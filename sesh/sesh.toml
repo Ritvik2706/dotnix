@@ -8,7 +8,7 @@ preview_command = "eza --all --git --icons --color=always {}"
 # Optional: pin some “named” sessions you always want in the list
 [[session]]
 name = "dotfiles"
-path = "~/github/personal/dotfiles_RitvikPC"
+path = "~/github/config/nixfiles"
 startup_command = "nvim"
 
 [[session]]

@@ -10,8 +10,8 @@ source "$_zsh_dir/aliases.zsh"
 source "$_zsh_dir/functions.zsh"
 source "$_zsh_dir/tools.zsh"
 
-# WSL_DISTRO_NAME is set automatically by WSL; absent on native Linux
-[[ -n "${WSL_DISTRO_NAME:-}" ]] && source "$_zsh_dir/wsl.zsh"
+# Detect WSL via kernel name — more reliable than WSL_DISTRO_NAME which tmux doesn't inherit
+[[ "$(uname -r)" == *microsoft* ]] && source "$_zsh_dir/wsl.zsh"
 
 unset _zsh_dir
 
