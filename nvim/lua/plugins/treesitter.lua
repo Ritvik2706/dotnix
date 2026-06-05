@@ -17,6 +17,7 @@ return {
         "html", "css",
         "json", "jsonc", "yaml", "toml",
         "markdown", "markdown_inline",
+        "latex", -- render-markdown math ($$...$$) via latex2text
         "vim", "vimdoc", "regex",
       },
       auto_install  = false,

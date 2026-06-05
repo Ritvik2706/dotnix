@@ -28,6 +28,13 @@ zinit snippet OMZP::archlinux        # yay/pacman aliases
 # Basic vi mode active immediately; full zsh-vi-mode loads async below
 bindkey -v
 
+# Paint the insert-mode (blinking bar) cursor before the first prompt renders.
+# zsh-vi-mode loads in turbo mode AFTER the first prompt, so until then the
+# cursor keeps whatever shape it inherited (a block) — this is why a fresh pane
+# showed a block until the first keypress. ZVM takes over cursor shaping once it
+# loads. \e[5 q = blinking bar (matches ZVM_INSERT_MODE_CURSOR below).
+print -n '\e[5 q'
+
 # ── Turbo: everything else after the prompt renders ───────────────────────
 # wait"0" = schedule for after first prompt; lucid = no output
 
@@ -66,6 +73,14 @@ function zvm_config() {
   ZVM_INSERT_MODE_CURSOR=$ZVM_CURSOR_BLINKING_BEAM
   ZVM_NORMAL_MODE_CURSOR=$ZVM_CURSOR_BLOCK
 }
+# Under zinit turbo (wait"0") ZVM is already loaded lazily. By default ZVM ALSO
+# defers its own init to the first precmd hook — that double-deferral makes it
+# emit the cursor-shape escapes (e.g. "^[[5 q") at the wrong moment, so the
+# terminal prints them as literal ghost characters instead of interpreting them,
+# and the cursor never gets re-styled (stays a block). Forcing sourcing-mode
+# init makes ZVM set everything up the instant zinit sources it. Must be set
+# BEFORE the plugin is sourced — zvm_config runs too late for this one.
+ZVM_INIT_MODE=sourcing
 zinit ice wait"0" lucid
 zinit light jeffreytse/zsh-vi-mode
 
