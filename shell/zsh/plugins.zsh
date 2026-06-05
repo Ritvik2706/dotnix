@@ -55,6 +55,17 @@ zinit light hlissner/zsh-autopair
 
 # Full vi-mode: loads async; basic bindkey -v already active above.
 # zsh-vi-mode resets ALL key bindings on init — use its hook to restore them.
+# zvm_config runs before the plugin initializes (must be defined pre-load).
+function zvm_config() {
+  # Always start a fresh prompt in insert mode. Default is "last mode", which
+  # carries normal mode (block cursor) over to the next prompt when the
+  # previous line ended in normal mode — the cause of the stray block cursor.
+  ZVM_LINE_INIT_MODE=$ZVM_MODE_INSERT
+  # Pin cursor shapes: bar while typing, block in normal/command mode.
+  ZVM_CURSOR_STYLE_ENABLED=true
+  ZVM_INSERT_MODE_CURSOR=$ZVM_CURSOR_BLINKING_BEAM
+  ZVM_NORMAL_MODE_CURSOR=$ZVM_CURSOR_BLOCK
+}
 zinit ice wait"0" lucid
 zinit light jeffreytse/zsh-vi-mode
 
@@ -65,6 +76,11 @@ function zvm_after_init() {
   # Restore history-substring-search arrow bindings
   bindkey '^[[A' history-substring-search-up   2>/dev/null
   bindkey '^[[B' history-substring-search-down 2>/dev/null
+  # Let backspace delete freely in insert mode. The vi default
+  # (vi-backward-delete-char) stops at the point insert mode began, so you
+  # can't backspace over a paste — this removes that wall.
+  bindkey -M viins '^?' backward-delete-char
+  bindkey -M viins '^H' backward-delete-char
 }
 
 # QoL: shows alias hint when you type a long-form command that has an alias
