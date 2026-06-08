@@ -3,6 +3,42 @@ local M = {}
 -- Persists across mini.files buffer creates (navigation re-creates buffers)
 local yanked_fs_entry = nil
 
+-- Platform flags — resolved once at module load. has() is a static feature
+-- check, but caching it keeps the per-action paths free of any OS probing.
+local is_wsl = vim.fn.has("wsl") == 1
+local is_mac = vim.fn.has("mac") == 1
+
+-- The system clipboard "copy" command, resolved lazily on first use and then
+-- cached for the session — the chosen tool can't change mid-session, so there's
+-- no point re-probing executable() on every yank. `false` = resolved, none found.
+local clipboard_copy_cmd = nil
+local function resolve_clipboard_copy_cmd()
+  if is_wsl and vim.fn.executable("clip.exe") == 1 then
+    return { "clip.exe" }
+  elseif os.getenv("WAYLAND_DISPLAY") and vim.fn.executable("wl-copy") == 1 then
+    return { "wl-copy" }
+  elseif vim.fn.executable("xclip") == 1 then
+    return { "xclip", "-selection", "clipboard" }
+  end
+  return false
+end
+
+-- Copy a string to the system clipboard. Text is passed on stdin (no shell
+-- escaping / spurious trailing newline). Returns ok, err.
+local function copy_to_system_clipboard(text)
+  if clipboard_copy_cmd == nil then
+    clipboard_copy_cmd = resolve_clipboard_copy_cmd()
+  end
+  if not clipboard_copy_cmd then
+    return false, "No clipboard tool found (need clip.exe, wl-clipboard, or xclip)"
+  end
+  vim.fn.system(clipboard_copy_cmd, text)
+  if vim.v.shell_error ~= 0 then
+    return false, "Clipboard copy failed"
+  end
+  return true
+end
+
 M.setup = function(opts)
   -- Create an autocmd to set buffer-local mappings when a `mini.files` buffer is opened
   -- I use this to open the highlighted directory in a tmux pane on the right
@@ -33,28 +69,16 @@ M.setup = function(opts)
         end
       end, { buffer = buf_id, noremap = true, silent = true })
 
-      -- Copy the current file or directory to the system clipboard
-      -- Linux-compatible version supporting both X11 and Wayland
+      -- Copy the current file or directory path to the system clipboard
+      -- (WSL / Wayland / X11 — see copy_to_system_clipboard)
       vim.keymap.set("n", keymaps.copy_to_clipboard, function()
         -- Get the current entry (file or directory)
         local curr_entry = mini_files.get_fs_entry()
         if curr_entry then
           local path = curr_entry.path
-          
-          -- Detect clipboard tool based on display protocol
-          local clipboard_cmd
-          if os.getenv("WAYLAND_DISPLAY") and vim.fn.executable("wl-copy") == 1 then
-            clipboard_cmd = string.format("echo %s | wl-copy", vim.fn.shellescape(path))
-          elseif vim.fn.executable("xclip") == 1 then
-            clipboard_cmd = string.format("echo %s | xclip -selection clipboard", vim.fn.shellescape(path))
-          else
-            vim.notify("No clipboard tool found (install wl-clipboard or xclip)", vim.log.levels.ERROR)
-            return
-          end
-          
-          local result = vim.fn.system(clipboard_cmd)
-          if vim.v.shell_error ~= 0 then
-            vim.notify("Copy failed: " .. result, vim.log.levels.ERROR)
+          local ok, err = copy_to_system_clipboard(path)
+          if not ok then
+            vim.notify(err, vim.log.levels.ERROR)
           else
             vim.notify(vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
             vim.notify("File path copied to clipboard", vim.log.levels.INFO)
@@ -85,20 +109,10 @@ M.setup = function(opts)
             vim.notify("Failed to create zip file: " .. result, vim.log.levels.ERROR)
             return
           end
-          -- Copy the zip file to the clipboard supporting both X11 and Wayland
-          local copy_cmd
-          if os.getenv("WAYLAND_DISPLAY") and vim.fn.executable("wl-copy") == 1 then
-            copy_cmd = string.format("echo %s | wl-copy", vim.fn.shellescape(zip_path))
-          elseif vim.fn.executable("xclip") == 1 then
-            copy_cmd = string.format("echo %s | xclip -selection clipboard", vim.fn.shellescape(zip_path))
-          else
-            vim.notify("No clipboard tool found (install wl-clipboard or xclip)", vim.log.levels.ERROR)
-            return
-          end
-          
-          local copy_result = vim.fn.system(copy_cmd)
-          if vim.v.shell_error ~= 0 then
-            vim.notify("Failed to copy zip path to clipboard: " .. copy_result, vim.log.levels.ERROR)
+          -- Copy the zip path to the clipboard (WSL / Wayland / X11)
+          local ok, err = copy_to_system_clipboard(zip_path)
+          if not ok then
+            vim.notify("Failed to copy zip path to clipboard: " .. err, vim.log.levels.ERROR)
             return
           end
           vim.notify(zip_path, vim.log.levels.INFO)
@@ -108,8 +122,9 @@ M.setup = function(opts)
         end
       end, { buffer = buf_id, noremap = true, silent = true, desc = "[P]Zip and copy to clipboard" })
 
-      -- Paste the current file or directory from the system clipboard into the current directory in mini.files
-      -- NOTE: This works only on macOS
+      -- Paste the file/directory currently on the system clipboard into the
+      -- current mini.files directory. Supported on WSL (Windows clipboard) and
+      -- macOS; native Linux clipboards don't carry file references uniformly.
       vim.keymap.set("n", keymaps.paste_from_clipboard, function()
         -- vim.notify("Starting the paste operation...", vim.log.levels.INFO)
         if not mini_files then
@@ -124,23 +139,43 @@ M.setup = function(opts)
         local curr_dir = curr_entry.fs_type == "directory" and curr_entry.path
           or vim.fn.fnamemodify(curr_entry.path, ":h") -- Use parent directory if entry is a file
         -- vim.notify("Current directory: " .. curr_dir, vim.log.levels.INFO)
-        local script = [[
-            tell application "System Events"
-              try
-                set theFile to the clipboard as alias
-                set posixPath to POSIX path of theFile
-                return posixPath
-              on error
-                return "error"
-              end try
-            end tell
-          ]]
-        local output = vim.fn.system("osascript -e " .. vim.fn.shellescape(script)) -- Execute AppleScript command
-        if vim.v.shell_error ~= 0 or output:find("error") then
-          vim.notify("Clipboard does not contain a valid file or directory.", vim.log.levels.WARN)
+
+        -- Resolve the source path from the clipboard, per platform.
+        local source_path
+        if is_wsl then
+          -- Windows clipboard: take the first entry of the FileDropList and map
+          -- the resulting Windows path back to a WSL path.
+          local ps = "$f=(Get-Clipboard -Format FileDropList); if ($f) { $f[0].FullName }"
+          local win = vim.fn.system({ "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps })
+          win = win:gsub("%s+$", "")
+          if win == "" then
+            vim.notify("Clipboard does not contain a file.", vim.log.levels.WARN)
+            return
+          end
+          source_path = vim.fn.system({ "wslpath", "-u", win }):gsub("%s+$", "")
+        elseif is_mac then
+          local script = [[
+              tell application "System Events"
+                try
+                  set theFile to the clipboard as alias
+                  set posixPath to POSIX path of theFile
+                  return posixPath
+                on error
+                  return "error"
+                end try
+              end tell
+            ]]
+          local output = vim.fn.system("osascript -e " .. vim.fn.shellescape(script))
+          if vim.v.shell_error ~= 0 or output:find("error") then
+            vim.notify("Clipboard does not contain a valid file or directory.", vim.log.levels.WARN)
+            return
+          end
+          source_path = output:gsub("%s+$", "")
+        else
+          vim.notify("Paste-from-clipboard isn't supported on this platform.", vim.log.levels.WARN)
           return
         end
-        local source_path = output:gsub("%s+$", "") -- Trim whitespace from clipboard output
+
         if source_path == "" then
           vim.notify("Clipboard is empty or invalid.", vim.log.levels.WARN)
           return

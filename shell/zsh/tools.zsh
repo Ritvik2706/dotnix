@@ -24,15 +24,4 @@ if command -v zoxide &>/dev/null; then
   unset _zoxide_cache
 fi
 
-# pyenv
-_pyenv_bin="$(command -v pyenv 2>/dev/null)"
-if [[ -n "$_pyenv_bin" ]]; then
-  _pyenv_cache="$_zsh_cache_dir/pyenv-init.zsh"
-  if [[ ! -f "$_pyenv_cache" || "$_pyenv_bin" -nt "$_pyenv_cache" ]]; then
-    "$_pyenv_bin" init - zsh >| "$_pyenv_cache" 2>/dev/null
-  fi
-  source "$_pyenv_cache"
-  unset _pyenv_cache
-fi
-
-unset _zsh_cache_dir _pyenv_bin
+unset _zsh_cache_dir

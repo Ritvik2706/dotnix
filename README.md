@@ -36,52 +36,56 @@ A collection of my personal configuration files for Linux (Manjaro/Arch) with a 
 ## Installation
 
 ### Prerequisites
-Make sure you have the following tools installed:
-- Git
-- Fish shell
-- Hyprland (for wayland setup)
-- The applications you want to configure (nvim, kitty, etc.)
+- A working **Arch Linux** install (native or Arch-on-WSL) with `sudo` access.
+- `git`, to clone this repo. Everything else is installed for you.
 
 ### Quick Setup
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/dotfiles_RitvikPC.git ~/github/personal/dotfiles_RitvikPC
+# Clone the repo to its canonical location
+git clone <this-repo-url> ~/github/config/dotnix
 
-# Run the install script
-cd ~/github/personal/dotfiles_RitvikPC
+# Run the bootstrap
+cd ~/github/config/dotnix
 ./install.sh
 ```
 
-### Manual Setup
-If you prefer to set up symlinks manually:
+`install.sh` is a one-shot, idempotent bootstrap. It always:
+- **Symlinks** every config dir into `~/.config/<name>` and the shell dotfiles
+  into `~`, all pointing back at this repo — **for everything**, even programs
+  you haven't installed yet (so the config is ready the day you do). Any real
+  files already in the way are moved to a timestamped `~/.config/dotnix-backup-*`
+  folder first.
+- **Sets `zsh`** as the login shell and **syncs Neovim plugins** headlessly.
 
+Package installation is **tiered** — pick how much to install:
+
+| Mode | Command | Installs |
+|------|---------|----------|
+| **minimal** *(default)* | `./install.sh` | CLI/TUI toolchain only — what zsh, tmux & nvim need |
+| **selective** | `./install.sh --selective` | minimal **+** an interactive pick-list of desktop groups |
+| **full** | `./install.sh --full` | minimal **+** every desktop group |
+
+Desktop groups (offered in selective / all-in for full): `terminals`, `desktop`
+(bar, notifications, screenshots, audio…), `hyprland`, `sway`, `theming`,
+`media`, `pdf`, `launcher`.
+
+It is **WSL-aware**: on Arch-on-WSL every mode collapses to the CLI set — the
+native desktop/Wayland stack is skipped since the Windows side provides it.
+Detection is automatic via the kernel name.
+
+Other flags:
 ```bash
-# Backup existing configs (optional but recommended)
-mkdir -p ~/.config/backup
-mv ~/.config/hypr ~/.config/backup/ 2>/dev/null
-mv ~/.config/nvim ~/.config/backup/ 2>/dev/null
-# ... backup other configs as needed
-
-# Create symlinks
-ln -sf ~/github/personal/dotfiles_RitvikPC/hypr ~/.config/hypr
-ln -sf ~/github/personal/dotfiles_RitvikPC/nvim ~/.config/nvim
-ln -sf ~/github/personal/dotfiles_RitvikPC/kitty ~/.config/kitty
-ln -sf ~/github/personal/dotfiles_RitvikPC/fish ~/.config/fish
-ln -sf ~/github/personal/dotfiles_RitvikPC/waybar ~/.config/waybar
-ln -sf ~/github/personal/dotfiles_RitvikPC/btop ~/.config/btop
-ln -sf ~/github/personal/dotfiles_RitvikPC/fastfetch ~/.config/fastfetch
-ln -sf ~/github/personal/dotfiles_RitvikPC/yazi ~/.config/yazi
-ln -sf ~/github/personal/dotfiles_RitvikPC/lazygit ~/.config/lazygit
-ln -sf ~/github/personal/dotfiles_RitvikPC/tmux ~/.config/tmux
-ln -sf ~/github/personal/dotfiles_RitvikPC/micro ~/.config/micro
-ln -sf ~/github/personal/dotfiles_RitvikPC/custom_scripts ~/.config/custom_scripts
-ln -sf ~/github/personal/dotfiles_RitvikPC/eww ~/.config/eww
-ln -sf ~/github/personal/dotfiles_RitvikPC/wal ~/.config/wal
-ln -sf ~/github/personal/dotfiles_RitvikPC/volumeicon ~/.config/volumeicon
-ln -sf ~/github/personal/dotfiles_RitvikPC/copyq ~/.config/copyq
-ln -sf ~/github/personal/dotfiles_RitvikPC/Kvantum ~/.config/Kvantum
-ln -sf ~/github/personal/dotfiles_RitvikPC/albert ~/.config/albert
+./install.sh --symlinks-only   # just (re)create symlinks, no packages
+./install.sh --no-aur          # skip AUR packages / paru bootstrap
+./install.sh --help
 ```
+
+The symlink list is **auto-derived** from the repo's top-level directories
+(everything except `shell/`, `grub_cpy/`), so new configs are picked up
+automatically next run — no need to edit the script.
+
+> **Secrets:** API keys live in `shell/zsh/secrets.zsh`, which is git-ignored.
+> Copy `shell/zsh/secrets.zsh.example` to `secrets.zsh` and fill it in per machine.
 
 ## Key Features
 

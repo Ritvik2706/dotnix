@@ -60,6 +60,7 @@ Thumbs.db
 *.p12
 *.pfx
 secrets/
+shell/zsh/secrets.zsh
 .env
 .env.local
 .env.production
