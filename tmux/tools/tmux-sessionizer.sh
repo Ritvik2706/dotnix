@@ -4,7 +4,7 @@ if [[ $# -eq 1 ]]; then
   selected=$1
 else
   # Customize these paths to match your directory structure
-  selected=$(find ~/Projects ~/workspace ~/code ~/git -mindepth 1 -maxdepth 1 -type d 2>/dev/null | fzf)
+  selected=$(find ~/github ~/github/projects -mindepth 1 -maxdepth 1 -type d 2>/dev/null | fzf)
 fi
 
 if [[ -z $selected ]]; then

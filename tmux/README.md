@@ -1,20 +1,37 @@
-# Contents
+# tmux config
 
-<!-- toc -->
+Originally based on [linkarzu's dotfiles](https://github.com/linkarzu/dotfiles-latest)
+([video](https://youtu.be/0aD7-EBnULc)), trimmed down and adapted for my
+devices. Prefix is `Ctrl+a`. Status bar look (transparent, rounded pills) is
+from [Yahddyyp's dotfiles](https://github.com/Yahddyyp/MacOS-Dotfiles), using
+upstream `catppuccin/tmux` pinned at v2.1.3.
 
-- [My Youtube video that explain this](#my-youtube-video-that-explain-this)
-- [Link to my blog with instructions](#link-to-my-blog-with-instructions)
+## Setup
 
-<!-- tocstop -->
+```bash
+./setup.sh
+```
 
-## My Youtube video that explain this
+Checks dependencies (`tmux`, `git`, `fzf`), symlinks `~/.config/tmux` here,
+and installs TPM. Plugins install automatically on first start (or `prefix+I`).
+The `plugins/` directory is gitignored — TPM manages it at runtime.
 
-<div align="left">
-    <a href="https://youtu.be/0aD7-EBnULc">
-        <img src="https://res.cloudinary.com/daqwsgmx6/image/upload/v1706358848/youtube/2024-macos-workflow/08-tmux" alt="08 - What is tmux and how to use it in macOS" width="600"/>
-    </a>
-</div>
+## Layout
 
-## Link to my blog with instructions
+| Path | What |
+| --- | --- |
+| `tmux.conf` | The whole config: options, keybindings, plugins |
+| `tools/tmux-sessionizer.sh` | ThePrimeagen's sessionizer — pick a dir, get a session |
+| `tools/simple_toggle.sh` | Toggle/zoom the neovim terminal pane (`Alt+t` in copy mode) |
+| `layouts/` | Saved custom pane layouts (`prefix+Alt+l` / `prefix+Alt+L`), see its readme |
+| `plugins/` | TPM-managed, gitignored |
 
-- [08 - What is tmux and how to use it in macOS](https://linkarzu.com/posts/2024-macos-workflow/setup-tmux/)
+## Keybinding highlights
+
+- `prefix+f` — fuzzy-find a project dir and open it as a session
+- `prefix+Ctrl+u/i/y/h` — sessionizer shortcuts (`~/.config`, `~/github`, `~/Downloads`, `~`)
+- `prefix+s` — session tree sorted by last use (`d` kills the highlighted one)
+- `prefix+Space` — alternate between the last two sessions
+- `prefix+|` / `prefix+-` — splits in the current directory
+- `prefix+u/i/o` — windows 1-3 (`p` is taken by floax)
+- `prefix+v` then `v`/`y` — vim-style copy mode
