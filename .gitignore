@@ -103,3 +103,6 @@ hypr/crash_reports/
 # CopyQ (clipboard history & runtime files)
 copyq/
 
+
+# Tmux plugins (managed by TPM, installed at runtime)
+tmux/plugins/

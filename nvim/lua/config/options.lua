@@ -137,8 +137,19 @@ local function shorten_path(path)
 end
 
 local function get_winbar_path()
-  local full_path = vim.fn.expand("%:p:h")
-  return full_path:gsub(vim.fn.expand("$HOME"), "~")
+  local ft = vim.bo.filetype
+  local name = vim.api.nvim_buf_get_name(0)
+  local full_path
+  if ft == "minifiles" then
+    -- mini.files buffers are named minifiles://<id>/<abs path of the
+    -- directory being browsed> — show that directory
+    full_path = name:match("^minifiles://%d+/(.*)$") or vim.uv.cwd()
+  elseif ft == "snacks_dashboard" or name == "" then
+    full_path = vim.uv.cwd()
+  else
+    full_path = vim.fn.expand("%:p:h")
+  end
+  return (full_path:gsub(vim.fn.expand("$HOME"), "~"))
 end
 
 local function get_buffer_count()

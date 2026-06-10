@@ -49,6 +49,29 @@ vim.api.nvim_create_autocmd("VimEnter", {
     local arg = vim.fn.argv(0)
     if arg and vim.fn.isdirectory(arg) == 1 then
       vim.schedule(function()
+        -- Snacks only auto-opens the dashboard when nvim starts with no
+        -- args, so put it up manually so the splash animates behind the
+        -- mini.files float. Reuse the directory buffer + real window, the
+        -- same way snacks' own startup path does (open with buf = 1), and
+        -- mirror its statusline/tabline hiding.
+        local saved = { showtabline = vim.o.showtabline, laststatus = vim.o.laststatus }
+        vim.o.showtabline, vim.o.laststatus = 0, 0
+        local dirbuf = vim.api.nvim_get_current_buf()
+        Snacks.dashboard.open({
+          buf = dirbuf,
+          win = vim.api.nvim_get_current_win(),
+        })
+        -- The dashboard buffer kept the directory name; rename it so
+        -- mini.files' use_as_default_explorer hijack doesn't open a fresh
+        -- explorer every time the dashboard window regains focus
+        pcall(vim.api.nvim_buf_set_name, dirbuf, "snacks://dashboard")
+        vim.api.nvim_create_autocmd("User", {
+          pattern = "SnacksDashboardClosed",
+          once = true,
+          callback = function()
+            vim.o.showtabline, vim.o.laststatus = saved.showtabline, saved.laststatus
+          end,
+        })
         require("mini.files").open(arg, true)
       end)
     end
