@@ -1,135 +1,129 @@
+/* Waybar style — Catppuccin Mocha, styled after a macOS SketchyBar setup.
+ *
+ * Palette:
+ *   base     #1e1e2e   surface0 #313244
+ *   mauve    #cba6f7   text     #cdd6f4   subtext #a6adc8
+ *
+ * Each module is a translucent rounded "pill" with a thin mauve border,
+ * matching the SketchyBar background: color=0xcc1e1e2e, border=0x44cba6f7,
+ * corner_radius=8, height=30.
+ */
+
 * {
   border: none;
   border-radius: 0;
-  font-family:
-    JetBrainsMono NF ExtraBold,
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
+  font-family: "CaskaydiaCove Nerd Font", "JetBrainsMono Nerd Font", sans-serif;
   font-size: 14px;
+  font-weight: bold;
   min-height: 0;
 }
 
+/* Transparent bar — the pills float on the desktop, like SketchyBar. */
 window#waybar {
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
+  background: transparent;
 }
 
-button {
-  margin: 3px;
-  padding: 3px;
+/* Shared pill look for every module. */
+#workspaces,
+#window,
+#mpris,
+#pulseaudio,
+#battery,
+#clock {
+  background: rgba(30, 30, 46, 0.8);          /* 0xcc1e1e2e */
+  border: 1px solid rgba(203, 166, 247, 0.27); /* 0x44cba6f7 */
+  border-radius: 8px;
+  padding: 0 12px;
+  margin: 0;
+  color: #cdd6f4;
 }
 
-tooltip {
-  background: rgba(0, 0, 0, 0.202); /*rgba(43, 48, 59, 0.5);*/
-  border: 4px solid white;
-  border-radius: 10px;
-}
-
-tooltip label {
-  color: white;
+/* --- Workspaces -------------------------------------------------------- */
+/* Wrapper holds the row of numbered pills; remove its own pill chrome so
+ * each button can be its own pill (like SketchyBar spaces). */
+#workspaces {
+  background: transparent;
+  border: none;
+  padding: 0;
 }
 
 #workspaces button {
-  margin: 0;
-  padding: 0;
-
-  background: transparent;
-  color: #888888;
+  background: rgba(30, 30, 46, 0.8);
+  border: 1px solid rgba(203, 166, 247, 0.27);
+  border-radius: 8px;
+  color: #cba6f7;
+  padding: 0 10px;
+  margin: 0 3px 0 0;
+  min-width: 18px;
 }
 
-#workspaces button.focused {
-  color: white;
+#workspaces button:hover {
+  background: rgba(49, 50, 68, 0.85);          /* surface0 */
+  border-color: rgba(203, 166, 247, 0.53);     /* 0x88cba6f7 */
+  color: #cdd6f4;
 }
 
-#mode,
-#clock,
-#battery,
+/* Focused workspace — solid mauve fill, dark text. */
+#workspaces button.active {
+  background: #cba6f7;
+  border-color: #cba6f7;
+  color: #1e1e2e;
+}
+
+/* Workspace with an urgent client. */
+#workspaces button.urgent {
+  background: #f38ba8;                          /* red */
+  border-color: #f38ba8;
+  color: #1e1e2e;
+}
+
+/* --- Focused app ------------------------------------------------------- */
+/* SketchyBar's front_app pill uses a lighter surface fill + brighter border. */
+#window {
+  background: rgba(49, 50, 68, 0.8);           /* 0xcc313244 */
+  border-color: rgba(203, 166, 247, 0.53);     /* 0x88cba6f7 */
+  color: #cdd6f4;
+}
+
+/* --- Now playing ------------------------------------------------------- */
+#mpris {
+  color: #cdd6f4;
+}
+
+#mpris.paused {
+  color: #a6adc8;                              /* subtext, dimmed */
+}
+
+/* --- Right side -------------------------------------------------------- */
 #pulseaudio,
-#temperature,
-#language,
-#backlight,
-#network,
-#tray,
-#custom-weather {
-  padding: 0 8px;
-}
-
-#scratchpad,
-#window {
-  margin-left: 6px;
-  margin-right: 6px;
-}
-
-#custom-weather.sunny {
-  color: rgb(215, 215, 0);
-}
-
-#custom-weather.lightrain {
-  color: lightblue;
-}
-
-#custom-weather.rain,
-#custom-weather.heavyrain {
-  color: blue;
-}
-
-#custom-weather.cloudy,
-#custom-weather.fog {
-  color: gray;
-}
-
-#window {
-  color: #ebfafa;
-}
-
-#language {
-  color: #7081d0;
-}
-
-#pulseaudio {
-  color: #37f499;
-}
-
-#network {
-  color: #f7c67f;
-}
-
-#temperature {
-  color: #fca6ff;
-}
-
-#backlight {
-  color: #f7c67f;
-}
-
+#battery,
 #clock {
-  color: #04d1f9;
+  color: #cdd6f4;
 }
 
-#battery {
-  color: #f16c75;
+#pulseaudio.muted {
+  color: #a6adc8;
+}
+
+#battery.warning {
+  color: #f9e2af;                              /* yellow */
+}
+
+#battery.critical {
+  color: #f38ba8;                              /* red */
+  border-color: rgba(243, 139, 168, 0.5);
 }
 
 #battery.charging {
-  color: #26a65b;
+  color: #a6e3a1;                              /* green */
 }
 
-@keyframes blink {
-  to {
-    color: white;
-  }
+tooltip {
+  background: rgba(30, 30, 46, 0.95);
+  border: 1px solid rgba(203, 166, 247, 0.4);
+  border-radius: 8px;
 }
 
-#battery.warning:not(.charging),
-#temperature.critical,
-#workspaces button.urgent,
-#mode {
-  color: #ff0000;
-  animation-name: blink;
-  animation-duration: 0.5s;
-  animation-timing-function: steps(2);
-  animation-iteration-count: infinite;
-  animation-direction: alternate;
+tooltip label {
+  color: #cdd6f4;
 }
