@@ -29,5 +29,8 @@ require("lua.keybinds")
 -- 6) Window/Layer rules (must come BEFORE execs so placement rules apply)
 require("lua.rules")
 
--- 7) Autostart — start LAST so all the above is active
+-- 7) Runtime event handlers
+require("lua.events")
+
+-- 8) Autostart — start LAST so all the above is active
 require("lua.execs")

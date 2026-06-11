@@ -10,7 +10,7 @@
   "spacing": 6,
 
   "modules-left": ["hyprland/workspaces", "hyprland/window"],
-  "modules-center": ["mpris"],
+  // "modules-center": ["mpris"],
   "modules-right": ["pulseaudio", "battery", "clock"],
 
   // --- Left: workspace pills (1..10) -------------------------------------
@@ -18,18 +18,39 @@
     "format": "{name}",
     "on-click": "activate",
     "sort-by-number": true,
-    "persistent-workspaces": {
-      "1": [], "2": [], "3": [], "4": [], "5": [], "6": []
-    }
+    // Only show workspaces that are occupied (or currently focused) —
+    // no persistent/empty placeholders.
+    "show-special": false
   },
 
   // --- Left: focused app (sketchybar "front_app") ------------------------
   "hyprland/window": {
-    "format": "  {title}",
+    "format": "{class}",
     "max-length": 40,
     "separate-outputs": true,
     "rewrite": {
-      "": "Desktop"
+      "": "  Desktop",
+      "zen.*": "  Zen",
+      ".*ghostty.*": "  Ghostty",
+      "kitty": "  Kitty",
+      "[Aa]lacritty": "  Alacritty",
+      "foot": "  Foot",
+      "firefox.*": "  Firefox",
+      "[Cc]hrom(e|ium).*": "  Chrome",
+      "[Bb]rave.*": "  Brave",
+      "[Cc]ode": "  Code",
+      "[Cc]ursor": "  Cursor",
+      "obsidian": "  Obsidian",
+      "[Dd]iscord|vesktop|[Ww]ebCord": "  Discord",
+      "[Ss]potify": "  Spotify",
+      "org.telegram.desktop": "  Telegram",
+      "[Ss]lack": "  Slack",
+      "org.gnome.Nautilus|thunar|nemo|[Dd]olphin": "  Files",
+      "[Ss]team": "  Steam",
+      "mpv|vlc": "  Video",
+      "org.pwmt.zathura|[Ee]vince|okular": "  PDF",
+      "imv|org.gnome.Loupe|feh": "  Image",
+      "pavucontrol": "  Audio"
     }
   },
 
@@ -40,24 +61,24 @@
     "max-length": 45,
     "tooltip-format": "{artist} - {title}\n{album}",
     "player-icons": {
-      "default": "",
-      "spotify": "",
-      "firefox": "",
-      "chromium": ""
+      "default": "",
+      "spotify": "",
+      "firefox": "",
+      "chromium": ""
     },
     "status-icons": {
-      "paused": ""
+      "paused": ""
     }
   },
 
   // --- Right: volume (sketchybar "volume") -----------------------------
   "pulseaudio": {
     "format": "{icon}  {volume}%",
-    "format-muted": "  muted",
+    "format-muted": "  muted",
     "format-icons": {
-      "headphone": "",
-      "headset": "",
-      "default": ["", "", ""]
+      "headphone": "",
+      "headset": "",
+      "default": ["", "", ""]
     },
     "scroll-step": 5,
     "on-click": "pavucontrol",
@@ -71,15 +92,15 @@
       "critical": 15
     },
     "format": "{icon}  {capacity}%",
-    "format-charging": "  {capacity}%",
-    "format-plugged": "  {capacity}%",
-    "format-icons": ["", "", "", "", ""],
+    "format-charging": "  {capacity}%",
+    "format-plugged": "  {capacity}%",
+    "format-icons": ["", "", "", "", ""],
     "tooltip-format": "{capacity}% — {timeTo}"
   },
 
   // --- Right: clock (sketchybar "date") --------------------------------
   "clock": {
-    "format": "  {:%a %d %b • %I:%M %p}",
+    "format": "  {:%a %d %b • %I:%M %p}",
     "tooltip-format": "<tt><small>{calendar}</small></tt>",
     "calendar": {
       "mode": "month",

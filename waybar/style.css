@@ -1,18 +1,19 @@
 /* Waybar style — Catppuccin Mocha, styled after a macOS SketchyBar setup.
  *
  * Palette:
- *   base     #1e1e2e   surface0 #313244
- *   mauve    #cba6f7   text     #cdd6f4   subtext #a6adc8
+ *   base     #1e1e2e   mantle   #181825   surface0 #313244
+ *   mauve    #cba6f7   text     #cdd6f4   subtext  #a6adc8
+ *   sky      #89dceb   green    #a6e3a1   yellow   #f9e2af   red #f38ba8
  *
- * Each module is a translucent rounded "pill" with a thin mauve border,
- * matching the SketchyBar background: color=0xcc1e1e2e, border=0x44cba6f7,
- * corner_radius=8, height=30.
+ * Each module is a translucent rounded "pill" that floats over the desktop.
+ * Modern touches: soft drop shadows for depth, smooth hover/state transitions,
+ * and per-module accent colors on the right cluster.
  */
 
 * {
   border: none;
   border-radius: 0;
-  font-family: "CaskaydiaCove Nerd Font", "JetBrainsMono Nerd Font", sans-serif;
+  font-family: "JetBrainsMono Nerd Font", sans-serif;
   font-size: 14px;
   font-weight: bold;
   min-height: 0;
@@ -30,12 +31,17 @@ window#waybar {
 #pulseaudio,
 #battery,
 #clock {
-  background: rgba(30, 30, 46, 0.8);          /* 0xcc1e1e2e */
-  border: 1px solid rgba(203, 166, 247, 0.27); /* 0x44cba6f7 */
-  border-radius: 8px;
-  padding: 0 12px;
+  /* Subtle top-to-bottom gradient gives the glass a bit of body. */
+  background: linear-gradient(180deg,
+              rgba(49, 50, 68, 0.72) 0%,
+              rgba(30, 30, 46, 0.82) 100%);
+  border: 1px solid rgba(203, 166, 247, 0.22);
+  border-radius: 10px;
+  padding: 0 13px;
   margin: 0;
   color: #cdd6f4;
+  /* Lift the pill off the wallpaper. */
+  box-shadow: 0 2px 6px rgba(17, 17, 27, 0.45);
 }
 
 /* --- Workspaces -------------------------------------------------------- */
@@ -44,44 +50,60 @@ window#waybar {
 #workspaces {
   background: transparent;
   border: none;
+  box-shadow: none;
   padding: 0;
 }
 
 #workspaces button {
-  background: rgba(30, 30, 46, 0.8);
-  border: 1px solid rgba(203, 166, 247, 0.27);
-  border-radius: 8px;
-  color: #cba6f7;
-  padding: 0 10px;
-  margin: 0 3px 0 0;
-  min-width: 18px;
+  background: linear-gradient(180deg,
+              rgba(49, 50, 68, 0.72) 0%,
+              rgba(30, 30, 46, 0.82) 100%);
+  border: 1px solid rgba(203, 166, 247, 0.22);
+  border-radius: 10px;
+  color: #cba6f7;                              /* mauve — occupied by default */
+  padding: 0 11px;
+  margin: 0 4px 0 0;
+  min-width: 16px;
+  box-shadow: 0 2px 6px rgba(17, 17, 27, 0.45);
+  /* Snappy workspace switching — no fade on active/hover state changes. */
+  transition: none;
 }
 
 #workspaces button:hover {
-  background: rgba(49, 50, 68, 0.85);          /* surface0 */
-  border-color: rgba(203, 166, 247, 0.53);     /* 0x88cba6f7 */
+  background: rgba(49, 50, 68, 0.9);
+  border-color: rgba(203, 166, 247, 0.5);
   color: #cdd6f4;
+  box-shadow: 0 0 8px rgba(203, 166, 247, 0.25);
 }
 
-/* Focused workspace — solid mauve fill, dark text. */
+/* Empty workspaces fade back so occupied ones stand out. */
+#workspaces button.empty {
+  color: #6c7086;                              /* overlay0 */
+}
+
+/* Focused workspace — solid mauve fill, dark text, soft glow. */
 #workspaces button.active {
-  background: #cba6f7;
+  background: linear-gradient(180deg, #d4b5f9 0%, #cba6f7 100%);
   border-color: #cba6f7;
   color: #1e1e2e;
+  box-shadow: 0 0 10px rgba(203, 166, 247, 0.45);
 }
 
 /* Workspace with an urgent client. */
 #workspaces button.urgent {
-  background: #f38ba8;                          /* red */
+  background: linear-gradient(180deg, #f5a0b8 0%, #f38ba8 100%);
   border-color: #f38ba8;
   color: #1e1e2e;
+  box-shadow: 0 0 10px rgba(243, 139, 168, 0.45);
 }
 
 /* --- Focused app ------------------------------------------------------- */
 /* SketchyBar's front_app pill uses a lighter surface fill + brighter border. */
 #window {
-  background: rgba(49, 50, 68, 0.8);           /* 0xcc313244 */
-  border-color: rgba(203, 166, 247, 0.53);     /* 0x88cba6f7 */
+  background: linear-gradient(180deg,
+              rgba(69, 71, 90, 0.72) 0%,
+              rgba(49, 50, 68, 0.82) 100%);
+  border-color: rgba(203, 166, 247, 0.4);
   color: #cdd6f4;
 }
 
@@ -94,34 +116,45 @@ window#waybar {
   color: #a6adc8;                              /* subtext, dimmed */
 }
 
-/* --- Right side -------------------------------------------------------- */
-#pulseaudio,
-#battery,
-#clock {
-  color: #cdd6f4;
+/* --- Right side — each module gets its own subtle accent ---------------- */
+#pulseaudio {
+  color: #89dceb;                              /* sky */
 }
 
 #pulseaudio.muted {
-  color: #a6adc8;
+  color: #6c7086;                              /* overlay0 */
+  border-color: rgba(108, 112, 134, 0.3);
+}
+
+#battery {
+  color: #a6e3a1;                              /* green */
 }
 
 #battery.warning {
   color: #f9e2af;                              /* yellow */
+  border-color: rgba(249, 226, 175, 0.4);
 }
 
 #battery.critical {
   color: #f38ba8;                              /* red */
   border-color: rgba(243, 139, 168, 0.5);
+  box-shadow: 0 0 10px rgba(243, 139, 168, 0.3);
 }
 
 #battery.charging {
   color: #a6e3a1;                              /* green */
+  border-color: rgba(166, 227, 161, 0.4);
+}
+
+#clock {
+  color: #cba6f7;                              /* mauve */
+  border-color: rgba(203, 166, 247, 0.35);
 }
 
 tooltip {
-  background: rgba(30, 30, 46, 0.95);
+  background: rgba(24, 24, 37, 0.96);          /* mantle */
   border: 1px solid rgba(203, 166, 247, 0.4);
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 tooltip label {
