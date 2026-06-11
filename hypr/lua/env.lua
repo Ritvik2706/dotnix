@@ -13,3 +13,6 @@ hl.env("HYPRCURSOR_SIZE", "21")
 -- Xcursor (GTK/Qt/Electron honor these)
 hl.env("XCURSOR_THEME", "Bibata-Modern-Ice")
 hl.env("XCURSOR_SIZE", "21")
+
+-- PRIME hybrid graphics: iGPU (card2/Intel) primary, dGPU (card1/NVIDIA) offload-only
+hl.env("WLR_DRM_DEVICES", "/dev/dri/card2:/dev/dri/card1")

@@ -51,9 +51,6 @@ hl.define_submap("proj", function()
 	-- Switch to last sesh workspace
 	pick("L", "tmux run-shell 'sesh last'")
 
-	-- Manual immerse mode trigger (for testing)
-	pick("I", "/home/ritvik/github/config/nixfiles/hypr/scripts/immerse_mode.sh")
-
 	-- Cancel keys (leave submap with no action)
 	hl.bind("ESCAPE", hl.dsp.submap("reset"))
 	hl.bind("BACKSPACE", hl.dsp.submap("reset"))

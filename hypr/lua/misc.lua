@@ -14,7 +14,6 @@ hl.config({
 		animate_manual_resizes = false,
 		animate_mouse_windowdragging = false,
 		enable_swallow = false,
-		swallow_regex = "(foot|kitty|allacritty|Alacritty)",
 		-- new_window_takes_over_fullscreen = 2 no longer exists; closest match
 		-- today is on_focus_under_fullscreen — uncomment if you miss the old
 		-- "new window kicks me out of fullscreen" behavior:

@@ -13,13 +13,5 @@ hl.monitor({
 	scale = "auto",
 })
 
--- Explicit laptop panel rule, if you ever want to pin it down:
--- hl.monitor({ output = "eDP-1", mode = "2560x1440@240", position = "0x0", scale = 1 })
-
--- Old MacBook Air 2018 configuration:
--- hl.monitor({ output = "eDP-1", mode = "2880x1800@60", position = "0x0", scale = 2 })
--- hl.monitor({ output = "DP-1",  mode = "1920x1080@60", position = "1440x0", scale = 1 })
-
--- Old desktop dual-HDMI setup (left vertical monitor + 100Hz main):
--- hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@60",  position = "0x-420", scale = 1, transform = 3 })
--- hl.monitor({ output = "HDMI-A-2", mode = "1920x1080@100", position = "1080x0", scale = 1 })
+-- Pin the panel if needed (QHD@240 confirmed working via auto):
+-- hl.monitor({ output = "eDP-2", mode = "2560x1440@240", position = "0x0", scale = 1 })

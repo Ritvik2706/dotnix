@@ -31,16 +31,31 @@ hl.bind(
 	{ locked = true }
 )
 
--- Brightness control for focused monitor using brightnessctl with ddcci
-hl.bind(main .. " + bracketleft", hl.dsp.exec_cmd("~/.config/custom_scripts/brightnessControl.sh -"), { repeating = true, locked = true })
-hl.bind(main .. " + bracketright", hl.dsp.exec_cmd("~/.config/custom_scripts/brightnessControl.sh +"), { repeating = true, locked = true })
+-- Display brightness (Fn+F7/F8 on Razer Blade) — requires brightnessctl
+-- Install: sudo pacman -S brightnessctl
+-- brightness.sh auto-detects nvidia_wmi_ec_backlight
+hl.bind(
+	"XF86MonBrightnessUp",
+	hl.dsp.exec_cmd("~/.config/custom_scripts/brightness.sh up"),
+	{ repeating = true, locked = true }
+)
+hl.bind(
+	"XF86MonBrightnessDown",
+	hl.dsp.exec_cmd("~/.config/custom_scripts/brightness.sh down"),
+	{ repeating = true, locked = true }
+)
 
--- Alternative brightness keys (F keys)
-hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("~/.config/custom_scripts/brightnessControl.sh +"), { repeating = true, locked = true })
-hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("~/.config/custom_scripts/brightnessControl.sh -"), { repeating = true, locked = true })
-
--- Volume wheel + Shift for brightness control
-hl.bind("SHIFT + XF86AudioRaiseVolume", hl.dsp.exec_cmd("~/.config/custom_scripts/brightnessControl.sh +"), { repeating = true, locked = true })
-hl.bind("SHIFT + XF86AudioLowerVolume", hl.dsp.exec_cmd("~/.config/custom_scripts/brightnessControl.sh -"), { repeating = true, locked = true })
+-- Keyboard backlight (Razer — via razerkbd sysfs, needs openrazer group)
+-- Fn+F11/F12 are captured by the driver; use explicit SUPER binds instead
+hl.bind(
+	main .. " + F10",
+	hl.dsp.exec_cmd("~/.config/custom_scripts/kbd-backlight.sh down"),
+	{ repeating = true, locked = true }
+)
+hl.bind(
+	main .. " + F11",
+	hl.dsp.exec_cmd("~/.config/custom_scripts/kbd-backlight.sh up"),
+	{ repeating = true, locked = true }
+)
 
 hl.bind(main .. " + N", hl.dsp.exec_cmd("~/.config/custom_scripts/toggle_wlsunset.sh"))

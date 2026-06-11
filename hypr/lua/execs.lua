@@ -6,7 +6,8 @@
 
 hl.on("hyprland.start", function()
 	-- ===== Core services =====
-	hl.exec_cmd("hyprpaper") -- wallpaper daemon
+	hl.exec_cmd("awww-daemon") -- wallpaper daemon
+	hl.exec_cmd("awww img /home/ritvik/github/dotnix/wallpapers/test.png") -- set wallpaper
 	hl.exec_cmd("dunst") -- notifications
 	hl.exec_cmd("hypridle") -- idle/suspend/lock management
 	hl.exec_cmd("copyq") -- clipboard manager
