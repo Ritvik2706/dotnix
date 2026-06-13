@@ -6,26 +6,7 @@
 ----------------------------------------
 -- APP → WORKSPACE PLACEMENT (ORDER MATTERS)
 ----------------------------------------
--- Generic Brave first → ChatGPT-in-Brave after it (more specific) so it wins.
-
--- Brave (generic): workspace 1
-hl.window_rule({
-	name = "brave-ws1",
-	match = { class = [[^(brave-browser|app\.brave\.Browser)$]] },
-	workspace = "1",
-})
-
--- Brave → ChatGPT (PWA/window): workspace 11 (overrides generic rule above)
-hl.window_rule({
-	name = "chatgpt-ws11-title",
-	match = { class = [[^(brave|Brave-browser|app\.brave\.Browser|Brave)$]], title = "^ChatGPT(.*)$" },
-	workspace = "11",
-})
-hl.window_rule({
-	name = "chatgpt-ws11-initialtitle",
-	match = { class = [[^(brave|Brave-browser|app\.brave\.Browser|Brave)$]], initial_title = "^ChatGPT(.*)$" },
-	workspace = "11",
-})
+-- Claude (Chromium PWA) → floating scratchpad on special:claude (see SCRATCHPADS below).
 
 -- Ghostty: workspace 2, fullscreen, no blur
 hl.window_rule({
@@ -281,6 +262,17 @@ hl.window_rule({ name = "immediate-steam-apps", match = { class = "^(steam_app).
 hl.window_rule({ name = "warp-tile", match = { class = [[^dev\.warp\.Warp$]] }, tile = true })
 
 ----------------------------------------
+-- TERMINAL — opt out of compositor opacity
+-- Ghostty handles its own transparency; keep Hyprland at 1.0 so the
+-- global active/inactive opacity doesn't stack on top of it.
+----------------------------------------
+hl.window_rule({
+	name = "ghostty-opaque",
+	match = { class = [[^(com\.mitchellh\.ghostty)$]] },
+	opacity = "1.0 override 1.0 override",
+})
+
+----------------------------------------
 -- PICTURE-IN-PICTURE
 ----------------------------------------
 hl.window_rule({
@@ -303,6 +295,17 @@ hl.window_rule({
 	float = true,
 	center = true,
 	size = "900 600",
+})
+
+-- Claude web app (Chromium PWA) → CopyQ-style floating popup over the current
+-- workspace. super+S shows it (parking it on special:claude to hide). See
+-- custom_scripts/toggle_claude.sh.
+hl.window_rule({
+	name = "claude",
+	match = { class = [[^(chrome-claude\.ai__-Default)$]] },
+	float = true,
+	center = true,
+	size = "1400 820",
 })
 
 -- Yazi FM popup (kitty wrapper)

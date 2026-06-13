@@ -6,16 +6,17 @@
 local c = require("lua.vars").colors
 
 -- === Opacity / dim (theme constants) ===
-local active_opacity = 1.0
-local inactive_opacity = 0.85 -- slight transparency for inactive windows
+--local active_opacity = 0.94 -- subtle glass on focused windows (terminal opted out via rule)
+local inactive_opacity = 0.60 -- a touch more transparency for inactive windows
 local dim_strength_val = 0.0 -- no dimming
 local dim_special_val = 0.0 -- no dimming for special windows
 
 hl.config({
 	general = {
 		col = {
-			active_border = { colors = { c.light_blue, c.pink }, angle = 45 },
-			inactive_border = c.dark_violet,
+			-- Razer green sweeping into neon cyan — the cyberpunk hero gradient
+			active_border = { colors = { c.cyan }, angle = 5 },
+			inactive_border = c.off,
 		},
 	},
 
@@ -24,8 +25,8 @@ hl.config({
 		inactive_opacity = inactive_opacity,
 
 		shadow = {
-			color = "rgba(8A47F7FF)", -- purple-blue blend that complements the gradient
-			color_inactive = "rgba(433597AA)", -- muted glow for inactive windows
+			color = "rgba(44D62C66)", -- faint Razer-green glow around the focused window
+			color_inactive = "rgba(07080E44)", -- soft dark drop for inactive windows
 		},
 
 		dim_inactive = false, -- disabled dimming

@@ -24,7 +24,7 @@ for _, d in ipairs(dirs) do
 end
 
 -- ===== Focus Apps =====
-hl.bind(main .. " + S", hl.dsp.exec_cmd("~/.config/custom_scripts/toggle_chatgpt.sh"))
+hl.bind(main .. " + S", hl.dsp.exec_cmd("~/.config/custom_scripts/toggle_claude.sh"))
 
 -- ===== Resize ===== (was bindel: repeating + locked)
 local resize = {

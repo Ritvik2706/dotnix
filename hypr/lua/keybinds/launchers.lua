@@ -28,8 +28,11 @@ hl.bind(
 -- hl.bind(main .. " + N", hl.dsp.exec_cmd("kitty -e nmtui"))
 -- hl.bind(main .. " + B", hl.dsp.exec_cmd([[sh -lc "command -v bluetuith >/dev/null && kitty -e bluetuith || notify-send 'bluetuith not installed'"]]))
 
+-- ===== App launcher (wofi) =====
+hl.bind(main .. " + D", hl.dsp.exec_cmd(vars.menu))
+
 -- ===== sesh / project picker submap =====
-hl.bind(main .. " + D", hl.dsp.submap("proj"))
+hl.bind(main .. " + TAB", hl.dsp.submap("proj"))
 
 hl.define_submap("proj", function()
 	local function pick(key, cmd)

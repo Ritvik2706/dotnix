@@ -143,7 +143,7 @@ window-padding-x = 4
 # `window-padding-y = 2` will set both paddings to 2.
 window-padding-y = 4
 
-font-family = "0xProto Nerd Font"
+font-family = "JetBrainsMono Nerd Font"
 font-size = 16
 
 # Valid values:
@@ -311,7 +311,8 @@ background-opacity = 0.9
 # need to set environment-specific settings and/or install third-party plugins
 # in order to support background blur, as there isn't a unified interface for
 # doing so.
-background-blur = false  # disabled: continuous GPU compositing cost, especially with shaders
+# disabled: continuous GPU compositing cost, especially with shaders
+background-blur = false
 
 # The opacity level (opposite of transparency) of an unfocused split.
 # Unfocused splits by default are slightly faded out to make it easier to see

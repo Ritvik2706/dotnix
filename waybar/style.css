@@ -1,13 +1,13 @@
-/* Waybar style — Catppuccin Mocha, styled after a macOS SketchyBar setup.
+/* Waybar style — Cyberpunk / Razer Green
  *
  * Palette:
- *   base     #1e1e2e   mantle   #181825   surface0 #313244
- *   mauve    #cba6f7   text     #cdd6f4   subtext  #a6adc8
- *   sky      #89dceb   green    #a6e3a1   yellow   #f9e2af   red #f38ba8
+ *   base     #07080e   surface  #0d0f18   surface1 #12151f
+ *   razer    #44d62c   bright   #76ff58   dim      #2a8a1a
+ *   cyan     #00f0ff   magenta  #ff2a6d   yellow   #faff00
+ *   text     #d6f5cf   subtext  #5e7a8a   off      #2a3450
  *
- * Each module is a translucent rounded "pill" that floats over the desktop.
- * Modern touches: soft drop shadows for depth, smooth hover/state transitions,
- * and per-module accent colors on the right cluster.
+ * Dark gunmetal glass pills, Razer-green hero accent, cyan/magenta
+ * support accents, layered neon bloom on the live elements.
  */
 
 * {
@@ -19,34 +19,32 @@
   min-height: 0;
 }
 
-/* Transparent bar — the pills float on the desktop, like SketchyBar. */
 window#waybar {
   background: transparent;
 }
 
-/* Shared pill look for every module. */
+/* Shared pill look — dark gunmetal glass with a Razer-green edge. */
 #workspaces,
 #window,
+#tray,
 #mpris,
 #pulseaudio,
 #battery,
 #clock {
-  /* Subtle top-to-bottom gradient gives the glass a bit of body. */
-  background: linear-gradient(180deg,
-              rgba(49, 50, 68, 0.72) 0%,
-              rgba(30, 30, 46, 0.82) 100%);
-  border: 1px solid rgba(203, 166, 247, 0.22);
-  border-radius: 10px;
+  background: linear-gradient(160deg,
+              rgba(18, 21, 31, 0.82) 0%,
+              rgba(7, 8, 14, 0.92) 100%);
+  border: 1px solid rgba(68, 214, 44, 0.28);
+  border-radius: 9px;
   padding: 0 13px;
   margin: 0;
-  color: #cdd6f4;
-  /* Lift the pill off the wallpaper. */
-  box-shadow: 0 2px 6px rgba(17, 17, 27, 0.45);
+  color: #d6f5cf;
+  box-shadow: inset 0 1px 0 rgba(118, 255, 88, 0.06),
+              0 2px 9px rgba(0, 0, 0, 0.7),
+              0 0 3px rgba(68, 214, 44, 0.1);
 }
 
 /* --- Workspaces -------------------------------------------------------- */
-/* Wrapper holds the row of numbered pills; remove its own pill chrome so
- * each button can be its own pill (like SketchyBar spaces). */
 #workspaces {
   background: transparent;
   border: none;
@@ -55,108 +53,152 @@ window#waybar {
 }
 
 #workspaces button {
-  background: linear-gradient(180deg,
-              rgba(49, 50, 68, 0.72) 0%,
-              rgba(30, 30, 46, 0.82) 100%);
-  border: 1px solid rgba(203, 166, 247, 0.22);
-  border-radius: 10px;
-  color: #cba6f7;                              /* mauve — occupied by default */
+  background: linear-gradient(160deg,
+              rgba(18, 21, 31, 0.82) 0%,
+              rgba(7, 8, 14, 0.92) 100%);
+  border: 1px solid rgba(68, 214, 44, 0.24);
+  border-radius: 9px;
+  color: #44d62c;
   padding: 0 11px;
   margin: 0 4px 0 0;
   min-width: 16px;
-  box-shadow: 0 2px 6px rgba(17, 17, 27, 0.45);
-  /* Snappy workspace switching — no fade on active/hover state changes. */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
   transition: none;
 }
 
 #workspaces button:hover {
-  background: rgba(49, 50, 68, 0.9);
-  border-color: rgba(203, 166, 247, 0.5);
-  color: #cdd6f4;
-  box-shadow: 0 0 8px rgba(203, 166, 247, 0.25);
+  background: rgba(18, 21, 31, 0.95);
+  border-color: rgba(0, 240, 255, 0.65);
+  color: #00f0ff;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.35),
+              inset 0 0 6px rgba(0, 240, 255, 0.12);
 }
 
-/* Empty workspaces fade back so occupied ones stand out. */
 #workspaces button.empty {
-  color: #6c7086;                              /* overlay0 */
+  color: #2a3450;
+  border-color: rgba(42, 52, 80, 0.35);
 }
 
-/* Focused workspace — solid mauve fill, dark text, soft glow. */
+/* Active workspace — dark glass, crisp Razer-green outline + text. */
 #workspaces button.active {
-  background: linear-gradient(180deg, #d4b5f9 0%, #cba6f7 100%);
-  border-color: #cba6f7;
-  color: #1e1e2e;
-  box-shadow: 0 0 10px rgba(203, 166, 247, 0.45);
+  background: linear-gradient(160deg,
+              rgba(20, 30, 20, 0.88) 0%,
+              rgba(8, 12, 9, 0.94) 100%);
+  border-color: #44d62c;
+  color: #76ff58;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
 }
 
-/* Workspace with an urgent client. */
 #workspaces button.urgent {
-  background: linear-gradient(180deg, #f5a0b8 0%, #f38ba8 100%);
-  border-color: #f38ba8;
-  color: #1e1e2e;
-  box-shadow: 0 0 10px rgba(243, 139, 168, 0.45);
+  background: linear-gradient(160deg, #ff5590 0%, #ff2a6d 100%);
+  border-color: #ff2a6d;
+  color: #0a0a0f;
+  box-shadow: 0 0 4px rgba(255, 85, 144, 0.9),
+              0 0 16px rgba(255, 42, 109, 0.55);
 }
 
-/* --- Focused app ------------------------------------------------------- */
-/* SketchyBar's front_app pill uses a lighter surface fill + brighter border. */
+/* --- Focused app — neon magenta hero, full cyberpunk bloom ------------- */
 #window {
-  background: linear-gradient(180deg,
-              rgba(69, 71, 90, 0.72) 0%,
-              rgba(49, 50, 68, 0.82) 100%);
-  border-color: rgba(203, 166, 247, 0.4);
-  color: #cdd6f4;
+  background: linear-gradient(160deg,
+              rgba(30, 12, 26, 0.88) 0%,
+              rgba(14, 6, 14, 0.94) 100%);
+  border-color: rgba(255, 42, 109, 0.6);
+  color: #ff5fa2;
+  text-shadow: 0 0 8px rgba(255, 42, 109, 0.7),
+               0 0 16px rgba(255, 42, 109, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 95, 162, 0.12),
+              0 2px 9px rgba(0, 0, 0, 0.7),
+              0 0 10px rgba(255, 42, 109, 0.25);
+}
+
+/* --- Tray apps (Discord, etc.) — cyan edge to sit beside the magenta --- */
+#tray {
+  border-color: rgba(0, 240, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(0, 240, 255, 0.06),
+              0 2px 9px rgba(0, 0, 0, 0.7),
+              0 0 3px rgba(0, 240, 255, 0.12);
+}
+
+#tray menu {
+  background: rgba(7, 8, 14, 0.98);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  border-radius: 9px;
+}
+
+#tray > .passive {
+  -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+  -gtk-icon-effect: highlight;
 }
 
 /* --- Now playing ------------------------------------------------------- */
 #mpris {
-  color: #cdd6f4;
+  color: #00f0ff;
+  border-color: rgba(0, 240, 255, 0.3);
+  text-shadow: 0 0 7px rgba(0, 240, 255, 0.35);
 }
 
 #mpris.paused {
-  color: #a6adc8;                              /* subtext, dimmed */
+  color: #5e7a8a;
+  border-color: rgba(94, 122, 138, 0.25);
+  text-shadow: none;
 }
 
-/* --- Right side — each module gets its own subtle accent ---------------- */
+/* --- Right cluster — cyberpunk accent colors per module ---------------- */
 #pulseaudio {
-  color: #89dceb;                              /* sky */
+  color: #00f0ff;                               /* neon cyan */
+  border-color: rgba(0, 240, 255, 0.32);
+  text-shadow: 0 0 7px rgba(0, 240, 255, 0.4);
 }
 
 #pulseaudio.muted {
-  color: #6c7086;                              /* overlay0 */
-  border-color: rgba(108, 112, 134, 0.3);
+  color: #2a3450;
+  border-color: rgba(42, 52, 80, 0.3);
+  text-shadow: none;
 }
 
 #battery {
-  color: #a6e3a1;                              /* green */
+  color: #44d62c;                               /* Razer green */
+  border-color: rgba(68, 214, 44, 0.32);
+  text-shadow: 0 0 7px rgba(68, 214, 44, 0.4);
 }
 
 #battery.warning {
-  color: #f9e2af;                              /* yellow */
-  border-color: rgba(249, 226, 175, 0.4);
+  color: #faff00;                               /* cyber yellow */
+  border-color: rgba(250, 255, 0, 0.4);
+  text-shadow: 0 0 8px rgba(250, 255, 0, 0.45);
 }
 
 #battery.critical {
-  color: #f38ba8;                              /* red */
-  border-color: rgba(243, 139, 168, 0.5);
-  box-shadow: 0 0 10px rgba(243, 139, 168, 0.3);
+  color: #ff2a6d;                               /* hot magenta */
+  border-color: rgba(255, 42, 109, 0.55);
+  text-shadow: 0 0 9px rgba(255, 42, 109, 0.6);
+  box-shadow: 0 0 14px rgba(255, 42, 109, 0.35),
+              0 2px 9px rgba(0, 0, 0, 0.7);
 }
 
 #battery.charging {
-  color: #a6e3a1;                              /* green */
-  border-color: rgba(166, 227, 161, 0.4);
+  color: #76ff58;
+  border-color: rgba(118, 255, 88, 0.5);
+  text-shadow: 0 0 8px rgba(118, 255, 88, 0.5);
+  box-shadow: 0 0 10px rgba(68, 214, 44, 0.3),
+              0 2px 9px rgba(0, 0, 0, 0.7);
 }
 
 #clock {
-  color: #cba6f7;                              /* mauve */
-  border-color: rgba(203, 166, 247, 0.35);
+  color: #44d62c;                               /* Razer green hero */
+  border-color: rgba(68, 214, 44, 0.4);
+  text-shadow: 0 0 9px rgba(68, 214, 44, 0.6);
 }
 
 tooltip {
-  background: rgba(24, 24, 37, 0.96);          /* mantle */
-  border: 1px solid rgba(203, 166, 247, 0.4);
-  border-radius: 10px;
+  background: rgba(7, 8, 14, 0.98);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  border-radius: 9px;
 }
 
 tooltip label {
-  color: #cdd6f4;
+  color: #d6f5cf;
 }

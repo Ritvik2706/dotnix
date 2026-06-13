@@ -1,0 +1,10 @@
+# Vesktop runtime / Electron state — never commit (contains your Discord
+# session token and machine-local junk). Only the theme + Vencord settings
+# in this dir are tracked.
+*
+!.gitignore
+!settings/
+!settings/settings.json
+!settings/quickCss.css
+!themes/
+!themes/**

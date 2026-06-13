@@ -1,0 +1,11 @@
+/* ──────────────────────────────────────────────────────────────
+   Managed userChrome.css — symlinked from dotfiles.
+   Forces JetBrainsMono Nerd Font on the Zen browser UI itself
+   (tabs, toolbar, URL bar, menus, sidebar). Requires the pref
+   toolkit.legacyUserProfileCustomizations.stylesheets = true (set
+   in user.js).
+   ────────────────────────────────────────────────────────────── */
+
+* {
+  font-family: "JetBrainsMono Nerd Font" !important;
+}

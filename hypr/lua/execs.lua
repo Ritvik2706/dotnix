@@ -7,7 +7,7 @@
 hl.on("hyprland.start", function()
 	-- ===== Core services =====
 	hl.exec_cmd("awww-daemon") -- wallpaper daemon
-	hl.exec_cmd("awww img /home/ritvik/github/dotnix/wallpapers/test.png") -- set wallpaper
+	hl.exec_cmd("awww img /home/ritvik/github/dotnix/wallpapers/samurai.png") -- set wallpaper
 	hl.exec_cmd("dunst") -- notifications
 	hl.exec_cmd("hypridle") -- idle/suspend/lock management
 	hl.exec_cmd("copyq") -- clipboard manager
@@ -20,13 +20,12 @@ hl.on("hyprland.start", function()
 	hl.exec_cmd("autotiling") -- auto-tiling helper (if installed)
 
 	-- ===== Applications (workspace-pinned via window rules) =====
-	hl.exec_cmd("brave") -- → workspace 1
 	hl.exec_cmd("ghostty") -- → workspace 2
-	-- ChatGPT app (Brave PWA) → workspace 11 lands via the title-based rule
+	-- Claude app (Chromium PWA) → workspace 11; launched on demand via super+S (toggle_claude.sh)
 
 	-- Auto-start wlsunset at login (sunset→sunrise)
 	hl.exec_cmd("wlsunset -l 43.6 -L 3.9")
 
 	-- ===== Optional / custom scripts =====
-	-- hl.exec_cmd("/home/ritvik/.config/custom_scripts/launch_chatgpt_hypr.sh")
+	-- hl.exec_cmd("/home/ritvik/.config/custom_scripts/launch_claude_hypr.sh")
 end)

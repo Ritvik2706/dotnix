@@ -1,0 +1,167 @@
+/**
+ * @name        Cyberpunk — Razer Green
+ * @description Dark gunmetal glass with Razer-green hero accent and cyan /
+ *             magenta neon support colours. Matches the Hyprland + waybar rice.
+ * @author      ritvik
+ * @version     1.0.0
+ *
+ * Palette:
+ *   base     #07080e   surface  #0d0f18   surface1 #12151f
+ *   razer    #44d62c   bright   #76ff58   dim      #2a8a1a
+ *   cyan     #00f0ff   magenta  #ff2a6d   yellow   #faff00
+ *   text     #d6f5cf   subtext  #5e7a8a   off      #2a3450
+ */
+
+:root {
+  /* ---- Core palette aliases ----------------------------------------- */
+  --cp-base:     #07080e;
+  --cp-surface:  #0d0f18;
+  --cp-surface1: #12151f;
+  --cp-surface2: #171b28;
+  --cp-razer:    #44d62c;
+  --cp-bright:   #76ff58;
+  --cp-dim:      #2a8a1a;
+  --cp-cyan:     #00f0ff;
+  --cp-magenta:  #ff2a6d;
+  --cp-yellow:   #faff00;
+  --cp-text:     #d6f5cf;
+  --cp-subtext:  #5e7a8a;
+  --cp-off:      #2a3450;
+
+  /* ---- Discord background layers ------------------------------------ */
+  --background-primary:            var(--cp-surface);
+  --background-secondary:          var(--cp-surface1);
+  --background-secondary-alt:      var(--cp-surface2);
+  --background-tertiary:           var(--cp-base);
+  --background-floating:           var(--cp-base);
+  --background-nested-floating:    var(--cp-surface);
+  --background-accent:             var(--cp-razer);
+  --background-mentioned:          rgba(68, 214, 44, 0.10);
+  --background-mentioned-hover:    rgba(68, 214, 44, 0.16);
+  --background-message-hover:      rgba(255, 255, 255, 0.02);
+  --background-modifier-hover:     rgba(68, 214, 44, 0.07);
+  --background-modifier-selected:  rgba(68, 214, 44, 0.12);
+  --background-modifier-active:    rgba(68, 214, 44, 0.16);
+  --channeltextarea-background:    var(--cp-surface1);
+  --input-background:              var(--cp-base);
+
+  /* Newer token system (Discord "appearance" vars) -------------------- */
+  --bg-base-lower:                 var(--cp-base);
+  --bg-base-low:                   var(--cp-surface);
+  --bg-base-default:               var(--cp-surface);
+  --bg-base-tertiary:              var(--cp-base);
+  --bg-surface-overlay:            var(--cp-surface1);
+  --bg-surface-raised:             var(--cp-surface1);
+  --bg-surface-higher:             var(--cp-surface2);
+
+  /* ---- Brand / accent (buttons, toggles, mentions) ------------------ */
+  --brand-experiment:              var(--cp-razer);
+  --brand-experiment-100:          #eafff0;
+  --brand-experiment-160:          #c8ffd6;
+  --brand-experiment-200:          #a4ffba;
+  --brand-experiment-260:          var(--cp-bright);
+  --brand-experiment-300:          var(--cp-bright);
+  --brand-experiment-360:          var(--cp-razer);
+  --brand-experiment-400:          var(--cp-razer);
+  --brand-experiment-430:          var(--cp-razer);
+  --brand-experiment-460:          var(--cp-razer);
+  --brand-experiment-500:          var(--cp-razer);
+  --brand-experiment-530:          var(--cp-dim);
+  --brand-experiment-560:          var(--cp-dim);
+  --brand-experiment-600:          var(--cp-dim);
+  --brand-experiment-630:          var(--cp-dim);
+  --brand-experiment-660:          var(--cp-dim);
+  --brand-500:                     var(--cp-razer);
+  --button-filled-brand-background:        var(--cp-razer);
+  --button-filled-brand-background-hover:  var(--cp-bright);
+  --button-filled-brand-text:              var(--cp-base);
+
+  /* ---- Text --------------------------------------------------------- */
+  --text-normal:        var(--cp-text);
+  --text-default:       var(--cp-text);
+  --text-muted:         var(--cp-subtext);
+  --text-faint:         var(--cp-off);
+  --header-primary:     #eafff0;
+  --header-secondary:   var(--cp-subtext);
+  --interactive-normal: var(--cp-text);
+  --interactive-hover:  var(--cp-bright);
+  --interactive-active: var(--cp-bright);
+  --interactive-muted:  var(--cp-off);
+  --channels-default:   var(--cp-subtext);
+  --text-link:          var(--cp-cyan);
+  --text-brand:         var(--cp-razer);
+
+  /* ---- Status / semantic accents ------------------------------------ */
+  --status-positive:           var(--cp-razer);
+  --status-danger:             var(--cp-magenta);
+  --status-warning:            var(--cp-yellow);
+  --info-positive-foreground:  var(--cp-razer);
+  --info-danger-foreground:    var(--cp-magenta);
+  --mention-foreground:        var(--cp-bright);
+  --mention-background:        rgba(68, 214, 44, 0.12);
+
+  /* ---- Scrollbars --------------------------------------------------- */
+  --scrollbar-thin-thumb:      rgba(68, 214, 44, 0.25);
+  --scrollbar-auto-thumb:      rgba(68, 214, 44, 0.30);
+  --scrollbar-auto-track:      transparent;
+}
+
+/* ---- App chrome: kill the flat blurple, lean into gunmetal --------- */
+.theme-dark,
+.theme-light {
+  --brand-experiment: var(--cp-razer);
+}
+
+/* Server list rail + selected guild pill ----------------------------- */
+.guilds__91540,
+nav[class*="guilds"] {
+  background: var(--cp-base);
+}
+
+/* Selected/hover guild pill -> razer green --------------------------- */
+[class*="pill"] span[style*="opacity: 1"],
+[class*="pill"] [class*="item"] {
+  background-color: var(--cp-razer) !important;
+}
+
+/* ---- Links + mentions glow ----------------------------------------- */
+a,
+[class*="anchor"] {
+  color: var(--cp-cyan) !important;
+  text-shadow: 0 0 6px rgba(0, 240, 255, 0.30);
+}
+
+[class*="mention"] {
+  background-color: rgba(68, 214, 44, 0.14) !important;
+  color: var(--cp-bright) !important;
+}
+
+/* ---- Your own message highlight on hover --------------------------- */
+[class*="message"]:hover {
+  box-shadow: inset 2px 0 0 rgba(68, 214, 44, 0.35);
+}
+
+/* ---- Code blocks: cyber green on near-black ------------------------ */
+code,
+pre {
+  background: var(--cp-base) !important;
+  border: 1px solid rgba(68, 214, 44, 0.18) !important;
+  color: var(--cp-bright) !important;
+}
+
+/* ---- Online / status dots in the cyber palette -------------------- */
+rect[fill="#23a55a"],
+rect[fill="#3ba55c"] { fill: var(--cp-razer) !important; }
+rect[fill="#f0b132"],
+rect[fill="#faa61a"] { fill: var(--cp-yellow) !important; }
+rect[fill="#f23f43"],
+rect[fill="#ed4245"] { fill: var(--cp-magenta) !important; }
+
+/* ---- Scrollbar polish --------------------------------------------- */
+::-webkit-scrollbar-thumb {
+  background: rgba(68, 214, 44, 0.25) !important;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.45) !important;
+}

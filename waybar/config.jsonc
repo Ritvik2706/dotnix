@@ -3,13 +3,13 @@
 {
   "layer": "top",
   "position": "top",
-  "height": 34,
-  "margin-top": 6,
+  "height": 31,
+  "margin-top": 3,
   "margin-left": 8,
   "margin-right": 8,
-  "spacing": 6,
+  "spacing": 4,
 
-  "modules-left": ["hyprland/workspaces", "hyprland/window"],
+  "modules-left": ["hyprland/workspaces", "hyprland/window", "tray"],
   // "modules-center": ["mpris"],
   "modules-right": ["pulseaudio", "battery", "clock"],
 
@@ -52,6 +52,13 @@
       "imv|org.gnome.Loupe|feh": "  Image",
       "pavucontrol": "  Audio"
     }
+  },
+
+  // --- Left: tray apps (Discord, etc.) ---------------------------------
+  "tray": {
+    "icon-size": 16,
+    "spacing": 10,
+    "reverse-direction": false
   },
 
   // --- Center: now playing (sketchybar "media") -------------------------
@@ -105,7 +112,7 @@
     "calendar": {
       "mode": "month",
       "format": {
-        "today": "<span color='#cba6f7'><b>{}</b></span>"
+        "today": "<span color='#44d62c'><b>{}</b></span>"
       }
     }
   }
