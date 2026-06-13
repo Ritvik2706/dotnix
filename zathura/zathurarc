@@ -1,0 +1,81 @@
+# ── Appearance ────────────────────────────────────────────────────────────
+set guioptions          none
+set font                "JetBrainsMono Nerd Font 11"
+set statusbar-h-padding 8
+set statusbar-v-padding 4
+set window-title-basename true
+set adjust-open         "best"
+
+# Dark-mode recolor (toggle with i)
+set recolor             true
+set recolor-lightcolor  "rgba(0, 0, 0, 0)"
+set recolor-darkcolor   "rgba(255, 255, 255, 1)"
+set recolor-keephue     false
+
+# ── Colors ────────────────────────────────────────────────────────────────
+set default-bg          "#0d0d0d"
+set default-fg          "#e0e0e0"
+set statusbar-bg        "#111111"
+set statusbar-fg        "#888888"
+set inputbar-bg         "#111111"
+set inputbar-fg         "#e0e0e0"
+set notification-bg     "#111111"
+set notification-fg     "#e0e0e0"
+set notification-error-bg   "#3b1a1a"
+set notification-error-fg   "#ff6b6b"
+set notification-warning-bg "#2e2a14"
+set notification-warning-fg "#f0c040"
+set highlight-color     "rgba(255, 200, 0, 0.3)"
+set highlight-active-color "rgba(255, 200, 0, 0.6)"
+set completion-bg       "#111111"
+set completion-fg       "#e0e0e0"
+set completion-highlight-bg "#1e3a5f"
+set completion-highlight-fg "#e0e0e0"
+
+# ── Behaviour ─────────────────────────────────────────────────────────────
+set scroll-step         60
+set zoom-step           5
+set zoom-min            10
+set zoom-max            1000
+set pages-per-row       1
+set scroll-page-aware   true
+set incremental-search  true
+set render-loading      false
+set synctex             true
+set selection-clipboard clipboard
+
+# ── Keybindings ───────────────────────────────────────────────────────────
+# vim-style scroll
+map j scroll down
+map k scroll up
+map h scroll left
+map l scroll right
+map J zoom out
+map K zoom in
+map <C-f> scroll full-down
+map <C-b> scroll full-up
+map <C-d> scroll half-down
+map <C-u> scroll half-up
+
+# navigate pages
+map <C-j> navigate next
+map <C-k> navigate previous
+map gg goto top
+map G goto bottom
+
+# zoom
+map + zoom in
+map - zoom out
+map = adjust_window best-fit
+map W adjust_window width
+
+
+# search
+map n search forward
+map N search backward
+
+# misc
+map i recolor
+map r rotate
+map R reload
+map q quit

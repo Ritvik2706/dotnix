@@ -8,7 +8,6 @@ hl.config({
 		-- Razer Blade has a standard PC layout, so the MacBook-era
 		-- altwin:swap_alt_win swap is gone. Caps↔Escape stays.
 		kb_options = "caps:swapescape",
-		-- kb_options = "caps:swapescape,altwin:swap_alt_win", -- MacBook variant
 
 		sensitivity = 0, -- mouse sensitivity
 		-- accel_profile = "", -- flat or adaptive; empty means libinput default

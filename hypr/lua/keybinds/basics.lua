@@ -10,6 +10,7 @@ local alt = vars.altMod
 hl.bind(main .. " + RETURN", hl.dsp.exec_cmd(vars.term))
 hl.bind(main .. " + T", hl.dsp.exec_cmd("~/.config/custom_scripts/tmux_popup.sh"))
 hl.bind(main .. " + Q", hl.dsp.window.close())
+hl.bind(main .. " + C", hl.dsp.exec_cmd("copyq show"))
 hl.bind(main .. " + SHIFT + C", hl.dsp.exec_cmd("hyprctl reload"))
 hl.bind(main .. " + SHIFT + E", hl.dsp.exit())
 

@@ -27,13 +27,21 @@ hl.window_rule({
 	workspace = "11",
 })
 
--- Ghostty: workspace 2, no blur, near-opaque for readability
+-- Ghostty: workspace 2, fullscreen, no blur
 hl.window_rule({
 	name = "ghostty",
 	match = { class = [[^(com\.mitchellh\.ghostty)$]] },
 	workspace = "2",
+	fullscreen = true,
 	no_blur = true,
 	opacity = "0.99 override 0.99 override",
+})
+
+-- Any terminal on workspace 2: fullscreen
+hl.window_rule({
+	name = "ws2-fullscreen",
+	match = { workspace = "2", class = [[^(com\.mitchellh\.ghostty|org\.alacritty|kitty|foot|wezterm)$]] },
+	fullscreen = true,
 })
 
 ----------------------------------------
@@ -311,13 +319,12 @@ hl.window_rule({
 })
 
 ----------------------------------------
--- Zathura — single global tab group (ws 11)
+-- Zathura — workspace 3
 ----------------------------------------
 hl.window_rule({
 	name = "zathura",
 	match = { class = [[^(org\.pwmt\.zathura.*)$]] },
-	workspace = "11",
-	group = "set lock invade",
+	workspace = "3",
 })
 
 ----------------------------------------
