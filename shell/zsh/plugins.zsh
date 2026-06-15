@@ -16,11 +16,27 @@ source "$ZINIT_HOME/zinit.zsh"
 # Everything here blocks the prompt — keep it minimal.
 
 # git.zsh calls _omz_register_handler (from async_prompt.zsh) which we don't
-# load. The theme uses git_prompt_info synchronously so async is not needed.
+# load. The prompt uses git_prompt_info synchronously so async is not needed.
 function _omz_register_handler() { return 0 }
 zinit snippet OMZL::git.zsh
 setopt PROMPT_SUBST
-zinit snippet OMZT::xiong-chiamiov-plus
+
+# Prompt — the classic two-line xiong-chiamiov-plus layout
+#   ┌─[user@host] - [path] - [date]
+#   └─[$] <git>
+# recoloured with a cyberpunk neon palette (truecolor %F{#hex}). Defined inline
+# rather than via OMZT:: so the colours live here instead of an upstream theme.
+#   purple #b967ff frame · green #0aff9d user · pink #ff2e97 @ and $
+#   cyan #00f0ff host · bold pink path · yellow #fffb00 date
+PROMPT='%F{#b967ff}%B┌─[%b%f%F{#0aff9d}%n%F{#ff2e97}@%f%F{#00f0ff}%m%F{#b967ff}%B]%b%f - %F{#b967ff}%B[%b%F{#ff2e97}%B%~%b%F{#b967ff}%B]%b%f - %F{#b967ff}%B[%b%F{#fffb00}%D{%a %b %d, %H:%M}%F{#b967ff}%B]%b%f
+%F{#b967ff}%B└─[%b%F{#ff2e97}%B$%b%F{#b967ff}%B] <%b%f$(git_prompt_info)%F{#b967ff}%B>%b%f '
+PS2='%F{#b967ff}%B>%b%f '
+
+# git segment shown inside <…> on the second line
+ZSH_THEME_GIT_PROMPT_PREFIX="%F{#b967ff} %f%F{#00f0ff}"
+ZSH_THEME_GIT_PROMPT_SUFFIX="%f"
+ZSH_THEME_GIT_PROMPT_DIRTY=" %F{#fffb00}✗%f"
+ZSH_THEME_GIT_PROMPT_CLEAN=" %F{#0aff9d}✔%f"
 
 zinit snippet OMZP::git              # git aliases: gst, gco, gd, gl, etc.
 zinit snippet OMZP::archlinux        # yay/pacman aliases

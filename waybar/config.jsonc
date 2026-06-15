@@ -3,20 +3,38 @@
 {
   "layer": "top",
   "position": "top",
-  "height": 31,
-  "margin-top": 3,
-  "margin-left": 8,
-  "margin-right": 8,
-  "spacing": 4,
+  "height": 34,
+  "margin-top": 5,
+  "margin-left": 10,
+  "margin-right": 10,
+  "spacing": 6,
 
-  "modules-left": ["hyprland/workspaces", "hyprland/window", "tray"],
-  // "modules-center": ["mpris"],
-  "modules-right": ["pulseaudio", "battery", "clock"],
+  "modules-left": ["hyprland/workspaces", "group/appdrawer"],
+  // Right cluster consolidated into one continuous glass capsule.
+  "modules-right": ["group/stats"],
+
+  // Focused-window pill that reveals the tray on hover (drawer).
+  "group/appdrawer": {
+    "orientation": "horizontal",
+    "drawer": {
+      "transition-duration": 350,
+      "transition-left-to-right": true,
+      "children-class": "drawer-tray"
+    },
+    "modules": ["hyprland/window", "tray"]
+  },
+
+  "group/stats": {
+    "orientation": "horizontal",
+    "modules": ["pulseaudio", "battery", "clock"]
+  },
 
   // --- Left: workspace pills (1..10) -------------------------------------
   "hyprland/workspaces": {
     "format": "{name}",
     "on-click": "activate",
+    "on-scroll-up": "hyprctl dispatch workspace e+1",
+    "on-scroll-down": "hyprctl dispatch workspace e-1",
     "sort-by-number": true,
     // Only show workspaces that are occupied (or currently focused) —
     // no persistent/empty placeholders.
@@ -63,10 +81,14 @@
 
   // --- Center: now playing (sketchybar "media") -------------------------
   "mpris": {
-    "format": "{player_icon}  {artist} - {title}",
-    "format-paused": "{status_icon}  {artist} - {title}",
-    "max-length": 45,
-    "tooltip-format": "{artist} - {title}\n{album}",
+    "format": "{player_icon}  {title}  ·  {artist}",
+    "format-paused": "{status_icon}  {title}  ·  {artist}",
+    "max-length": 50,
+    "ellipsis": "…",
+    "tooltip-format": "{title}\n{artist} — {album}",
+    "on-click": "playerctl play-pause",
+    "on-scroll-up": "playerctl next",
+    "on-scroll-down": "playerctl previous",
     "player-icons": {
       "default": "",
       "spotify": "",
@@ -80,12 +102,12 @@
 
   // --- Right: volume (sketchybar "volume") -----------------------------
   "pulseaudio": {
-    "format": "{icon}  {volume}%",
-    "format-muted": "  muted",
+    "format": "  {volume}%",
+    "format-muted": "  muted",
     "format-icons": {
-      "headphone": "",
-      "headset": "",
-      "default": ["", "", ""]
+      "headphone": "",
+      "headset": "",
+      "default": ["", "", ""]
     },
     "scroll-step": 5,
     "on-click": "pavucontrol",
@@ -99,21 +121,28 @@
       "critical": 15
     },
     "format": "{icon}  {capacity}%",
-    "format-charging": "  {capacity}%",
-    "format-plugged": "  {capacity}%",
-    "format-icons": ["", "", "", "", ""],
+    "format-charging": "  {capacity}%",
+    "format-plugged": "  {capacity}%",
+    "format-icons": [""],
     "tooltip-format": "{capacity}% — {timeTo}"
   },
 
   // --- Right: clock (sketchybar "date") --------------------------------
   "clock": {
-    "format": "  {:%a %d %b • %I:%M %p}",
+    "format": "  {:%a %d %b   %I:%M %p}",
     "tooltip-format": "<tt><small>{calendar}</small></tt>",
     "calendar": {
       "mode": "month",
+      "mode-mon-col": 3,
+      "on-scroll": 1,
       "format": {
         "today": "<span color='#44d62c'><b>{}</b></span>"
       }
+    },
+    "actions": {
+      "on-click-right": "mode",
+      "on-scroll-up": "shift_up",
+      "on-scroll-down": "shift_down"
     }
   }
 }

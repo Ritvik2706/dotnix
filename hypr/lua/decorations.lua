@@ -5,29 +5,35 @@
 
 hl.config({
 	decoration = {
-		rounding = 14, -- soft curvature to match the rounded waybar pills
+		rounding = 16, -- matches the waybar glass pill radius
 		-- screen_shader = "/home/ritvik/.config/hypr/conf/shaders/rounded_corners.frag",
 
-		-- Blur — dark glass behind windows for the cyberpunk depth
+		-- Blur — iOS "liquid glass": deep frost + vibrancy (saturation
+		-- boost behind the glass) + fine grain for that frosted texture.
 		blur = {
 			enabled = true,
 			xray = true,
 			special = false,
 			new_optimizations = true,
-			size = 8, -- blur_size for glow effect
-			passes = 4, -- blur_passes for stronger glow
-			brightness = 0.92, -- slightly darker glass, lets neon edges pop
-			noise = 0.012, -- subtle grain for a screen/CRT feel
-			contrast = 1.15,
+			size = 4, -- light frost
+			passes = 2,
+			brightness = 0.98, -- luminous glass rather than dark
+			vibrancy = 0.1696, -- Apple's vibrancy: colors glow through, not muddy
+			vibrancy_darkness = 0.0,
+			noise = 0.02, -- fine frosted grain
+			contrast = 1.0,
 			popups = true,
 			popups_ignorealpha = 0.6,
 			input_methods = true,
 			input_methods_ignorealpha = 0.8,
 		},
 
-		-- Glow disabled
+		-- Soft floating-glass shadow (colors set in colors.lua).
 		shadow = {
-			enabled = false,
+			enabled = true,
+			range = 24,
+			render_power = 3,
+			scale = 0.97,
 		},
 	},
 })

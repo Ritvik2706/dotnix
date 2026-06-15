@@ -1,204 +1,215 @@
-/* Waybar style — Cyberpunk / Razer Green
+/* Waybar style — "Liquid Glass" (Apple-design-language reimagining)
+ *
+ * Philosophy borrowed from Apple's current system:
+ *   - Fewer, continuous glass surfaces instead of many floating chips.
+ *     The right cluster (volume · battery · clock) is ONE capsule with
+ *     hairline dividers; workspaces are a single segmented rail.
+ *   - Ruthless color restraint. Glass stays neutral/clear; the lone sky
+ *     accent appears only on live, meaningful state (active workspace,
+ *     battery warning/critical/charging). Everything else is near-white.
+ *   - Concentric capsule geometry, specular edge light, breathing room.
+ *
+ * GTK CSS can't blur, so the frost comes from Hyprland's layer blur
+ * behind these translucent surfaces (see hypr/lua/rules.lua).
  *
  * Palette:
- *   base     #07080e   surface  #0d0f18   surface1 #12151f
- *   razer    #44d62c   bright   #76ff58   dim      #2a8a1a
- *   cyan     #00f0ff   magenta  #ff2a6d   yellow   #faff00
- *   text     #d6f5cf   subtext  #5e7a8a   off      #2a3450
- *
- * Dark gunmetal glass pills, Razer-green hero accent, cyan/magenta
- * support accents, layered neon bloom on the live elements.
+ *   text    #f6f8fc        subtext rgba(246,248,252,0.55)
+ *   accent  #8ad8ff (sky)  warn #ffce6e   crit #ff7a8c   good #9be8b4
  */
 
 * {
   border: none;
   border-radius: 0;
-  font-family: "JetBrainsMono Nerd Font", sans-serif;
-  font-size: 14px;
-  font-weight: bold;
+  /* SF Pro for all text; Nerd Font auto-falls-back for icon glyphs only. */
+  font-family: "SF Pro Display", "SF Pro Text", "JetBrainsMono Nerd Font", sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
   min-height: 0;
 }
 
 window#waybar {
   background: transparent;
+  color: #f6f8fc;
 }
 
-/* Shared pill look — dark gunmetal glass with a Razer-green edge. */
+/* ---------------------------------------------------------------------- *
+ *  Shared glass surface — the single material everything is cut from.
+ *  Specular top rim, light wrapping the bottom edge, layered ambient
+ *  shadow so each surface reads as a slab of real glass.
+ * ---------------------------------------------------------------------- */
 #workspaces,
-#window,
-#tray,
+#appdrawer,
 #mpris,
-#pulseaudio,
-#battery,
-#clock {
-  background: linear-gradient(160deg,
-              rgba(18, 21, 31, 0.82) 0%,
-              rgba(7, 8, 14, 0.92) 100%);
-  border: 1px solid rgba(68, 214, 44, 0.28);
-  border-radius: 9px;
-  padding: 0 13px;
-  margin: 0;
-  color: #d6f5cf;
-  box-shadow: inset 0 1px 0 rgba(118, 255, 88, 0.06),
-              0 2px 9px rgba(0, 0, 0, 0.7),
-              0 0 3px rgba(68, 214, 44, 0.1);
+#stats {
+  background: linear-gradient(180deg,
+              rgba(255, 255, 255, 0.22) 0%,
+              rgba(255, 255, 255, 0.13) 45%,
+              rgba(255, 255, 255, 0.11) 80%,
+              rgba(255, 255, 255, 0.13) 100%);
+  /* crisp bright rim defines the glass edge and hides the blur fringe */
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 16px;
+  color: #f6f8fc;
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.65),
+              inset 0 -1px 1px rgba(255, 255, 255, 0.12),
+              inset 0 -8px 14px rgba(0, 0, 0, 0.06),
+              0 1px 3px rgba(0, 0, 0, 0.10);
+  transition: all 240ms ease;
 }
 
-/* --- Workspaces -------------------------------------------------------- */
+/* ---------------------------------------------------------------------- *
+ *  Workspaces — one segmented glass rail; active = inner lozenge.
+ * ---------------------------------------------------------------------- */
 #workspaces {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
+  padding: 3px;
 }
 
 #workspaces button {
-  background: linear-gradient(160deg,
-              rgba(18, 21, 31, 0.82) 0%,
-              rgba(7, 8, 14, 0.92) 100%);
-  border: 1px solid rgba(68, 214, 44, 0.24);
-  border-radius: 9px;
-  color: #44d62c;
-  padding: 0 11px;
-  margin: 0 4px 0 0;
-  min-width: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
-  transition: none;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  /* Inactive workspaces render as a dot: hide the number, draw a circle. */
+  color: transparent;
+  background-image: radial-gradient(circle,
+              rgba(246, 248, 252, 0.55) 0,
+              rgba(246, 248, 252, 0.55) 3px,
+              transparent 3.5px);
+  padding: 0 9px;
+  margin: 0 1px;
+  min-width: 12px;
+  box-shadow: none;
+  transition: all 200ms ease;
 }
 
 #workspaces button:hover {
-  background: rgba(18, 21, 31, 0.95);
-  border-color: rgba(0, 240, 255, 0.65);
-  color: #00f0ff;
-  box-shadow: 0 0 12px rgba(0, 240, 255, 0.35),
-              inset 0 0 6px rgba(0, 240, 255, 0.12);
+  background-image: radial-gradient(circle,
+              rgba(255, 255, 255, 0.95) 0,
+              rgba(255, 255, 255, 0.95) 3.5px,
+              transparent 4px);
 }
 
+/* Empty workspaces — fainter dot. */
 #workspaces button.empty {
-  color: #2a3450;
-  border-color: rgba(42, 52, 80, 0.35);
+  background-image: radial-gradient(circle,
+              rgba(246, 248, 252, 0.28) 0,
+              rgba(246, 248, 252, 0.28) 2.5px,
+              transparent 3px);
 }
 
-/* Active workspace — dark glass, crisp Razer-green outline + text. */
+/* Active segment — bright inner lozenge with a soft lilac glass glow
+   (matches the Hyprland window rim). Apple-restrained: color on the
+   live element only. */
 #workspaces button.active {
-  background: linear-gradient(160deg,
-              rgba(20, 30, 20, 0.88) 0%,
-              rgba(8, 12, 9, 0.94) 100%);
-  border-color: #44d62c;
-  color: #76ff58;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+  background: linear-gradient(180deg,
+              rgba(255, 255, 255, 0.30) 0%,
+              rgba(201, 182, 255, 0.12) 60%,
+              rgba(201, 182, 255, 0.18) 100%);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.65),
+              inset 0 -3px 8px rgba(201, 182, 255, 0.22),
+              0 1px 4px rgba(0, 0, 0, 0.18),
+              0 0 12px rgba(201, 182, 255, 0.30);
 }
 
 #workspaces button.urgent {
-  background: linear-gradient(160deg, #ff5590 0%, #ff2a6d 100%);
-  border-color: #ff2a6d;
-  color: #0a0a0f;
-  box-shadow: 0 0 4px rgba(255, 85, 144, 0.9),
-              0 0 16px rgba(255, 42, 109, 0.55);
+  background: linear-gradient(180deg,
+              rgba(255, 122, 140, 0.42) 0%,
+              rgba(255, 122, 140, 0.18) 100%);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.5),
+              0 0 10px rgba(255, 122, 140, 0.4);
 }
 
-/* --- Focused app — neon magenta hero, full cyberpunk bloom ------------- */
+/* ---------------------------------------------------------------------- *
+ *  Focused app — quiet glass label, no shouty color.
+ * ---------------------------------------------------------------------- */
+/* Focused-app pill is the visible face of the drawer (#appdrawer). */
 #window {
-  background: linear-gradient(160deg,
-              rgba(30, 12, 26, 0.88) 0%,
-              rgba(14, 6, 14, 0.94) 100%);
-  border-color: rgba(255, 42, 109, 0.6);
-  color: #ff5fa2;
-  text-shadow: 0 0 8px rgba(255, 42, 109, 0.7),
-               0 0 16px rgba(255, 42, 109, 0.35);
-  box-shadow: inset 0 1px 0 rgba(255, 95, 162, 0.12),
-              0 2px 9px rgba(0, 0, 0, 0.7),
-              0 0 10px rgba(255, 42, 109, 0.25);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 16px;
+  color: #f6f8fc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 
-/* --- Tray apps (Discord, etc.) — cyan edge to sit beside the magenta --- */
+/* ---------------------------------------------------------------------- *
+ *  Tray — hidden inside the drawer; slides out on hovering the app pill.
+ * ---------------------------------------------------------------------- */
 #tray {
-  border-color: rgba(0, 240, 255, 0.3);
-  box-shadow: inset 0 1px 0 rgba(0, 240, 255, 0.06),
-              0 2px 9px rgba(0, 0, 0, 0.7),
-              0 0 3px rgba(0, 240, 255, 0.12);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 12px 0 4px;
+}
+
+/* Subtle hairline where the tray emerges from the app pill. */
+#tray.drawer-tray {
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  margin-left: 4px;
 }
 
 #tray menu {
-  background: rgba(7, 8, 14, 0.98);
-  border: 1px solid rgba(0, 240, 255, 0.4);
-  border-radius: 9px;
+  background: rgba(28, 30, 38, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
 }
 
-#tray > .passive {
-  -gtk-icon-effect: dim;
+#tray > .passive { -gtk-icon-effect: dim; }
+#tray > .needs-attention { -gtk-icon-effect: highlight; }
+
+/* ---------------------------------------------------------------------- *
+ *  Right cluster — one continuous capsule (#stats) holding three modules
+ *  separated by hairline dividers. Children are transparent so the glass
+ *  reads as a single unbroken surface.
+ * ---------------------------------------------------------------------- */
+#stats {
+  padding: 0;
 }
 
-#tray > .needs-attention {
-  -gtk-icon-effect: highlight;
-}
-
-/* --- Now playing ------------------------------------------------------- */
-#mpris {
-  color: #00f0ff;
-  border-color: rgba(0, 240, 255, 0.3);
-  text-shadow: 0 0 7px rgba(0, 240, 255, 0.35);
-}
-
-#mpris.paused {
-  color: #5e7a8a;
-  border-color: rgba(94, 122, 138, 0.25);
-  text-shadow: none;
-}
-
-/* --- Right cluster — cyberpunk accent colors per module ---------------- */
-#pulseaudio {
-  color: #00f0ff;                               /* neon cyan */
-  border-color: rgba(0, 240, 255, 0.32);
-  text-shadow: 0 0 7px rgba(0, 240, 255, 0.4);
+#stats #pulseaudio,
+#stats #battery,
+#stats #clock {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 15px;
+  color: #f6f8fc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+  /* Feather icons for the glyphs; SF Pro takes over for the text/numbers.
+     Scoped here so it can't collide with the Nerd Font app/tray icons. */
+  font-family: "icomoon-feather", "SF Pro Display", "SF Pro Text", sans-serif;
 }
 
 #pulseaudio.muted {
-  color: #2a3450;
-  border-color: rgba(42, 52, 80, 0.3);
-  text-shadow: none;
+  color: rgba(246, 248, 252, 0.40);
 }
 
-#battery {
-  color: #44d62c;                               /* Razer green */
-  border-color: rgba(68, 214, 44, 0.32);
-  text-shadow: 0 0 7px rgba(68, 214, 44, 0.4);
-}
-
-#battery.warning {
-  color: #faff00;                               /* cyber yellow */
-  border-color: rgba(250, 255, 0, 0.4);
-  text-shadow: 0 0 8px rgba(250, 255, 0, 0.45);
-}
-
-#battery.critical {
-  color: #ff2a6d;                               /* hot magenta */
-  border-color: rgba(255, 42, 109, 0.55);
-  text-shadow: 0 0 9px rgba(255, 42, 109, 0.6);
-  box-shadow: 0 0 14px rgba(255, 42, 109, 0.35),
-              0 2px 9px rgba(0, 0, 0, 0.7);
-}
-
-#battery.charging {
-  color: #76ff58;
-  border-color: rgba(118, 255, 88, 0.5);
-  text-shadow: 0 0 8px rgba(118, 255, 88, 0.5);
-  box-shadow: 0 0 10px rgba(68, 214, 44, 0.3),
-              0 2px 9px rgba(0, 0, 0, 0.7);
-}
+/* Battery state — the only place color earns its keep. */
+#battery.warning  { color: #ffce6e; }
+#battery.critical { color: #ff7a8c; text-shadow: 0 0 10px rgba(255, 122, 140, 0.4); }
+/* Charging = energy = Razer green, the second home for the accent. */
+#battery.charging { color: #76ff58; text-shadow: 0 0 9px rgba(68, 214, 44, 0.45); }
 
 #clock {
-  color: #44d62c;                               /* Razer green hero */
-  border-color: rgba(68, 214, 44, 0.4);
-  text-shadow: 0 0 9px rgba(68, 214, 44, 0.6);
+  color: #ffffff;
+  font-weight: 600;
 }
+
+/* ---------------------------------------------------------------------- *
+ *  Tooltips & now playing.
+ * ---------------------------------------------------------------------- */
+#mpris {
+  padding: 0 16px;
+  color: #f6f8fc;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+#mpris.paused { color: rgba(246, 248, 252, 0.55); }
 
 tooltip {
-  background: rgba(7, 8, 14, 0.98);
-  border: 1px solid rgba(0, 240, 255, 0.4);
-  border-radius: 9px;
+  background: rgba(28, 30, 38, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
 }
-
-tooltip label {
-  color: #d6f5cf;
-}
+tooltip label { color: #f6f8fc; }

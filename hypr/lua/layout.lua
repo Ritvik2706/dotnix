@@ -9,7 +9,7 @@ hl.config({
 		gaps_out = 4,
 		gaps_workspaces = 50,
 
-		border_size = 2, -- bright neon edge
+		border_size = 2, -- thin glass rim
 		resize_on_border = true,
 		no_focus_fallback = true,
 		allow_tearing = false,
@@ -17,21 +17,21 @@ hl.config({
 		layout = "dwindle",
 
 		col = {
-			-- Solid neon cyan (mirrors colors.lua theme)
-			active_border = { colors = { "rgba(00F0FFFF)" }, angle = 5 },
-			inactive_border = "rgba(2A3450CC)", -- muted gunmetal
+			-- Liquid-glass rim (mirrors colors.lua) — soft lilac → white
+			active_border = { colors = { "rgba(C9B6FFFF)", "rgba(FFFFFFCC)" }, angle = 120 },
+			inactive_border = "rgba(FFFFFF1F)",
 		},
 
 		-- snap = { enabled = true },
 	},
 
-	-- Grouped windows get a cyan -> magenta edge to read distinct from focus
+	-- Grouped windows: a brighter sky-tinted glass rim to read as focused.
 	group = {
 		col = {
-			border_active = { colors = { "rgba(00F0FFFF)", "rgba(FF2A6DFF)" }, angle = 45 },
-			border_inactive = "rgba(2A3450CC)",
-			border_locked_active = { colors = { "rgba(FAFF00FF)", "rgba(FF2A6DFF)" }, angle = 45 },
-			border_locked_inactive = "rgba(2A3450CC)",
+			border_active = { colors = { "rgba(C9B6FFFF)", "rgba(FFFFFFCC)" }, angle = 120 },
+			border_inactive = "rgba(FFFFFF1F)",
+			border_locked_active = { colors = { "rgba(FFFFFFE6)", "rgba(C9B6FFCC)" }, angle = 120 },
+			border_locked_inactive = "rgba(FFFFFF1F)",
 		},
 	},
 

@@ -391,6 +391,10 @@ hl.layer_rule({
 -- GTK layer-shell (Waybar, wlogout, etc.)
 hl.layer_rule({ name = "gtk-layer-shell", match = { namespace = "gtk-layer-shell" }, blur = true, ignore_alpha = 0 })
 
+-- Waybar — frosted "liquid glass" blur behind the translucent pills.
+-- ignore_alpha keeps the transparent gaps clear; only the pills blur.
+hl.layer_rule({ name = "waybar-blur", match = { namespace = "waybar" }, blur = true, xray = false, ignore_alpha = 0.10 })
+
 -- Launchers & notifications
 hl.layer_rule({ name = "launcher", match = { namespace = "launcher" }, blur = true, ignore_alpha = 0.5 })
 hl.layer_rule({ name = "notifications", match = { namespace = "notifications" }, blur = true, ignore_alpha = 0.69 })
