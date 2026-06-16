@@ -191,13 +191,31 @@ window#waybar {
   min-width: 30px;
   padding: 0 15px;
   margin: 0 2px;
-  /* Static resting glow (was the breathe keyframe's endpoint). No infinite
-     animation, so the pill stops repainting when idle. */
-  box-shadow:
-    inset 0 1.5px 1px rgba(255, 255, 255, 0.90),
-    inset 0 -3px 8px rgba(194, 168, 255, 0.24),
-    0 1px 4px rgba(0, 0, 0, 0.18),
-    0 0 10px rgba(194, 168, 255, 0.28);
+  animation: ws-breathe 4.5s ease-in-out infinite;
+}
+
+@keyframes ws-breathe {
+  from {
+    box-shadow:
+      inset 0 1.5px 1px rgba(255, 255, 255, 0.90),
+      inset 0 -3px 8px rgba(194, 168, 255, 0.24),
+      0 1px 4px rgba(0, 0, 0, 0.18),
+      0 0 10px rgba(194, 168, 255, 0.28);
+  }
+  50% {
+    box-shadow:
+      inset 0 1.5px 1px rgba(255, 255, 255, 1.00),
+      inset 0 -3px 10px rgba(255, 158, 122, 0.32),
+      0 1px 4px rgba(0, 0, 0, 0.18),
+      0 0 20px rgba(255, 158, 122, 0.42);
+  }
+  to {
+    box-shadow:
+      inset 0 1.5px 1px rgba(255, 255, 255, 0.90),
+      inset 0 -3px 8px rgba(194, 168, 255, 0.24),
+      0 1px 4px rgba(0, 0, 0, 0.18),
+      0 0 10px rgba(194, 168, 255, 0.28);
+  }
 }
 
 #workspaces button.urgent {
@@ -290,23 +308,6 @@ window#waybar {
   font-family: "icomoon-feather", "SF Pro Display", "SF Pro Text", sans-serif;
   transition: color 200ms ease, text-shadow 200ms ease;
 }
-
-/* ---------------------------------------------------------------------- *
- *  FIXED FOOTPRINTS — reserve the width of the widest possible reading so
- *  the capsules never reflow when a value crosses a digit boundary
- *  (9%→10%→100%). Each min-width fits "icon + 100%" / "muted" at this size;
- *  shorter readings center within the reserved slot. Tune ±2px to taste.
- * ---------------------------------------------------------------------- */
-/* Sysmon readings sit close: trim the inter-segment padding and reserve only
-   what a 2-digit reading needs (the rare 100% may nudge a hair). */
-#sysmon #cpu,
-#sysmon #memory,
-#sysmon #temperature { padding: 0 10px; }
-#sysmon #cpu        { min-width: 36px; }
-#sysmon #memory     { min-width: 36px; }
-#sysmon #temperature{ min-width: 30px; }
-#stats #pulseaudio  { min-width: 50px; }
-#stats #battery     { min-width: 46px; }
 
 /* Etched dividers — skip each capsule's first child. */
 #sysmon #memory,
