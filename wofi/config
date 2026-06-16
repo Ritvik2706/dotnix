@@ -1,0 +1,26 @@
+# Wofi — drun launcher (paired with style.css in this dir).
+# Liquid-glass look matching the Waybar surface; blur comes from the
+# Hyprland layer rule on the "wofi" namespace (see hypr/lua/rules.lua).
+show=drun
+prompt=Search
+width=560
+# Fixed outer height + scrolling list = the window never resizes on open or
+# while typing. The list scrolls inside this fixed box (scrollbar hidden in
+# CSS). hide_scroll=true is what made the surface size-to-content and jump.
+height=440
+lines=8
+columns=1
+location=center
+allow_images=true
+image_size=34
+insensitive=true
+no_actions=true
+# Keep scrolling enabled so the window stays a fixed size; the scrollbar
+# itself is hidden visually in style.css.
+hide_scroll=false
+gtk_dark=true
+# Lock geometry so the window never resizes on open or per keystroke:
+# always render a fixed number of rows regardless of match count.
+dynamic_lines=false
+# Run on Enter; matching is case-insensitive substring.
+matching=fuzzy

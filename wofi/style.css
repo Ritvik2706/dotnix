@@ -1,0 +1,139 @@
+/* Wofi style — "Liquid Glass", matched to the Waybar surface.
+ *
+ * Same material vocabulary as waybar/style.css:
+ *   - One clear glass slab; specular top catch + a bright rim wrapping every
+ *     edge to fake refraction at the bead's lip. Thin white fill so the
+ *     wallpaper reads straight through (frost = Hyprland layer blur).
+ *   - Color restraint: neutral glass, lone sky/lilac accent on the live
+ *     element (the selected entry), everything else near-white.
+ *
+ * Palette (shared with waybar):
+ *   text  #f6f8fc   subtext rgba(246,248,252,0.55)
+ *   accent lilac rgba(201,182,255,*)   sky #8ad8ff
+ */
+
+* {
+  font-family: "SF Pro Display", "SF Pro Text", "JetBrainsMono Nerd Font", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 0;
+  /* GTK draws a focus ring on keyboard navigation that takes layout space and
+     shifts content row-to-row (pointer/:hover selection doesn't). Kill it. */
+  outline: none;
+  -gtk-outline-radius: 0;
+  box-shadow: none;
+}
+
+/* ---------------------------------------------------------------------- *
+ *  Window — the single clear glass slab. Edge-lit on all sides so light
+ *  reads as bending around the lip (the liquid-droplet illusion).
+ * ---------------------------------------------------------------------- */
+window {
+  margin: 0;
+  /* Darker tinted glass: a launcher must stay legible, and per-layer blur
+     strength can't be raised in Hyprland, so contrast comes from the slab's
+     own backing. Bright edge-lighting (below) keeps it reading as glass. */
+  background: linear-gradient(135deg,
+              rgba(30, 33, 43, 0.62) 0%,
+              rgba(24, 26, 34, 0.55) 50%,
+              rgba(30, 33, 43, 0.60) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 22px;
+  color: #f6f8fc;
+  box-shadow: inset 0 1.5px 1px rgba(255, 255, 255, 0.90),
+              inset 1px 0 2px rgba(255, 255, 255, 0.30),
+              inset -1px 0 2px rgba(255, 255, 255, 0.30),
+              inset 0 -2px 3px rgba(255, 255, 255, 0.38),
+              inset 0 -14px 26px rgba(0, 0, 0, 0.05),
+              0 8px 26px rgba(0, 0, 0, 0.32),
+              0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+#outer-box {
+  padding: 16px;
+}
+
+/* ---------------------------------------------------------------------- *
+ *  Search field — an inner glass pill, concentric with the window.
+ * ---------------------------------------------------------------------- */
+#input {
+  margin: 2px 2px 14px 2px;
+  padding: 11px 16px;
+  background: linear-gradient(180deg,
+              rgba(255, 255, 255, 0.14) 0%,
+              rgba(255, 255, 255, 0.05) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.30);
+  border-radius: 14px;
+  color: #ffffff;
+  caret-color: #8ad8ff;
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.55),
+              inset 0 -1px 2px rgba(0, 0, 0, 0.06);
+}
+
+#input:focus {
+  border: 1px solid rgba(201, 182, 255, 0.55);
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.65),
+              0 0 12px rgba(201, 182, 255, 0.28);
+}
+
+#input image {
+  color: rgba(246, 248, 252, 0.55);
+}
+
+/* ---------------------------------------------------------------------- *
+ *  Results list.
+ * ---------------------------------------------------------------------- */
+#scroll {
+  margin: 0;
+}
+
+/* Scrolling stays enabled (fixed window size) but the scrollbar is hidden
+   so the glass surface looks clean. */
+scrollbar {
+  opacity: 0;
+  -gtk-icon-source: none;
+}
+scrollbar, scrollbar slider {
+  min-width: 0;
+  background: transparent;
+  border: none;
+}
+
+#inner-box {
+  margin: 0;
+}
+
+#entry {
+  margin: 2px 2px;
+  padding: 9px 12px;
+  border-radius: 13px;
+  background: transparent;
+  color: #f6f8fc;
+}
+
+#entry image {
+  margin-right: 12px;
+}
+
+#text {
+  color: #f6f8fc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+/* Selected row — the lone live element wears the lilac glass glow,
+   mirroring the active workspace lozenge in waybar. */
+#entry:selected {
+  background: linear-gradient(135deg,
+              rgba(255, 255, 255, 0.30) 0%,
+              rgba(201, 182, 255, 0.10) 55%,
+              rgba(201, 182, 255, 0.20) 100%);
+  /* inset-only: an outer glow repaints/shimmers as the selection moves
+     through the list while typing — keep the highlight contained. */
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.70),
+              inset 0 -3px 8px rgba(201, 182, 255, 0.22);
+}
+
+#entry:selected #text {
+  color: #ffffff;
+}

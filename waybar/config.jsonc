@@ -9,7 +9,7 @@
   "margin-right": 10,
   "spacing": 6,
 
-  "modules-left": ["hyprland/workspaces", "group/appdrawer"],
+  "modules-left": ["hyprland/workspaces", "group/appdrawer", "group/sysmon"],
   // Right cluster consolidated into one continuous glass capsule.
   "modules-right": ["group/stats"],
 
@@ -27,6 +27,12 @@
   "group/stats": {
     "orientation": "horizontal",
     "modules": ["pulseaudio", "battery", "clock"]
+  },
+
+  // System monitor capsule — CPU · RAM · temp, sits right of the app coin.
+  "group/sysmon": {
+    "orientation": "horizontal",
+    "modules": ["cpu", "memory", "temperature"]
   },
 
   // --- Left: workspace pills (1..10) -------------------------------------
@@ -47,28 +53,28 @@
     "max-length": 40,
     "separate-outputs": true,
     "rewrite": {
-      "": "  Desktop",
-      "zen.*": "  Zen",
-      ".*ghostty.*": "  Ghostty",
-      "kitty": "  Kitty",
-      "[Aa]lacritty": "  Alacritty",
-      "foot": "  Foot",
-      "firefox.*": "  Firefox",
-      "[Cc]hrom(e|ium).*": "  Chrome",
-      "[Bb]rave.*": "  Brave",
-      "[Cc]ode": "  Code",
-      "[Cc]ursor": "  Cursor",
-      "obsidian": "  Obsidian",
-      "[Dd]iscord|vesktop|[Ww]ebCord": "  Discord",
-      "[Ss]potify": "  Spotify",
-      "org.telegram.desktop": "  Telegram",
-      "[Ss]lack": "  Slack",
-      "org.gnome.Nautilus|thunar|nemo|[Dd]olphin": "  Files",
-      "[Ss]team": "  Steam",
-      "mpv|vlc": "  Video",
-      "org.pwmt.zathura|[Ee]vince|okular": "  PDF",
-      "imv|org.gnome.Loupe|feh": "  Image",
-      "pavucontrol": "  Audio"
+      "": "",
+      "zen.*": "",
+      ".*ghostty.*": "",
+      "kitty": "",
+      "[Aa]lacritty": "",
+      "foot": "",
+      "firefox.*": "",
+      "[Cc]hrom(e|ium).*": "",
+      "[Bb]rave.*": "",
+      "[Cc]ode": "",
+      "[Cc]ursor": "",
+      "obsidian": "",
+      "[Dd]iscord|vesktop|[Ww]ebCord": "",
+      "[Ss]potify": "",
+      "org.telegram.desktop": "",
+      "[Ss]lack": "",
+      "org.gnome.Nautilus|thunar|nemo|[Dd]olphin": "",
+      "[Ss]team": "",
+      "mpv|vlc": "",
+      "org.pwmt.zathura|[Ee]vince|okular": "",
+      "imv|org.gnome.Loupe|feh": "",
+      "pavucontrol": ""
     }
   },
 
@@ -125,6 +131,26 @@
     "format-plugged": "  {capacity}%",
     "format-icons": [""],
     "tooltip-format": "{capacity}% — {timeTo}"
+  },
+
+  // --- Left: system monitor (cpu · ram · temp) -------------------------
+  "cpu": {
+    "format": "  {usage}%",
+    "interval": 2,
+    "tooltip": false
+  },
+  "memory": {
+    "format": "  {percentage}%",
+    "interval": 5,
+    "tooltip-format": "RAM: {used:0.1f} / {total:0.1f} GiB"
+  },
+  "temperature": {
+    // Drop in hwmon-path / thermal-zone if auto-detect picks the wrong sensor.
+    "critical-threshold": 80,
+    "format": "  {temperatureC}°",
+    "format-critical": "  {temperatureC}°",
+    "interval": 5,
+    "tooltip-format": "CPU temperature: {temperatureC}°C"
   },
 
   // --- Right: clock (sketchybar "date") --------------------------------

@@ -397,6 +397,8 @@ hl.layer_rule({ name = "waybar-blur", match = { namespace = "waybar" }, blur = t
 
 -- Launchers & notifications
 hl.layer_rule({ name = "launcher", match = { namespace = "launcher" }, blur = true, ignore_alpha = 0.5 })
+-- Wofi (drun) — frosted glass behind the launcher slab, matching waybar.
+hl.layer_rule({ name = "wofi-blur", match = { namespace = "wofi" }, blur = true, xray = false, ignore_alpha = 0.10, no_anim = true })
 hl.layer_rule({ name = "notifications", match = { namespace = "notifications" }, blur = true, ignore_alpha = 0.69 })
 hl.layer_rule({ name = "logout-dialog", match = { namespace = "logout_dialog" }, blur = true })
 

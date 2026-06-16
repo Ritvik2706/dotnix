@@ -15,13 +15,13 @@ hl.config({
 			xray = true,
 			special = false,
 			new_optimizations = true,
-			size = 4, -- light frost
+			size = 4, -- moderate frost: enough to read text over a busy wallpaper
 			passes = 2,
 			brightness = 0.98, -- luminous glass rather than dark
-			vibrancy = 0.1696, -- Apple's vibrancy: colors glow through, not muddy
+			vibrancy = 0.25, -- push color through so the glass refracts rather than smears
 			vibrancy_darkness = 0.0,
-			noise = 0.02, -- fine frosted grain
-			contrast = 1.0,
+			noise = 0.015, -- barely-there grain
+			contrast = 1.12, -- crisper edges = more "lensed glass", less milky haze
 			popups = true,
 			popups_ignorealpha = 0.6,
 			input_methods = true,

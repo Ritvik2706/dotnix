@@ -38,22 +38,33 @@ window#waybar {
  *  shadow so each surface reads as a slab of real glass.
  * ---------------------------------------------------------------------- */
 #workspaces,
-#appdrawer,
+#window,
 #mpris,
+#sysmon,
 #stats {
-  background: linear-gradient(180deg,
-              rgba(255, 255, 255, 0.22) 0%,
-              rgba(255, 255, 255, 0.13) 45%,
-              rgba(255, 255, 255, 0.11) 80%,
-              rgba(255, 255, 255, 0.13) 100%);
+  /* Thin, *clear* glass — far less white fill than a frosted chip so the
+     wallpaper reads straight through it (the "more glass, less blur" ask).
+     A diagonal gradient lets the light catch a corner like a real bead. */
+  background: linear-gradient(135deg,
+              rgba(255, 255, 255, 0.15) 0%,
+              rgba(255, 255, 255, 0.06) 38%,
+              rgba(255, 255, 255, 0.05) 62%,
+              rgba(255, 255, 255, 0.11) 100%);
   /* crisp bright rim defines the glass edge and hides the blur fringe */
-  border: 1px solid rgba(255, 255, 255, 0.38);
-  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  /* near-pill radius reads as a liquid droplet rather than a card */
+  border-radius: 17px;
   color: #f6f8fc;
-  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.65),
-              inset 0 -1px 1px rgba(255, 255, 255, 0.12),
-              inset 0 -8px 14px rgba(0, 0, 0, 0.06),
-              0 1px 3px rgba(0, 0, 0, 0.10);
+  /* Layered edge-lighting fakes refraction: a glossy specular catch up top,
+     a bright rim wrapping every edge (light bending at the bead's lip), a
+     lit underside, then interior depth + an ambient shadow to ground it. */
+  box-shadow: inset 0 1.5px 1px rgba(255, 255, 255, 0.90),
+              inset 1px 0 2px rgba(255, 255, 255, 0.30),
+              inset -1px 0 2px rgba(255, 255, 255, 0.30),
+              inset 0 -2px 3px rgba(255, 255, 255, 0.38),
+              inset 0 -11px 18px rgba(0, 0, 0, 0.05),
+              0 2px 9px rgba(0, 0, 0, 0.18),
+              0 1px 2px rgba(0, 0, 0, 0.12);
   transition: all 240ms ease;
 }
 
@@ -100,13 +111,15 @@ window#waybar {
    (matches the Hyprland window rim). Apple-restrained: color on the
    live element only. */
 #workspaces button.active {
-  background: linear-gradient(180deg,
-              rgba(255, 255, 255, 0.30) 0%,
-              rgba(201, 182, 255, 0.12) 60%,
-              rgba(201, 182, 255, 0.18) 100%);
+  background: linear-gradient(135deg,
+              rgba(255, 255, 255, 0.34) 0%,
+              rgba(201, 182, 255, 0.10) 55%,
+              rgba(201, 182, 255, 0.20) 100%);
   color: #ffffff;
-  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.65),
-              inset 0 -3px 8px rgba(201, 182, 255, 0.22),
+  box-shadow: inset 0 1.5px 1px rgba(255, 255, 255, 0.85),
+              inset 1px 0 2px rgba(255, 255, 255, 0.30),
+              inset -1px 0 2px rgba(255, 255, 255, 0.30),
+              inset 0 -3px 8px rgba(201, 182, 255, 0.24),
               0 1px 4px rgba(0, 0, 0, 0.18),
               0 0 12px rgba(201, 182, 255, 0.30);
 }
@@ -123,12 +136,19 @@ window#waybar {
 /* ---------------------------------------------------------------------- *
  *  Focused app — quiet glass label, no shouty color.
  * ---------------------------------------------------------------------- */
-/* Focused-app pill is the visible face of the drawer (#appdrawer). */
-#window {
+/* The window label is the round app coin and carries the glass itself
+   (inherited above), so it stays a perfect circle regardless of the
+   drawer/tray width. The drawer wrapper is just a transparent container. */
+#appdrawer {
   background: transparent;
   border: none;
   box-shadow: none;
-  padding: 0 16px;
+}
+
+#window {
+  /* slightly less left / more right padding nudges the glyph left to center it */
+  padding: 0 16px 0 12px;
+  font-size: 15px;
   color: #f6f8fc;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
@@ -157,6 +177,33 @@ window#waybar {
 
 #tray > .passive { -gtk-icon-effect: dim; }
 #tray > .needs-attention { -gtk-icon-effect: highlight; }
+
+/* ---------------------------------------------------------------------- *
+ *  System monitor — one continuous capsule (#sysmon) holding cpu · ram ·
+ *  temp, mirroring the right cluster. Children transparent so the glass
+ *  reads as a single unbroken surface.
+ * ---------------------------------------------------------------------- */
+#sysmon {
+  padding: 0;
+}
+
+#sysmon #cpu,
+#sysmon #memory,
+#sysmon #temperature {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 12px;
+  color: #f6f8fc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+  font-family: "icomoon-feather", "SF Pro Display", "SF Pro Text", sans-serif;
+}
+
+/* Runs hot — the lone bit of color, matching battery-critical red. */
+#sysmon #temperature.critical {
+  color: #ff7a8c;
+  text-shadow: 0 0 10px rgba(255, 122, 140, 0.4);
+}
 
 /* ---------------------------------------------------------------------- *
  *  Right cluster — one continuous capsule (#stats) holding three modules
