@@ -1,11 +1,12 @@
 /* ──────────────────────────────────────────────────────────────
    Managed userChrome.css — symlinked from dotfiles.
-   Forces JetBrainsMono Nerd Font on the Zen browser UI itself
-   (tabs, toolbar, URL bar, menus, sidebar). Requires the pref
-   toolkit.legacyUserProfileCustomizations.stylesheets = true (set
-   in user.js).
+   Forces Apple's SF Pro on the Zen browser UI itself (tabs, toolbar,
+   URL bar, menus, sidebar) — matching the waybar LUMEN aesthetic.
+   SF Pro Display for headings/larger UI, SF Pro Text for body sizes.
+   Requires the pref toolkit.legacyUserProfileCustomizations.stylesheets
+   = true (set in user.js).
    ────────────────────────────────────────────────────────────── */
 
 * {
-  font-family: "JetBrainsMono Nerd Font" !important;
+  font-family: "SF Pro Display", "SF Pro Text", "JetBrainsMono Nerd Font" !important;
 }

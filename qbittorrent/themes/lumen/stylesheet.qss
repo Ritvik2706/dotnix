@@ -1,0 +1,315 @@
+/* ── LUMEN · qBittorrent (Qt Style Sheet) ────────────────────────────────
+ * The dusk-glass language from waybar/style.css + gtk-3.0/gtk.css, ported to
+ * Qt. Qt windows are OPAQUE (a theme can't request a translucent surface, so
+ * Hyprland can't frost the wallpaper behind it the way it does for GTK/Waybar)
+ * — so this is the opaque reading: a deep dusk-black base, light building the
+ * form via luminous rims + prism edges (violet left / peach right), and a
+ * dusk-lilac bloom on the active selection. Palette mirrors the bar exactly.
+ *
+ *   text   #f6f8fc        dim #7a809a
+ *   base   #0f1119  pane #14161e  raised #1b1d27
+ *   prism  cool #ab9cff · warm #ffb38c
+ *   accent lilac #c2a8ff · coral #ff9e7a · teal #5fb6cf
+ *   warn   #ffce6e · crit #ff7a8c · ok #76ff58
+ * ──────────────────────────────────────────────────────────────────────── */
+
+QWidget {
+    background-color: #14161e;
+    color: #f6f8fc;
+    selection-background-color: #c2a8ff;
+    selection-color: #1a1622;
+}
+
+QMainWindow,
+QDialog {
+    background-color: #14161e;
+}
+
+QToolTip {
+    background-color: #1a1c26;
+    color: #f6f8fc;
+    border: 1px solid #ab9cff;
+    border-radius: 8px;
+    padding: 5px 8px;
+}
+
+/* ── Menu bar + top toolbar — the luminous glass slab, prism-rimmed ── */
+QMenuBar {
+    background-color: #14161e;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 2px 4px;
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 5px 10px;
+    border-radius: 8px;
+}
+QMenuBar::item:selected {
+    background-color: rgba(194,168,255,0.20);
+    color: #ffffff;
+}
+
+QToolBar {
+    /* specular top-catch + dusk prism wash (violet→peach) over the glass */
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255,255,255,0.05), stop:0.5 rgba(22,24,32,0.0),
+        stop:1 rgba(11,13,20,0.20)), #161820;
+    border: none;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 5px 7px;
+    spacing: 3px;
+}
+QToolBar::separator {
+    background: rgba(255,255,255,0.07);
+    width: 1px;
+    margin: 5px 7px;
+}
+
+/* Rounded controls: NO border stroke — Qt can't anti-alias a stroked
+   border-radius, so a stroke = stair-stepped corners. Soft fills only. */
+QToolButton {
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    padding: 6px 9px;
+    color: #f6f8fc;
+}
+QToolButton:hover { background-color: rgba(255,255,255,0.07); }
+QToolButton:pressed,
+QToolButton:checked { background-color: rgba(194,168,255,0.20); }
+
+/* ── Dropdown / context menus — dark glass with lilac selection ── */
+QMenu {
+    background-color: #16181f;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 12px;
+    padding: 6px;
+}
+QMenu::item {
+    background: transparent;
+    padding: 6px 24px 6px 22px;
+    border-radius: 8px;
+    margin: 1px 2px;
+}
+QMenu::item:selected {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 rgba(194,168,255,0.42), stop:1 rgba(255,158,122,0.26));
+    color: #ffffff;
+}
+QMenu::separator {
+    height: 1px;
+    background: rgba(255,255,255,0.08);
+    margin: 5px 8px;
+}
+QMenu::icon { padding-left: 6px; }
+
+/* ── Buttons ── */
+/* Borderless: a soft top-lit fill reads as a glass pill without the aliased
+   corner a stroke would leave. Hover/press shift the fill, not a border. */
+QPushButton {
+    color: #f6f8fc;
+    border: none;
+    border-radius: 9px;
+    padding: 7px 16px;
+    min-height: 18px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #20222e, stop:1 #181a23);
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #262936, stop:1 #1c1e28);
+}
+QPushButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #17191f, stop:1 #14161c);
+}
+QPushButton:default,
+QPushButton:focus {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(194,168,255,0.30), stop:1 rgba(171,156,255,0.16));
+    color: #ffffff;
+}
+QPushButton:disabled { color: #6b7185; background: #16181f; }
+
+/* ── Text inputs / combos / spin ── */
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background-color: #0f1119;
+    color: #f6f8fc;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 9px;
+    padding: 5px 8px;
+    selection-background-color: #c2a8ff;
+    selection-color: #1a1622;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
+QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border: 1px solid rgba(194,168,255,0.65);
+}
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView {
+    background-color: #16181f;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    selection-background-color: rgba(194,168,255,0.42);
+    selection-color: #ffffff;
+    outline: none;
+    padding: 4px;
+}
+
+/* ── Lists, trees, tables (transfer list, files, peers) ── */
+QTreeView, QTreeWidget, QTableView, QTableWidget, QListView, QListWidget {
+    background-color: #0f1119;
+    alternate-background-color: #13151d;
+    color: #f6f8fc;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    gridline-color: rgba(255,255,255,0.05);
+    outline: none;
+}
+QTreeView::item, QTableView::item, QListView::item {
+    padding: 4px 6px;
+    border-radius: 6px;
+}
+QTreeView::item:hover, QTableView::item:hover, QListView::item:hover {
+    background-color: rgba(255,255,255,0.04);
+}
+QTreeView::item:selected, QTableView::item:selected, QListView::item:selected {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 rgba(194,168,255,0.55), stop:0.6 rgba(194,168,255,0.32),
+        stop:1 rgba(255,158,122,0.30));
+    color: #ffffff;
+}
+QTreeView::branch:selected { background: rgba(194,168,255,0.45); }
+
+QHeaderView::section {
+    background-color: #161820;
+    color: #c8cee0;
+    border: none;
+    border-right: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 6px 8px;
+}
+QHeaderView::section:hover { background-color: #1b1d27; }
+
+/* ── Left category/status sidebar ── */
+QTreeView#filterWidget,
+#filterWidget {
+    background-color: #0e1018;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+}
+
+/* ── Tabs (the bottom info panel: General / Trackers / Peers …) ── */
+QTabWidget::pane {
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    top: -1px;
+}
+QTabBar::tab {
+    background: transparent;
+    color: #9aa0b4;
+    padding: 7px 14px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-right: 2px;
+}
+QTabBar::tab:hover { color: #f6f8fc; }
+QTabBar::tab:selected {
+    color: #f6f8fc;
+    border-bottom: 2px solid #c2a8ff;
+}
+
+/* ── Progress bars — the dusk gradient, charge-green fill ── */
+QProgressBar {
+    background-color: #0f1119;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 7px;
+    text-align: center;
+    color: #f6f8fc;
+    height: 16px;
+}
+QProgressBar::chunk {
+    border-radius: 6px;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #ab9cff, stop:1 #c2a8ff);
+}
+
+/* ── Scrollbars — thin, quiet, bloom on hover ── */
+QScrollBar:vertical {
+    background: transparent; width: 12px; margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background: rgba(255,255,255,0.14);
+    border-radius: 5px; min-height: 28px;
+}
+QScrollBar::handle:vertical:hover { background: rgba(194,168,255,0.55); }
+QScrollBar:horizontal {
+    background: transparent; height: 12px; margin: 2px;
+}
+QScrollBar::handle:horizontal {
+    background: rgba(255,255,255,0.14);
+    border-radius: 5px; min-width: 28px;
+}
+QScrollBar::handle:horizontal:hover { background: rgba(194,168,255,0.55); }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+/* ── Checkboxes / radios ── */
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 16px; height: 16px;
+    border: 1px solid rgba(255,255,255,0.22);
+    background: #0f1119;
+}
+QCheckBox::indicator { border-radius: 5px; }
+QRadioButton::indicator { border-radius: 8px; }
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    background-color: #c2a8ff;
+    border: 1px solid #c2a8ff;
+}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+    border: 1px solid rgba(194,168,255,0.65);
+}
+
+/* ── Sliders (e.g. limits) ── */
+QSlider::groove:horizontal {
+    height: 4px; background: rgba(255,255,255,0.12); border-radius: 2px;
+}
+QSlider::sub-page:horizontal {
+    background: #c2a8ff; border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    background: #f6f8fc; width: 14px; height: 14px;
+    margin: -6px 0; border-radius: 7px;
+}
+
+/* ── Status bar (bottom: DHT / speeds) ── */
+QStatusBar {
+    background-color: #14161e;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    color: #9aa0b4;
+}
+QStatusBar::item { border: none; }
+
+/* ── Group boxes (settings panels) ── */
+QGroupBox {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    margin-top: 10px;
+    padding-top: 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px; padding: 0 6px;
+    color: #c2a8ff;
+}
+
+/* ── Splitter handles ── */
+QSplitter::handle { background: rgba(255,255,255,0.05); }
+QSplitter::handle:hover { background: rgba(194,168,255,0.40); }
+
+/* ── Settings dialog left nav list ── */
+QListWidget::item:selected {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 rgba(194,168,255,0.40), stop:1 rgba(255,158,122,0.22));
+    color: #ffffff;
+}

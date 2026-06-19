@@ -60,7 +60,9 @@ HAVE_PACMAN=0
 command -v pacman &>/dev/null && HAVE_PACMAN=1
 
 # Top-level repo dirs that are NOT ~/.config symlinks.
-EXCLUDE_DIRS=(shell grub_cpy nvim_backup)
+# qbittorrent is special-cased in run_symlinks (only its theme subdir is
+# linked, since ~/.config/qBittorrent holds live runtime state).
+EXCLUDE_DIRS=(shell grub_cpy nvim_backup qbittorrent)
 
 # ──────────────────────────────────────────────────────────────────────────
 # Package sets
@@ -245,6 +247,11 @@ run_symlinks() {
     is_excluded "$name" && continue
     link "$dir" "$CONFIG_DIR/$name" "$name"
   done
+
+  # qBittorrent: link only the custom theme, not the whole (stateful) dir.
+  mkdir -p "$CONFIG_DIR/qBittorrent/themes"
+  link "$DOTFILES_DIR/qbittorrent/themes/lumen" \
+       "$CONFIG_DIR/qBittorrent/themes/lumen" "qBittorrent/themes/lumen"
 
   step "Linking home dotfiles"
   local f base

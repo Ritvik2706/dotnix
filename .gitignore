@@ -106,3 +106,10 @@ copyq/
 
 # Tmux plugins (managed by TPM, installed at runtime)
 tmux/plugins/
+
+# Zen browser — the live profile lives here (~/.config/zen symlinks in).
+# It contains SAVED PASSWORDS (logins.json + key4.db), cookies and history.
+# NEVER commit it. Track ONLY the two managed files.
+zen/*
+!zen/user.js
+!zen/userChrome.css

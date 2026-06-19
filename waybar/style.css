@@ -34,7 +34,25 @@
  *   prism  cool #ab9cff (twilight) · warm #ffb38c (sunset)  (dispersion pair)
  *   accent dusk-lilac #c2a8ff · coral #ff9e7a · cup-teal #5fb6cf (rare pop)
  *   state  warn #ffce6e · crit #ff7a8c · charge #76ff58
- */
+ *
+ * ── MOTION ──────────────────────────────────────────────────────────────
+ *   One coherent feel, extrapolated from where Apple's curves are heading:
+ *   away from snap, toward *fluid* — long, heavily front-loaded decelerations
+ *   that move a lot early then glide to an almost imperceptible stop, the way
+ *   inertia + surface tension settle a drop of liquid. Two curves only:
+ *
+ *     · GLIDE  cubic-bezier(0.32, 0.72, 0, 1)   — all state/hover crossfades.
+ *              Apple's fluid-sheet curve. No overshoot, pure smooth arrival.
+ *     · MORPH  cubic-bezier(0.34, 1.18, 0.36, 1) — the workspace bead↔pill
+ *              shape change. A *gentle* spring: just enough overshoot to read
+ *              as physical, damped so it never visibly bounces or jitters.
+ *
+ *   Durations run long (≈0.4s) on purpose — slow = premium, and since these
+ *   only fire on discrete events (hover, focus change), longer transitions
+ *   cost no idle CPU. The expensive thing — an always-running keyframe — is
+ *   deliberately absent: nothing on this bar repaints when you're not
+ *   touching it. That is the optimisation.
+ * ───────────────────────────────────────────────────────────────────────── */
 
 * {
   border: none;
@@ -96,7 +114,13 @@ window#waybar {
        window, so a large blur slices into a hard dark rectangle at the
        corners. A tight, soft contact shadow stays within bounds. */
     0 2px 5px rgba(0, 0, 0, 0.13);                   /* contact shadow      */
-  transition: all 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* GLIDE — animate ONLY border-color. Waybar is GTK3 → CSS is rasterized by
+     cairo on the CPU with no GPU path, so interpolating the background
+     gradient or the blurred box-shadow every frame can't hold 60fps, let
+     alone 240Hz — it stutters. border-color is a 1px solid redraw: cheap,
+     buttery. The fill + shadow snap to their hover values instantly; the
+     delta is subtle enough that the eye only reads the rim igniting. */
+  transition: border-color 420ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* Bloom on attention — rim ignites, dispersion intensifies, slab lifts. */
@@ -154,8 +178,18 @@ window#waybar {
   margin: 0 1px;
   min-width: 12px;
   box-shadow: none;
-  /* the spring that powers the morph: snappy out, settling in */
-  transition: all 320ms cubic-bezier(0.34, 1.4, 0.4, 1);
+  /* MORPH — driven by min-width ALONE. Animating padding/margin alongside it
+     gave GTK three size sources that relayout on different integer-pixel
+     schedules, so they snapped into place at slightly different moments — the
+     "jumps to final size on the last frame" artifact. One property = one
+     monotonic relayout. And no overshoot: a spring curve (y>1) pushes past the
+     target and settles back, which on GTK3's coarse relayout reads as a pop,
+     not a bounce. GLIDE decel instead — smooth, single-directional growth.
+     Padding/margin are held identical across states (below) so they never
+     move. */
+  transition:
+    min-width 440ms cubic-bezier(0.32, 0.72, 0, 1),
+    color 300ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 #workspaces button:hover {
@@ -188,9 +222,12 @@ window#waybar {
                 rgba(255, 158, 122, 0.16) 100%);
   color: #ffffff;
   font-weight: 600;
-  min-width: 30px;
-  padding: 0 15px;
-  margin: 0 2px;
+  /* Only min-width changes (12→42). Padding/margin stay at the inactive values
+     (0 9 / 0 1) so they don't become extra animating size sources — the width
+     the old padding/margin used to add is folded into this number instead. */
+  min-width: 42px;
+  padding: 0 9px;
+  margin: 0 1px;
   /* Static resting glow (was the breathe keyframe's endpoint). No infinite
      animation, so the pill stops repainting when idle. */
   box-shadow:
@@ -288,7 +325,10 @@ window#waybar {
   /* Feather glyphs; SF Pro takes the numerals. Scoped so it can't collide
      with the Nerd Font app/tray icons. */
   font-family: "icomoon-feather", "SF Pro Display", "SF Pro Text", sans-serif;
-  transition: color 200ms ease, text-shadow 200ms ease;
+  /* GLIDE on the cheap properties (no layout/repaint cost beyond the glyph). */
+  transition:
+    color 280ms cubic-bezier(0.32, 0.72, 0, 1),
+    text-shadow 280ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* ---------------------------------------------------------------------- *

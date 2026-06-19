@@ -47,7 +47,7 @@
   scale = 0
 
   # Maximum number of notification (0 means no limit)
- ~/Pictures/Wallpapers notification_limit = 3
+  notification_limit = 3
 
   ### Progress bar ###
 
@@ -69,7 +69,7 @@
   progress_bar_max_width = 230
 
   # Corner radius for the progress bar. 0 disables rounded corners.
-  progress_bar_corner_radius = 2
+  progress_bar_corner_radius = 4
 
   # Define which corners to round when drawing the progress bar. If progress_bar_corner_radius
   # is set to 0 this option will be ignored.
@@ -106,18 +106,18 @@
   # Padding between text and icon.
   text_icon_padding = 0
 
-  # Defines width in pixels of frame around the notification window.
-  # Set to 0 to disable.
-  frame_width = 4
+  # LUMEN: a single thin luminous rim, not a heavy frame — the form is the
+  # light at the edge, not a painted border.
+  frame_width = 1
 
-  # Defines color of the frame around the notification window.
-  frame_color = "#b4befe"
+  # Luminous white rim ~0.38 alpha (matches waybar's border rgba(255,255,255,0.38)).
+  frame_color = "#ffffff61"
 
   # Size of gap to display between notifications - requires a compositor.
   # If value is greater than 0, separator_height will be ignored and a border
   # of size frame_width will be drawn around each notification instead.
   # Click events on gaps do not currently propagate to applications below.
-  gap_size = 5
+  gap_size = 8
 
   # Define a color for the separator.
   # possible values are:
@@ -144,7 +144,7 @@
 
   ### Text ###
 
-  font = 0xProto Nerd Font 12
+  font = SF Pro Display 11
 
   # The spacing between lines.  If the height is smaller than the
   # font height, it will get raised to the font height.
@@ -271,7 +271,7 @@
   # corners.
   # The radius will be automatically lowered if it exceeds half of the
   # notification height to avoid clipping text and/or icons.
-  corner_radius = 12
+  corner_radius = 18
 
   # Define which corners to round when drawing the window. If the corner radius
   # is set to 0 this option will be ignored.
@@ -337,28 +337,40 @@
   per_monitor_dpi = false
 
 
+# LUMEN palette (matches waybar/style.css):
+#   pane   #181a22 dark glass   text #f6f8fc
+#   prism  cool #ab9cff / warm #ffb38c   accent lilac #c2a8ff / coral #ff9e7a
+#   crit   #ff7a8c   charge #76ff58
+# Alpha hex suffix is the glass translucency — Hyprland blurs the wallpaper
+# behind it (see the dunst layer-blur rule in hypr/lua/rules.lua). The
+# `highlight` gradient is the dusk dispersion swept across the progress bar.
+
 [urgency_low]
   # IMPORTANT: colors have to be defined in quotation marks.
   # Otherwise the "#" and following would be interpreted as a comment.
-  background = "#11111b"
-  foreground = "#b4befe"
+  background = "#181a22bf"
+  foreground = "#f6f8fc"
+  frame_color = "#ffffff52"
+  highlight = "#c2a8ff, #ff9e7a"
   timeout = 3
   # Icon for notifications with low urgency
   # default_icon = state-information
 
 [urgency_normal]
-  background = "#11111b"
-  foreground = "#b4befe"
-  highlight = "#89b4fa"
+  background = "#181a22cc"
+  foreground = "#f6f8fc"
+  frame_color = "#ffffff61"
+  highlight = "#c2a8ff, #ff9e7a"
   timeout = 5
   # override_pause_level = 30
   # Icon for notifications with normal urgency
   # default_icon = state-information
 
 [urgency_critical]
-  background = "#11111b"
-  foreground = "#f38ba8"
-  frame_color = "#f38ba8"
+  background = "#181a22cc"
+  foreground = "#f6f8fc"
+  frame_color = "#ff7a8c"
+  highlight = "#ff7a8c, #ff9e7a"
   timeout = 0
   # override_pause_level = 60
   # Icon for notifications with critical urgency

@@ -18,13 +18,6 @@ hl.window_rule({
 	opacity = "0.99 override 0.99 override",
 })
 
--- Any terminal on workspace 2: fullscreen
-hl.window_rule({
-	name = "ws2-fullscreen",
-	match = { workspace = "2", class = [[^(com\.mitchellh\.ghostty|org\.alacritty|kitty|foot|wezterm)$]] },
-	fullscreen = true,
-})
-
 ----------------------------------------
 -- BLUR & OPACITY
 ----------------------------------------
@@ -33,6 +26,17 @@ hl.window_rule({
 	name = "noblur-empty-popups",
 	match = { class = "^$", title = "^$" },
 	no_blur = true,
+})
+
+-- qBittorrent: LUMEN dusk-glass. Qt windows are opaque, so the theme alone
+-- can't show the wallpaper — Hyprland forces translucency here and the global
+-- xray blur frosts the scene behind the dark glass. Text stays readable
+-- because the drop is gentle. (Theme: qbittorrent/themes/lumen.)
+hl.window_rule({
+	name = "qbittorrent-glass",
+	match = { class = [[^(org\.qbittorrent\.qBittorrent)$]] },
+	opacity = "0.90 override 0.84 override",
+	rounding = 16,
 })
 
 ----------------------------------------
@@ -44,6 +48,21 @@ hl.window_rule({
 	match = { title = "^(Open File|Select a File|Choose wallpaper|Open Folder|Save As|Library|File Upload)(.*)$" },
 	float = true,
 	center = true,
+})
+
+-- File-chooser popups → REAL transparency (not the global xray wallpaper
+-- trick). xray=false makes the blur sample the actual windows behind the
+-- dialog, so you see the apps underneath frosted, not just the wallpaper.
+-- Scoped to the chooser titles so the parent app keeps the global xray look.
+-- Apple-style compact picker: same widescreen shape as the Claude popup
+-- (1400x820 ≈ 1.707) but scaled down to a transient utility size, ~NSOpenPanel.
+hl.window_rule({
+	name = "filechooser-real-blur",
+	match = { title = "^(Open Files?|Save File|Save As|Select a File|Open Folder|File Upload|All Files)(.*)$" },
+	xray = false,
+	float = true,
+	center = true,
+	size = "1024 600",
 })
 
 -- Wallpaper chooser — custom size
@@ -234,13 +253,6 @@ hl.window_rule({
 ----------------------------------------
 -- WORKSPACE-SPECIFIC RULES
 ----------------------------------------
--- Workspace 2: Remove rounding and borders for tiled windows only
-hl.window_rule({
-	name = "ws2-tiled-flat",
-	match = { workspace = "2", float = false },
-	rounding = 0,
-	border_size = 0,
-})
 hl.window_rule({
 	name = "ws2-noanim",
 	match = { workspace = "2" },
@@ -371,8 +383,6 @@ hl.window_rule({
 -- Special scratchpad workspace
 hl.workspace_rule({ workspace = "special:special", gaps_out = 30 })
 
--- Workspace 2: No gaps for tiled windows (terminal workspace)
-hl.workspace_rule({ workspace = "2", gaps_in = 0, gaps_out = 0 })
 
 ----------------------------------------
 -- LAYER RULES
@@ -399,7 +409,7 @@ hl.layer_rule({ name = "waybar-blur", match = { namespace = "waybar" }, blur = t
 hl.layer_rule({ name = "launcher", match = { namespace = "launcher" }, blur = true, ignore_alpha = 0.5 })
 -- Wofi (drun) — frosted glass behind the launcher slab, matching waybar.
 hl.layer_rule({ name = "wofi-blur", match = { namespace = "wofi" }, blur = true, xray = false, ignore_alpha = 0.10, no_anim = true })
-hl.layer_rule({ name = "notifications", match = { namespace = "notifications" }, blur = true, ignore_alpha = 0.69 })
+hl.layer_rule({ name = "notifications", match = { namespace = "notifications" }, blur = true, xray = false, ignore_alpha = 0.69 })
 hl.layer_rule({ name = "logout-dialog", match = { namespace = "logout_dialog" }, blur = true })
 
 -- AGS surfaces
