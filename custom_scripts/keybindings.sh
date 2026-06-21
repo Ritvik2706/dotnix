@@ -65,12 +65,9 @@ keybinds="$(
   ' "$CONFIG_FILE"
 )"
 
-# Small delay is unnecessary with wofi, but harmless
-# sleep 0.2
-
-# Show in Wofi (dmenu mode, case-insensitive, with prompt)
-# If you want to copy the chosen action to clipboard, uncomment the xclip line.
-choice="$(printf "%s\n" "$keybinds" | wofi --dmenu --insensitive --prompt 'Keybinds')"
+# Show in Vicinae (dmenu mode): renders the list from stdin and prints the
+# chosen line to stdout, same contract as the old `wofi --dmenu`.
+choice="$(printf "%s\n" "$keybinds" | vicinae dmenu --placeholder 'Keybinds' --no-section)"
 
 # Optional: copy action (right column) to clipboard
 # action="${choice#*$'\t'}"

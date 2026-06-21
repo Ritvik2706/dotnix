@@ -299,7 +299,9 @@ def main():
             if not lid_is_open() or _paused["on"]:
                 if not blanked:
                     mtx.reset(); dev.fx.advanced.draw(); blanked = True
-                time.sleep(0.5)
+                # Poll often so effects snap back quickly on lid-open/resume;
+                # this only re-reads a tiny /proc file, so CPU cost is trivial.
+                time.sleep(0.1)
                 continue
             blanked = False
             t = time.time() - t0

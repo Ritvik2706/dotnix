@@ -110,10 +110,20 @@ scrollbar, scrollbar slider {
   border-radius: 13px;
   background: transparent;
   color: #f6f8fc;
+  /* Pre-reserve the row height. wofi loads drun icons asynchronously; without
+     a pinned height each row grows the instant its icon streams in, which
+     pushes the list past its row reservation and makes the whole window
+     resize/jitter for several seconds on open and on every keystroke.
+     Locking the row to icon height means nothing grows when images land. */
+  min-height: 34px;
 }
 
 #entry image {
   margin-right: 12px;
+  /* Reserve the icon box up front so the row is full height before its image
+     loads (see #entry note). Matches image_size=34 in config. */
+  min-width: 34px;
+  min-height: 34px;
 }
 
 #text {

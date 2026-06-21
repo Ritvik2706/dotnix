@@ -31,7 +31,7 @@ A collection of my personal configuration files for Linux (Manjaro/Arch) with a 
 - **volumeicon/** - Volume control and audio management
 - **copyq/** - Clipboard manager with advanced features
 - **Kvantum/** - Qt application theming engine
-- **albert/** - Application launcher and productivity tool
+- **vicinae/** - Application launcher (Raycast-like) with the custom "Lumen" theme
 
 ## Installation
 
@@ -112,7 +112,7 @@ automatically next run — no need to edit the script.
 dotfiles_RitvikPC/
 ```
 dotfiles_RitvikPC/
-├── albert/            # Application launcher config
+├── vicinae/           # Application launcher (Lumen theme + settings)
 ├── btop/              # System monitor configuration
 ├── copyq/             # Clipboard manager config
 ├── custom_scripts/    # Personal automation scripts

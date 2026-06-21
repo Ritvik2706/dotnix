@@ -92,7 +92,7 @@ declare -A GROUP_DESC=(
   [theming]="GTK/Qt theming (kvantum, qt5ct, fontconfig)"
   [media]="Media (mpv + streamlink for twitch)"
   [pdf]="PDF viewers (zathura, sioyek)"
-  [launcher]="App launcher (albert)"
+  [launcher]="App launcher (vicinae)"
 )
 declare -A GROUP_PACMAN=(
   [terminals]="kitty ghostty"
@@ -107,7 +107,7 @@ declare -A GROUP_PACMAN=(
 declare -A GROUP_AUR=(
   [desktop]="eww"
   [pdf]="sioyek"
-  [launcher]="albert"
+  [launcher]="vicinae-bin"
 )
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -253,6 +253,13 @@ run_symlinks() {
   link "$DOTFILES_DIR/qbittorrent/themes/lumen" \
        "$CONFIG_DIR/qBittorrent/themes/lumen" "qBittorrent/themes/lumen"
 
+  # Vicinae: settings.json is covered by the ~/.config/vicinae dir symlink above,
+  # but custom themes must live in the (stateful) data dir, so link only the file.
+  local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
+  mkdir -p "$data_dir/vicinae/themes"
+  link "$DOTFILES_DIR/vicinae/themes/lumen.toml" \
+       "$data_dir/vicinae/themes/lumen.toml" "vicinae/themes/lumen.toml"
+
   step "Linking home dotfiles"
   local f base
   # Every dotfile (file or symlink) directly under shell/ — the zsh/ subdir is
@@ -277,6 +284,19 @@ set_login_shell() {
   grep -qx "$zsh_path" /etc/shells 2>/dev/null || echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null
   if chsh -s "$zsh_path"; then ok "login shell set to $zsh_path (re-login to take effect)"
   else warn "chsh failed — set it manually with: chsh -s $zsh_path"; fi
+}
+
+enable_user_services() {
+  command -v systemctl &>/dev/null || return 0
+  # Vicinae runs as a user service (the launcher is a client of a long-lived
+  # server). Enable it so Super+D has something to toggle after login.
+  if systemctl --user list-unit-files vicinae.service &>/dev/null \
+     && systemctl --user cat vicinae.service &>/dev/null; then
+    step "Enabling vicinae user service"
+    systemctl --user enable --now vicinae.service \
+      && ok "vicinae.service enabled" \
+      || warn "could not enable vicinae.service (no user session?)"
+  fi
 }
 
 sync_plugins() {
@@ -305,6 +325,7 @@ fi
 ((SYMLINKS_ONLY)) || run_packages
 run_symlinks
 ((SYMLINKS_ONLY)) || set_login_shell
+((SYMLINKS_ONLY)) || enable_user_services
 ((SYMLINKS_ONLY)) || sync_plugins
 
 # ── Summary ───────────────────────────────────────────────────────────────

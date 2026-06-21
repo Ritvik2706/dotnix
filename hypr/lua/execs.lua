@@ -21,7 +21,6 @@ hl.on("hyprland.start", function()
 
 	-- ===== Desktop UI elements =====
 	hl.exec_cmd("sh -c 'rm -f /tmp/waybar-hidden; waybar'") -- status bar (flag cleared so it starts visible & in sync)
-	hl.exec_cmd("albert") -- launcher
 	hl.exec_cmd("autotiling") -- auto-tiling helper (if installed)
 
 	-- ===== Applications (workspace-pinned via window rules) =====

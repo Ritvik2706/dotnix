@@ -7,7 +7,7 @@ local M = {}
 M.mainMod = "SUPER" -- Main modifier key (physical Windows key on the Razer)
 M.altMod  = "ALT"
 M.term    = "ghostty"
-M.menu    = "wofi --show drun"
+M.menu    = "vicinae toggle" -- launcher (vicinae server runs via systemd --user)
 M.opacity = 1
 
 -- Color palette — Liquid Glass (matches waybar style.css)

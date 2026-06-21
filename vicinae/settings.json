@@ -1,0 +1,55 @@
+// Vicinae configuration — lives in the dotfiles repo, symlinked to
+// ~/.config/vicinae/settings.json by install.sh.
+//
+// This file is merged over the defaults (`vicinae config default` prints them).
+// NOTE: vicinae rewrites this file when you change settings through the GUI,
+// which drops comments/formatting. If that happens, just `git checkout` it or
+// re-apply from here.
+//
+// The "Lumen" theme lives in ./themes/lumen.toml (symlinked into
+// ~/.local/share/vicinae/themes/), and the glass blur behind the window is
+// produced by the Hyprland layer rule for namespace "vicinae".
+{
+  "$schema": "https://vicinae.com/schemas/config.json",
+
+  // Cool twilight glass to match waybar. Both light/dark map to Lumen so the
+  // look is stable regardless of system appearance.
+  "theme": {
+    "dark":  { "name": "lumen", "icon_theme": "auto" },
+    "light": { "name": "lumen", "icon_theme": "auto" }
+  },
+
+  // Inter (bundled) — clean, Apple-adjacent grotesque that suits the aesthetic.
+  "font": {
+    "rendering": "native",
+    "normal": { "family": "auto", "size": 10.5 }
+  },
+
+  "launcher_window": {
+    // < 1 so the Hyprland blur behind the window actually reads as glass.
+    "opacity": 0.92,
+    "blur": { "enabled": true },
+
+    "client_side_decorations": {
+      "enabled": true,
+      "rounding": 16,
+      "border_width": 1,
+      "shadow_size": 16
+    },
+
+    "layer_shell": {
+      "enabled": true,
+      // 'on_demand' rather than the default 'exclusive': the default is known
+      // to break mouse interaction on popups (action panel) under Hyprland.
+      "keyboard_interactivity": "on_demand",
+      "layer": "top"
+    }
+  },
+
+  // Launcher-style behaviour: dismiss when it loses focus, and always reopen
+  // at the root search instead of wherever you last were.
+  "close_on_focus_loss": true,
+  "pop_to_root_on_close": true,
+
+  "favicon_service": "twenty"
+}

@@ -1,0 +1,98 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Lumen — Vicinae theme
+#
+# The launcher counterpart to waybar/style.css. Same vision: Apple's design
+# language extrapolated ~four years out — away from snap, toward *fluid*; cool
+# twilight glass that takes its colour from the dusk light behind it.
+#
+# Palette (shared with waybar):
+#   text   #f6f8fc        muted rgba(246,248,252,0.50)
+#   prism  twilight #ab9cff  ·  sunset #ffb38c        (dispersion pair)
+#   accent dusk-lilac #c2a8ff · coral #ff9e7a · cup-teal #5fb6cf (rare pop)
+#   state  warn #ffce6e · crit #ff7a8c · charge #76ff58
+#
+# Real blur comes from Hyprland's layer rule behind the translucent window
+# (namespace "vicinae" in hypr/lua/rules.lua) — the theme only sets colour.
+# ──────────────────────────────────────────────────────────────────────────
+
+[meta]
+name = "Lumen"
+description = "Liquid-glass dusk — cool twilight base, lilac↔coral dispersion, cup-teal pop. Matches the waybar."
+variant = "dark"
+inherits = "vicinae-dark"
+
+[colors.core]
+accent = "#c2a8ff"              # dusk-lilac — primary highlight
+accent_foreground = "#0b0c12"   # near-black cool, for text on the accent
+background = "#0c0d14"          # cool twilight charcoal
+foreground = "#f6f8fc"          # cool white
+secondary_background = "#13141d"
+border = "#2c2942"              # cool violet hairline
+
+[colors.main_window]
+border = "#34304f"
+footer = { background = "colors.core.secondary_background" }
+
+[colors.settings_window]
+border = "#2c2942"
+
+# Dispersion pair maps across the accent wheel: cool on one side (lilac /
+# twilight / teal), warm on the other (coral / sunset) — the same prism that
+# rakes across the waybar at dusk.
+[colors.accents]
+blue    = "#5fb6cf"   # cup-teal
+green   = "#76ff58"   # charge
+magenta = "#c2a8ff"   # dusk-lilac
+orange  = "#ff9e7a"   # coral / sunset
+red     = "#ff7a8c"   # crit
+yellow  = "#ffce6e"   # warn
+cyan    = "#5fb6cf"   # cup-teal
+purple  = "#ab9cff"   # twilight
+
+[colors.shortcut]
+border = "colors.core.border"
+
+[colors.text]
+default     = "colors.core.foreground"
+muted       = "#9aa0b8"
+danger      = "#ff7a8c"
+success     = "#76ff58"
+placeholder = "#6a7090"
+selection   = { background = "#c2a8ff", foreground = "#0b0c12" }
+
+[colors.text.links]
+default = "#c2a8ff"
+visited = "#ab9cff"
+
+[colors.input]
+border       = "#2c2942"
+border_focus = "#c2a8ff"
+border_error = "#ff7a8c"
+
+[colors.button.primary]
+background = "#171826"
+foreground = "#f6f8fc"
+hover = { background = "#bb171826" }
+focus = { outline = "colors.core.accent" }
+
+[colors.list.item.hover]
+foreground           = "#ffffff"
+secondary_foreground = "#f6f8fc"
+
+[colors.list.item.selection]
+background           = "#1b1c2b"
+foreground           = "#ffffff"
+secondary_background = "#1b1c2b"
+secondary_foreground = "#f6f8fc"
+
+[colors.grid.item]
+background = "#13141d"
+hover     = { outline = "#c2a8ff" }
+selection = { outline = "#c2a8ff" }
+
+[colors.scrollbars]
+background = "#2c2942"
+
+[colors.loading]
+bar     = "#c2a8ff"
+spinner = "#ff9e7a"
