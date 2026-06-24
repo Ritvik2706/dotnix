@@ -24,3 +24,13 @@ hl.config({
 		focus_on_activate = true,
 	},
 })
+
+-- XWayland on a fractional-scaled (1.6x) display: without this, XWayland apps
+-- render at 1x and Hyprland bitmap-upscales them -> blurry. force_zero_scaling
+-- makes them render at native pixels (sharp); toolkit scale is then supplied
+-- per-app via GDK_SCALE/QT_SCALE_FACTOR in env.lua (Steam uses -forcedesktopscaling).
+hl.config({
+	xwayland = {
+		force_zero_scaling = true,
+	},
+})

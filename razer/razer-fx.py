@@ -142,7 +142,7 @@ def make_breath(period=4.0, sat=1.0):
     return layer
 
 
-def make_starlight(rate=9.0, life=2.2, color=None):
+def make_starlight(rate=5.0, life=2.8, color=None):
     """Random keys flash and fade; transparent (alpha 0) elsewhere."""
     born = np.full((6, 16), -1e9)          # birth time per key (resized on first call)
     rgb = np.zeros((6, 16, 3))
@@ -166,7 +166,13 @@ def make_starlight(rate=9.0, life=2.2, color=None):
             else:
                 hue = np.random.random()
                 rgb[r, c] = hsv_to_rgb(np.array(hue), np.array(0.2), np.array(1.0))
-        alpha = np.clip(1.0 - (t - born) / life, 0.0, 1.0)
+        # normalized 0..1 age over the twinkle's lifetime
+        age = np.clip((t - born) / life, 0.0, 1.0)
+        # smooth ease-in then ease-out: a gentle bell instead of an instant
+        # pop. sin(pi*age) rises and falls softly so twinkles breathe rather
+        # than flicker, which reads as far less distracting.
+        alpha = np.sin(np.pi * age) ** 1.5
+        alpha[age >= 1.0] = 0.0
         return rgb * alpha[..., None], alpha
     return layer
 

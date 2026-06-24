@@ -22,3 +22,10 @@ hl.env("WLR_DRM_DEVICES", "/dev/dri/card2:/dev/dri/card1")
 -- fresh profile when its install dir/symlink changes (e.g. an install.sh re-link).
 -- This is what previously fragmented the profile and looked like a settings reset.
 hl.env("MOZ_LEGACY_PROFILES", "1")
+
+-- XWayland HiDPI: paired with misc.lua's xwayland.force_zero_scaling, these tell
+-- GTK/Qt XWayland apps the 1.6x display scale so they render sharp at native px.
+-- (Steam ignores these; it's scaled via -forcedesktopscaling 1.6 in its .desktop.)
+hl.env("GDK_SCALE", "1.6")
+hl.env("QT_SCALE_FACTOR", "1.6")
+hl.env("QT_AUTO_SCREEN_SCALE_FACTOR", "0")

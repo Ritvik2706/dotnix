@@ -27,4 +27,4 @@ hl.animation({ leaf = "windows", enabled = true, speed = 4, bezier = "apple", st
 hl.animation({ leaf = "border", enabled = true, speed = 8, bezier = "apple" })
 hl.animation({ leaf = "fade", enabled = true, speed = 4, bezier = "apple" })
 hl.animation({ leaf = "workspaces", enabled = true, speed = 5, bezier = "apple", style = "slide" })
-hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 4.5, bezier = "apple", style = "slidevert" })
+hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3, bezier = "apple", style = "slidevert" })

@@ -84,7 +84,8 @@ Layer order bottom→top: **aurora** wave (mint green → violet → watermelon 
   - `hold` — transition hardness (toward 0.5 = harder/poppier edges, toward 0 = smoother)
 - `make_reactive(color="44FF00", life=3.0)` — vivid green keypress, 3s fade.
   Default green is `#44FF00` (no blue, so it stays saturated instead of washing white).
-- `make_starlight(rate=9.0, life=2.2)` — dense, lingering twinkles (`:BFEFFF` icy).
+- `make_starlight(rate=5.0, life=2.8)` — sparse twinkles with a soft sine ease-in/out
+  (gentle "breathing" instead of an instant pop), so it reads as calm not distracting (`:BFEFFF` icy).
 - `--fps` default **15** (cost scales with fps; the cost is `draw()` I/O, not the math)
 
 ---

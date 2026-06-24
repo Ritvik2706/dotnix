@@ -315,6 +315,7 @@ hl.window_rule({
 hl.window_rule({
 	name = "claude",
 	match = { class = [[^(chrome-claude\.ai__-Default)$]] },
+	workspace = "special:claude", -- lives on the special ws; shown by toggling it
 	float = true,
 	center = true,
 	size = "1400 820",
