@@ -82,7 +82,6 @@ systemd/
 autostart/
 gtk-*/
 qt5ct/
-Thunar/
 menus/
 mimeapps.list
 user-dirs.dirs

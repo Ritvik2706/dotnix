@@ -260,6 +260,17 @@ run_symlinks() {
   link "$DOTFILES_DIR/vicinae/themes/lumen.toml" \
        "$data_dir/vicinae/themes/lumen.toml" "vicinae/themes/lumen.toml"
 
+  # Thunar look settings (view mode, zoom, hidden files) live in xfconf, which
+  # rewrites its xml atomically — a symlink there would be replaced by a plain
+  # file on the first settings change. Copy the tracked snapshot only if the
+  # live file doesn't exist yet.
+  local xfconf_dir="$CONFIG_DIR/xfce4/xfconf/xfce-perchannel-xml"
+  if [[ ! -e "$xfconf_dir/thunar.xml" ]]; then
+    mkdir -p "$xfconf_dir"
+    cp "$DOTFILES_DIR/Thunar/xfconf/thunar.xml" "$xfconf_dir/thunar.xml" \
+      && RELINKED+=("thunar.xml (xfconf, copied)") || FAILED+=("thunar.xml (xfconf)")
+  fi
+
   step "Linking home dotfiles"
   local f base
   # Every dotfile (file or symlink) directly under shell/ — the zsh/ subdir is

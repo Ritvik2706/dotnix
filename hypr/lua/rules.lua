@@ -8,12 +8,11 @@
 ----------------------------------------
 -- Claude (Chromium PWA) → floating scratchpad on special:claude (see SCRATCHPADS below).
 
--- Ghostty: workspace 2, fullscreen, no blur
+-- Ghostty: workspace 2, no blur
 hl.window_rule({
 	name = "ghostty",
 	match = { class = [[^(com\.mitchellh\.ghostty)$]] },
 	workspace = "2",
-	fullscreen = true,
 	no_blur = true,
 	opacity = "0.99 override 0.99 override",
 })
@@ -58,7 +57,19 @@ hl.window_rule({
 -- (1400x820 ≈ 1.707) but scaled down to a transient utility size, ~NSOpenPanel.
 hl.window_rule({
 	name = "filechooser-real-blur",
-	match = { title = "^(Open Files?|Save File|Save As|Select a File|Open Folder|File Upload|All Files)(.*)$" },
+	match = { title = "^(Open Files?|Save File|Save As|Select a File|Open Folder|File Upload|All Files|Enter name of file to save to|Save Image)(.*)$" },
+	xray = false,
+	float = true,
+	center = true,
+	size = "1024 600",
+})
+
+-- Portal file choosers (Zen/Firefox, Chromium, flatpaks…) go through
+-- xdg-desktop-portal-gtk, so the class catches every picker no matter what
+-- the app titles it. Same real-blur treatment as above.
+hl.window_rule({
+	name = "portal-chooser-real-blur",
+	match = { class = [[^(xdg-desktop-portal-gtk|xdg-desktop-portal-gnome)$]] },
 	xray = false,
 	float = true,
 	center = true,
@@ -394,6 +405,13 @@ hl.layer_rule({ name = "launcher", match = { namespace = "launcher" }, blur = tr
 hl.layer_rule({ name = "vicinae-blur", match = { namespace = "vicinae" }, blur = true, xray = false, ignore_alpha = 0.10, no_anim = true })
 hl.layer_rule({ name = "notifications", match = { namespace = "notifications" }, blur = true, xray = false, ignore_alpha = 0.69 })
 hl.layer_rule({ name = "logout-dialog", match = { namespace = "logout_dialog" }, blur = true })
+
+-- Dunst — pop in/out instantly, no slide/fade from the compositor.
+-- blur + ignore_alpha give the capsules the same frosted-glass pane as the
+-- bar: the compositor frosts what's behind the translucent body, while the
+-- fully-transparent gaps between stacked notifications stay clear.
+hl.layer_rule({ name = "dunst-noanim", match = { namespace = "notifications" }, no_anim = true })
+hl.layer_rule({ name = "dunst-glass", match = { namespace = "notifications" }, blur = true, ignore_alpha = 0.1 })
 
 -- AGS surfaces
 hl.layer_rule({ name = "ags-sideleft", match = { namespace = "sideleft.*" }, animation = "slide left" })

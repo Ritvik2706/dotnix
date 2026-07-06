@@ -31,6 +31,23 @@ hl.bind(
 	{ locked = true }
 )
 
+-- Plain F-keys mirror the Fn-layer media keys (no Fn needed)
+hl.bind(
+	"F3",
+	hl.dsp.exec_cmd(
+		[[wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-high.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]
+	),
+	{ repeating = true, locked = true }
+)
+
+hl.bind(
+	"F2",
+	hl.dsp.exec_cmd(
+		[[wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-medium.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]
+	),
+	{ repeating = true, locked = true }
+)
+
 -- Display brightness (Fn+F7/F8 on Razer Blade) — requires brightnessctl
 -- Install: sudo pacman -S brightnessctl
 -- brightness.sh auto-detects nvidia_wmi_ec_backlight
@@ -41,6 +58,16 @@ hl.bind(
 )
 hl.bind(
 	"XF86MonBrightnessDown",
+	hl.dsp.exec_cmd("~/.config/custom_scripts/brightness.sh down"),
+	{ repeating = true, locked = true }
+)
+hl.bind(
+	"F9",
+	hl.dsp.exec_cmd("~/.config/custom_scripts/brightness.sh up"),
+	{ repeating = true, locked = true }
+)
+hl.bind(
+	"F8",
 	hl.dsp.exec_cmd("~/.config/custom_scripts/brightness.sh down"),
 	{ repeating = true, locked = true }
 )

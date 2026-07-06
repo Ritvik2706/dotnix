@@ -58,3 +58,24 @@ hl.define_submap("proj", function()
 	hl.bind("ESCAPE", hl.dsp.submap("reset"))
 	hl.bind("BACKSPACE", hl.dsp.submap("reset"))
 end)
+
+-- ===== tmux session prefix (Super+A, then a key) =====
+-- Jumps to the terminal workspace and switches the tmux client to a session
+hl.bind(main .. " + A", hl.dsp.submap("tmuxsesh"))
+
+hl.define_submap("tmuxsesh", function()
+	local function jump(key, session)
+		hl.bind(key, function()
+			hl.dispatch(hl.dsp.submap("reset"))
+			hl.dispatch(hl.dsp.focus({ workspace = 2 }))
+			hl.exec_cmd("tmux run-shell 'sesh connect " .. session .. "'")
+		end)
+	end
+
+	jump("D", "dotfiles")
+	jump("P", "~/github/projects")
+	jump("U", "~/github/uni")
+
+	hl.bind("ESCAPE", hl.dsp.submap("reset"))
+	hl.bind("BACKSPACE", hl.dsp.submap("reset"))
+end)

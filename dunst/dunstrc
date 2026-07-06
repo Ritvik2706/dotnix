@@ -29,7 +29,10 @@
 
   # The height of a single notification, excluding the frame.
   # dynamic height from 0 to 300
-  height = (0, 100)
+  # Min height 46 ≥ 2×corner_radius(22): shorter surfaces (the "(N more)"
+  # hidden-count row) can't fit the 22px corners and dunst paints their
+  # background as a square block behind the rounded frame.
+  height = (46, 100)
   # constant height of 300
   # height = 300
   # NOTE: Dunst from version 1.11 and older don't support dynamic height
@@ -98,26 +101,28 @@
   separator_height = 2
 
   # Padding between text and separator.
-  padding = 8
+  padding = 12
 
   # Horizontal padding.
-  horizontal_padding = 10
+  horizontal_padding = 14
 
   # Padding between text and icon.
-  text_icon_padding = 0
+  text_icon_padding = 10
 
   # LUMEN: a single thin luminous rim, not a heavy frame — the form is the
   # light at the edge, not a painted border.
   frame_width = 1
 
-  # Luminous white rim ~0.38 alpha (matches waybar's border rgba(255,255,255,0.38)).
-  frame_color = "#ffffff61"
+  # Faint luminous rim — dunst can't do inset shadows, so the glass reads
+  # from the compositor blur behind the pane; keep the rim whisper-thin
+  # (rgba 0.14, same as the gtk.css `borders`) instead of a bright outline.
+  frame_color = "#ffffff24"
 
   # Size of gap to display between notifications - requires a compositor.
   # If value is greater than 0, separator_height will be ignored and a border
   # of size frame_width will be drawn around each notification instead.
   # Click events on gaps do not currently propagate to applications below.
-  gap_size = 8
+  gap_size = 10
 
   # Define a color for the separator.
   # possible values are:
@@ -222,7 +227,7 @@
   enable_recursive_icon_lookup = true
 
   # Set icon theme (only used for recursive icon lookup)
-  icon_theme = Papirus-Dark
+  icon_theme = Uniformity-Dark
   # You can also set multiple icon themes, with the leftmost one being used first.
   # icon_theme = "Adwaita, breeze"
 
@@ -238,7 +243,7 @@
   max_icon_size = 48
 
   # Paths to default icons (only necessary when not using recursive icon lookup)
-  icon_path = /usr/share/icons/Papirus-Dark/16/actions:/usr/share/icons/Papirus-Dark/16/apps:/usr/share/icons/Papirus-Dark/16/devices:/usr/share/icons/Papirus-Dark/16/mimetypes:/usr/share/icons/Papirus-Dark/16/panel:/usr/share/icons/Papirus-Dark/16/places:/usr/share/icons/Papirus-Dark/16/status
+  icon_path = /home/ritvik/.local/share/icons/Uniformity-Dark/24x24/actions:/home/ritvik/.local/share/icons/Uniformity-Dark/24x24/panel
 
   ### History ###
 
@@ -271,7 +276,12 @@
   # corners.
   # The radius will be automatically lowered if it exceeds half of the
   # notification height to avoid clipping text and/or icons.
-  corner_radius = 18
+  # 22px — Apple scales radius with element size (banner-proportioned, not
+  # the window shell's 16): a small floating capsule gets a fatter radius.
+  # Dunst draws circular arcs, not Apple's continuous-curvature squircle —
+  # that's a cairo limitation shared by waybar/Hyprland, so it stays
+  # consistent across the desktop.
+  corner_radius = 22
 
   # Define which corners to round when drawing the window. If the corner radius
   # is set to 0 this option will be ignored.
@@ -348,18 +358,22 @@
 [urgency_low]
   # IMPORTANT: colors have to be defined in quotation marks.
   # Otherwise the "#" and following would be interpreted as a comment.
-  background = "#181a22bf"
+  # Low sits quietest: the near-clear lumen_pane glass (0.64) and a rim a
+  # step fainter than normal.
+  background = "#161820a3"
   foreground = "#f6f8fc"
-  frame_color = "#ffffff52"
+  frame_color = "#ffffff1f"
   highlight = "#c2a8ff, #ff9e7a"
   timeout = 3
   # Icon for notifications with low urgency
   # default_icon = state-information
 
 [urgency_normal]
-  background = "#181a22cc"
+  # lumen_pane rgba(22,24,32,0.64) — same glass as the waybar capsules and
+  # the gtk.css window pane; the compositor blur supplies the frost.
+  background = "#161820a3"
   foreground = "#f6f8fc"
-  frame_color = "#ffffff61"
+  frame_color = "#ffffff24"
   highlight = "#c2a8ff, #ff9e7a"
   timeout = 5
   # override_pause_level = 30
@@ -367,9 +381,11 @@
   # default_icon = state-information
 
 [urgency_critical]
-  background = "#181a22cc"
+  # Critical steps forward: denser glass (0.85) so it reads urgent even over
+  # busy content, rim ignited crit-coral — color earns its keep.
+  background = "#161820d9"
   foreground = "#f6f8fc"
-  frame_color = "#ff7a8c"
+  frame_color = "#ff7a8cbf"
   highlight = "#ff7a8c, #ff9e7a"
   timeout = 0
   # override_pause_level = 60
