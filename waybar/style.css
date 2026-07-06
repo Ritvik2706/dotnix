@@ -1,4 +1,4 @@
-/* Waybar style — "LUMEN"
+/* Waybar style — "LUMEN" (v2)
  * A speculative read on where Apple's design language lands ~4 years past
  * Liquid Glass. The arc so far: frosted material (Big Sur) → refractive
  * glass (visionOS-era). The endpoint this extrapolates toward:
@@ -9,9 +9,8 @@
  *      DISPERSION: white light splitting cool on one edge, warm on the other,
  *      exactly as it does through real glass. That prism is the signature.
  *
- *   2. ALIVE, NOT PAINTED.  The single accent no longer sits as a static
- *      color. Live state (the focused workspace) emits a slow luminance
- *      BREATH — lit from within rather than filled in.
+ *   2. ALIVE, NOT PAINTED.  The single accent doesn't sit as static color —
+ *      live state (the focused workspace) reads as lit from within.
  *
  *   3. QUIET BY DEFAULT, BLOOM ON ATTENTION.  At rest the chrome nearly
  *      dissolves into the wallpaper. Hover doesn't just brighten — the glass
@@ -24,28 +23,37 @@
  * surfaces (GTK CSS can't blur) — see hypr/lua/rules.lua.
  *
  * ── Tuned to the wallpaper (warm dusk: violet twilight sky, pink→peach
- *    sunset low-right, teal drink-cup pop). The glass now picks up the
- *    LIGHT OF THE SCENE behind it, and does so SPATIALLY: the sun sets on
- *    the right of the image, so the right cluster glows warm peach while the
- *    left workspace rail stays cool violet — dusk raking across the bar. ──
+ *    sunset low-right, teal drink-cup pop). The glass picks up the LIGHT OF
+ *    THE SCENE behind it, and does so SPATIALLY: the sun sets on the right
+ *    of the image, so the right cluster glows warm peach while the left
+ *    workspace rail stays cool violet — dusk raking across the bar.
+ *
+ *    v2 refinements over v1:
+ *      · a whisper of dark under-glass beneath every capsule — the sky here
+ *        is BRIGHT (pink clouds, violet noon of dusk), and pure additive
+ *        glass lost its text against them. The pane now has a smoked back
+ *        surface: legibility without losing the see-through read.
+ *      · deeper text shadows + a firmer contact shadow, grounding the slabs
+ *        against the high-key clouds instead of floating washed-out.
+ *      · the cup-teal accent is actually SPENT now (it was only declared in
+ *        v1): it lights the now-playing title while media is live — the one
+ *        cold pop on the bar, exactly like the cup in the scene.
+ *      · hover bloom pulls slightly harder (brighter rim, lifted specular)
+ *        so attention reads at a glance over the busy sky. ──
  *
  * Palette:
  *   text   #f6f8fc          dim rgba(246,248,252,0.50)
  *   prism  cool #ab9cff (twilight) · warm #ffb38c (sunset)  (dispersion pair)
- *   accent dusk-lilac #c2a8ff · coral #ff9e7a · cup-teal #5fb6cf (rare pop)
+ *   accent dusk-lilac #c2a8ff · coral #ff9e7a · cup-teal #6fd3ec (one pop)
  *   state  warn #ffce6e · crit #ff7a8c · charge #76ff58
  *
  * ── MOTION ──────────────────────────────────────────────────────────────
- *   One coherent feel, extrapolated from where Apple's curves are heading:
- *   away from snap, toward *fluid* — long, heavily front-loaded decelerations
- *   that move a lot early then glide to an almost imperceptible stop, the way
- *   inertia + surface tension settle a drop of liquid. Two curves only:
+ *   One coherent feel: away from snap, toward *fluid* — long, heavily
+ *   front-loaded decelerations that move a lot early then glide to an almost
+ *   imperceptible stop, the way inertia + surface tension settle a drop.
  *
- *     · GLIDE  cubic-bezier(0.32, 0.72, 0, 1)   — all state/hover crossfades.
+ *     · GLIDE  cubic-bezier(0.32, 0.72, 0, 1)  — all state/hover crossfades.
  *              Apple's fluid-sheet curve. No overshoot, pure smooth arrival.
- *     · MORPH  cubic-bezier(0.34, 1.18, 0.36, 1) — the workspace bead↔pill
- *              shape change. A *gentle* spring: just enough overshoot to read
- *              as physical, damped so it never visibly bounces or jitters.
  *
  *   Durations run long (≈0.4s) on purpose — slow = premium, and since these
  *   only fire on discrete events (hover, focus change), longer transitions
@@ -60,7 +68,6 @@
   font-family: "SF Pro Display", "SF Pro Text", "JetBrainsMono Nerd Font", sans-serif;
   font-size: 13.5px;
   font-weight: 500;
-  /* tighter tracking reads more "system UI" at this size */
   min-height: 0;
 }
 
@@ -74,14 +81,15 @@ window#waybar {
  *
  *  Built from light, not fill:
  *    · a radial specular bloom raking in from the top-left (the catch),
- *    · a barely-there diagonal body so the wallpaper reads straight through,
+ *    · ambient dusk pickup — violet bleeding in cool from the left, peach
+ *      warming the right: the scene's light on the pane,
+ *    · a smoked back surface (v2) so type holds against the bright clouds,
  *    · a bright rim that defines the whole edge,
  *    · per-edge dispersion (cool left, warm right) — the prism,
  *    · inset cool/warm glow echoing that split inward,
- *    · layered ambient shadow grounding the slab in space.
+ *    · a tight contact shadow grounding the slab in space.
  * ---------------------------------------------------------------------- */
 #workspaces,
-#window,
 #nowisland,
 #sysmon,
 #stats {
@@ -89,17 +97,19 @@ window#waybar {
     radial-gradient(125% 145% at 16% -25%,
                 rgba(255, 255, 255, 0.24) 0%,
                 rgba(255, 255, 255, 0.00) 44%),
-    /* ambient dusk pickup: twilight violet bleeding in cool from the left,
-       sunset peach warming the right — the scene's light on the glass */
     linear-gradient(110deg,
-                rgba(171, 156, 255, 0.13) 0%,
+                rgba(171, 156, 255, 0.14) 0%,
                 rgba(255, 255, 255, 0.04) 48%,
-                rgba(255, 179, 140, 0.13) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.38);
-  /* the prism: edges aren't white — they're where the light splits, and the
-     split is tuned to the dusk (cool violet / warm peach) */
-  border-left-color: rgba(171, 156, 255, 0.55);
-  border-right-color: rgba(255, 179, 140, 0.50);
+                rgba(255, 179, 140, 0.14) 100%),
+    /* smoked back surface — just enough to seat white text on pink clouds */
+    linear-gradient(180deg,
+                rgba(30, 26, 48, 0.16) 0%,
+                rgba(24, 20, 40, 0.22) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.40);
+  /* the prism: edges aren't white — they're where the light splits, tuned
+     to the dusk (cool violet / warm peach) */
+  border-left-color: rgba(171, 156, 255, 0.58);
+  border-right-color: rgba(255, 179, 140, 0.52);
   /* True stadium — radius far exceeds half-height, so GTK clamps it to a
      perfect semicircular end. The Dynamic-Island silhouette, not a chip. */
   border-radius: 100px;
@@ -107,13 +117,12 @@ window#waybar {
   box-shadow:
     inset 0 1.5px 1.5px rgba(255, 255, 255, 0.95),   /* specular top catch  */
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.10),     /* hairline inner seal */
-    inset 2px 0 9px rgba(171, 156, 255, 0.14),       /* violet dispersion in */
-    inset -2px 0 9px rgba(255, 179, 140, 0.12),      /* peach dispersion in  */
-    inset 0 -10px 20px rgba(0, 0, 0, 0.06),          /* interior depth      */
-    /* Kept small on purpose: GTK clips a widget's drop shadow to the bar
-       window, so a large blur slices into a hard dark rectangle at the
-       corners. A tight, soft contact shadow stays within bounds. */
-    0 2px 5px rgba(0, 0, 0, 0.13);                   /* contact shadow      */
+    inset 2px 0 9px rgba(171, 156, 255, 0.15),       /* violet dispersion in */
+    inset -2px 0 9px rgba(255, 179, 140, 0.13),      /* peach dispersion in  */
+    /* No outer drop shadow: GTK clips it to a rectangular region, which
+       reads as a faint square block behind the capsule corners. Depth comes
+       entirely from the inset lighting instead. */
+    inset 0 -10px 20px rgba(0, 0, 0, 0.07);          /* interior depth      */
   /* GLIDE — animate ONLY border-color. Waybar is GTK3 → CSS is rasterized by
      cairo on the CPU with no GPU path, so interpolating the background
      gradient or the blurred box-shadow every frame can't hold 60fps, let
@@ -125,33 +134,34 @@ window#waybar {
 
 /* Bloom on attention — rim ignites, dispersion intensifies, slab lifts. */
 #workspaces:hover,
-#window:hover,
 #nowisland:hover,
 #sysmon:hover,
 #stats:hover {
   background:
     radial-gradient(125% 145% at 16% -25%,
-                rgba(255, 255, 255, 0.32) 0%,
+                rgba(255, 255, 255, 0.34) 0%,
                 rgba(255, 255, 255, 0.00) 46%),
     linear-gradient(110deg,
-                rgba(171, 156, 255, 0.20) 0%,
-                rgba(255, 255, 255, 0.05) 48%,
-                rgba(255, 179, 140, 0.20) 100%);
-  border-color: rgba(255, 255, 255, 0.52);
-  border-left-color: rgba(171, 156, 255, 0.78);
-  border-right-color: rgba(255, 179, 140, 0.70);
+                rgba(171, 156, 255, 0.22) 0%,
+                rgba(255, 255, 255, 0.06) 48%,
+                rgba(255, 179, 140, 0.22) 100%),
+    linear-gradient(180deg,
+                rgba(30, 26, 48, 0.13) 0%,
+                rgba(24, 20, 40, 0.18) 100%);
+  border-color: rgba(255, 255, 255, 0.58);
+  border-left-color: rgba(186, 172, 255, 0.82);
+  border-right-color: rgba(255, 190, 152, 0.75);
   box-shadow:
     inset 0 1.5px 1.5px rgba(255, 255, 255, 1.00),
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.14),
-    inset 3px 0 12px rgba(171, 156, 255, 0.24),
-    inset -3px 0 12px rgba(255, 179, 140, 0.21),
-    inset 0 -10px 20px rgba(0, 0, 0, 0.06),
-    0 3px 7px rgba(0, 0, 0, 0.16);
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.15),
+    inset 3px 0 12px rgba(171, 156, 255, 0.26),
+    inset -3px 0 12px rgba(255, 179, 140, 0.23),
+    inset 0 -10px 20px rgba(0, 0, 0, 0.07);
 }
 
 /* ---------------------------------------------------------------------- *
  *  WORKSPACES — a segmented light-rail. Inactive = a quiet bead of light;
- *  active = an inner lozenge that breathes.
+ *  active = an inner lozenge lit lilac from within.
  * ---------------------------------------------------------------------- */
 #workspaces {
   padding: 3px;
@@ -161,8 +171,11 @@ window#waybar {
                 rgba(255, 255, 255, 0.22) 0%,
                 rgba(255, 255, 255, 0.00) 44%),
     linear-gradient(120deg,
-                rgba(171, 156, 255, 0.20) 0%,
-                rgba(171, 156, 255, 0.07) 100%);
+                rgba(171, 156, 255, 0.21) 0%,
+                rgba(171, 156, 255, 0.07) 100%),
+    linear-gradient(180deg,
+                rgba(30, 26, 48, 0.16) 0%,
+                rgba(24, 20, 40, 0.22) 100%);
 }
 
 #workspaces button {
@@ -171,8 +184,8 @@ window#waybar {
   border-radius: 100px;           /* stadium, so the active state can stretch */
   color: transparent;             /* hide the number, draw a bead instead */
   background-image: radial-gradient(circle,
-              rgba(246, 248, 252, 0.55) 0,
-              rgba(246, 248, 252, 0.55) 3px,
+              rgba(246, 248, 252, 0.58) 0,
+              rgba(246, 248, 252, 0.58) 3px,
               transparent 3.6px);
   padding: 0 9px;
   margin: 0 1px;
@@ -208,18 +221,18 @@ window#waybar {
 
 /* The live workspace — Dynamic-Island lineage: the focused bead EXPANDS,
    stretching into an elongated glass capsule that surfaces its label, lit
-   lilac from within and breathing on a slow 4.5s cycle. The wider min-width
-   + padding is what the spring above animates, so focus visibly inflates the
-   shape and unfocus lets it collapse back to a dot. */
+   lilac from within. The wider min-width is what the curve above animates,
+   so focus visibly inflates the shape and unfocus lets it collapse back to
+   a dot. */
 #workspaces button.active {
   background:
     radial-gradient(120% 160% at 50% 0%,
-                rgba(255, 255, 255, 0.40) 0%,
+                rgba(255, 255, 255, 0.42) 0%,
                 rgba(194, 168, 255, 0.06) 60%),
     /* the focused pill holds the whole dusk: twilight violet into sunset coral */
     linear-gradient(120deg,
-                rgba(194, 168, 255, 0.22) 0%,
-                rgba(255, 158, 122, 0.16) 100%);
+                rgba(194, 168, 255, 0.26) 0%,
+                rgba(255, 158, 122, 0.18) 100%);
   color: #ffffff;
   font-weight: 600;
   /* Only min-width changes (12→42). Padding/margin stay at the inactive values
@@ -228,13 +241,11 @@ window#waybar {
   min-width: 42px;
   padding: 0 9px;
   margin: 0 1px;
-  /* Static resting glow (was the breathe keyframe's endpoint). No infinite
-     animation, so the pill stops repainting when idle. */
+  /* Static resting glow — no infinite animation, so the pill stops
+     repainting when idle. */
   box-shadow:
-    inset 0 1.5px 1px rgba(255, 255, 255, 0.90),
-    inset 0 -3px 8px rgba(194, 168, 255, 0.24),
-    0 1px 4px rgba(0, 0, 0, 0.18),
-    0 0 10px rgba(194, 168, 255, 0.28);
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.92),
+    inset 0 -3px 8px rgba(194, 168, 255, 0.26);
 }
 
 #workspaces button.urgent {
@@ -243,11 +254,90 @@ window#waybar {
               rgba(255, 122, 140, 0.18) 100%);
   color: #ffffff;
   box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.5),
-              0 0 12px rgba(255, 122, 140, 0.45);
+              inset 0 -3px 8px rgba(255, 122, 140, 0.35);
+}
+
+/* Clickable workspace pills (custom/wsN). The built-in hyprland/workspaces
+   click is unusable under this Hyprland's Lua-only IPC, so the pills are
+   custom modules — these rules mirror the #workspaces button look above:
+   occupied = bead, active = inflated pill, empty = collapsed/hidden. */
+/* NOTE: these deliberately use a single-ID selector (not "#workspaces
+   #custom-wsN") so the .active / .empty rules below — which are only
+   (id + class) specificity — can actually override them. */
+#custom-ws1,
+#custom-ws2,
+#custom-ws3,
+#custom-ws4,
+#custom-ws5,
+#custom-ws6,
+#custom-ws7,
+#custom-ws8,
+#custom-ws9,
+#custom-ws10 {
+  border-radius: 100px;           /* stadium, so the active state can stretch */
+  color: transparent;             /* hide the number, draw a bead instead */
+  background-image: radial-gradient(circle,
+              rgba(246, 248, 252, 0.58) 0,
+              rgba(246, 248, 252, 0.58) 3px,
+              transparent 3.6px);
+  padding: 0 9px;
+  margin: 0 1px;
+  min-width: 12px;
+  transition:
+    min-width 440ms cubic-bezier(0.32, 0.72, 0, 1),
+    color 300ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+#custom-ws1:hover,
+#custom-ws2:hover,
+#custom-ws3:hover,
+#custom-ws4:hover,
+#custom-ws5:hover,
+#custom-ws6:hover,
+#custom-ws7:hover,
+#custom-ws8:hover,
+#custom-ws9:hover,
+#custom-ws10:hover {
+  background-image: radial-gradient(circle,
+              rgba(255, 255, 255, 0.98) 0,
+              rgba(255, 255, 255, 0.98) 3.8px,
+              transparent 4.4px);
+}
+
+/* Empty workspaces collapse away entirely (preserves "only occupied/focused"). */
+#workspaces .empty {
+  background-image: none;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+}
+
+/* The live workspace — the bead inflates into the glass capsule. */
+#workspaces .active {
+  background:
+    radial-gradient(120% 160% at 50% 0%,
+                rgba(255, 255, 255, 0.42) 0%,
+                rgba(194, 168, 255, 0.06) 60%),
+    linear-gradient(120deg,
+                rgba(194, 168, 255, 0.26) 0%,
+                rgba(255, 158, 122, 0.18) 100%);
+  border-radius: 100px;
+  color: #ffffff;
+  font-weight: 600;
+  min-width: 42px;
+  padding: 0 9px;
+  margin: 0 1px;
+  box-shadow:
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.92),
+    inset 0 -3px 8px rgba(194, 168, 255, 0.26);
 }
 
 /* ---------------------------------------------------------------------- *
- *  FOCUSED APP — the round coin carries the glass; the drawer is a shell.
+ *  FOCUSED APP — no glass here. The icon is already a rendered object with
+ *  its own silhouette; wrapping it in a capsule double-framed it. It floats
+ *  bare on the wallpaper, seated by the same scene-violet shadow the rest
+ *  of the bar's type uses, and brightens on hover — the cue that the tray
+ *  drawer is about to slide out from behind it.
  * ---------------------------------------------------------------------- */
 #appdrawer {
   background: transparent;
@@ -256,10 +346,24 @@ window#waybar {
 }
 
 #window {
-  padding: 0 16px 0 12px;
+  background: transparent;
+  border: none;
+  border-radius: 100px;
+  padding: 0 8px;
   font-size: 15px;
   color: #f6f8fc;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  text-shadow: 0 1px 3px rgba(20, 14, 40, 0.40);
+  -gtk-icon-shadow: 0 2px 5px rgba(20, 14, 40, 0.45);
+  box-shadow: none;
+  transition: -gtk-icon-shadow 280ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+#window:hover {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  -gtk-icon-shadow: 0 2px 6px rgba(20, 14, 40, 0.45),
+                    0 0 10px rgba(255, 255, 255, 0.35);
 }
 
 /* ---------------------------------------------------------------------- *
@@ -278,8 +382,8 @@ window#waybar {
 }
 
 #tray menu {
-  background: rgba(24, 26, 34, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(26, 22, 40, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 16px;
 }
 
@@ -306,7 +410,10 @@ window#waybar {
                 rgba(255, 255, 255, 0.00) 44%),
     linear-gradient(120deg,
                 rgba(255, 198, 150, 0.09) 0%,
-                rgba(255, 158, 122, 0.20) 100%);
+                rgba(255, 158, 122, 0.21) 100%),
+    linear-gradient(180deg,
+                rgba(30, 26, 48, 0.16) 0%,
+                rgba(24, 20, 40, 0.22) 100%);
 }
 
 #sysmon #cpu,
@@ -319,9 +426,11 @@ window#waybar {
   background: transparent;
   border: none;
   box-shadow: none;
-  padding: 0 14px;
+  /* 1px top bias: pango centers on SF Pro's metrics box (deep descent, but
+     digits/% have no descenders), so glyphs land visually high — nudge down. */
+  padding: 1px 14px 0;
   color: #f6f8fc;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  text-shadow: 0 1px 3px rgba(20, 14, 40, 0.40);
   /* Feather glyphs; SF Pro takes the numerals. Scoped so it can't collide
      with the Nerd Font app/tray icons. */
   font-family: "icomoon-feather", "SF Pro Display", "SF Pro Text", sans-serif;
@@ -337,14 +446,26 @@ window#waybar {
  *  (9%→10%→100%). Each min-width fits "icon + 100%" / "muted" at this size;
  *  shorter readings center within the reserved slot. Tune ±2px to taste.
  * ---------------------------------------------------------------------- */
-/* Sysmon readings sit close: trim the inter-segment padding and reserve only
-   what a 2-digit reading needs (the rare 100% may nudge a hair). */
+/* Sysmon: glyph carries the load-color ramp (telemetry-as-light — see
+   config.jsonc), the number beside it stays steady text. min-width reserves
+   the widest reading (100%) so the pill never reflows across digit
+   boundaries; shorter readings center in the reserved slot. */
 #sysmon #cpu,
 #sysmon #memory,
-#sysmon #temperature { padding: 0 10px; }
-#sysmon #cpu        { min-width: 36px; }
-#sysmon #memory     { min-width: 36px; }
-#sysmon #temperature{ min-width: 30px; }
+#sysmon #temperature { padding: 1px 10px 0; }
+#sysmon #cpu        { min-width: 46px; }
+/* memory shows "12.3G" — one char wider than the % readings */
+#sysmon #memory     { min-width: 54px; }
+#sysmon #temperature{ min-width: 42px; }
+
+/* Optical centering — a stadium cap curves INTO the segment, so equal
+   padding reads as content crowding the round end. The sides that face a
+   cap get extra room (the divider sides stay tight); each pill's content
+   then sits visually, not just arithmetically, centered. */
+#sysmon #cpu        { padding-left: 15px; }
+#sysmon #temperature{ padding-right: 15px; }
+#stats #pulseaudio  { padding-left: 19px; }
+#stats #battery     { padding-right: 15px; }
 #stats #pulseaudio  { min-width: 50px; }
 #stats #battery     { min-width: 46px; }
 
@@ -352,7 +473,7 @@ window#waybar {
 #sysmon #memory,
 #sysmon #temperature,
 #stats #battery {
-  border-left: 1px solid rgba(0, 0, 0, 0.12);
+  border-left: 1px solid rgba(20, 14, 40, 0.20);
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.10);
 }
 
@@ -360,7 +481,7 @@ window#waybar {
    player is active (mpris hides itself) the line vanishes with it and the
    clock sits alone — the island collapsing, Dynamic-Island style. */
 #nowisland #mpris {
-  border-right: 1px solid rgba(0, 0, 0, 0.12);
+  border-right: 1px solid rgba(20, 14, 40, 0.20);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.10);
 }
 
@@ -374,7 +495,7 @@ window#waybar {
 #nowisland #mpris:hover,
 #nowisland #clock:hover {
   color: #ffffff;
-  text-shadow: 0 0 9px rgba(255, 255, 255, 0.40);
+  text-shadow: 0 0 9px rgba(255, 255, 255, 0.42);
 }
 
 /* Color earns its keep only on real, live state. */
@@ -394,7 +515,7 @@ window#waybar {
   font-weight: 600;
   /* the lead element of the lead island — largest type on the bar */
   font-size: 14.5px;
-  padding: 0 17px;
+  padding: 1px 17px 0;
 }
 
 /* ---------------------------------------------------------------------- *
@@ -403,19 +524,26 @@ window#waybar {
 /* The center island leads: a touch brighter rim + crisper specular than the
    recessive flanks, so the eye lands here first. Size hierarchy, not color. */
 #nowisland {
-  border-color: rgba(255, 255, 255, 0.50);
+  border-color: rgba(255, 255, 255, 0.52);
 }
 
+/* The cup-teal pop — spent exactly here: live media glows the cold accent
+   of the drink cup in the scene. Pausing drains it back to dim glass, so
+   color always means "something is actually happening". */
 #mpris {
-  color: #f6f8fc;
+  color: #6fd3ec;
   font-weight: 500;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  text-shadow: 0 1px 3px rgba(20, 14, 40, 0.40),
+               0 0 10px rgba(111, 211, 236, 0.30);
 }
-#mpris.paused { color: rgba(246, 248, 252, 0.52); }
+#mpris.paused {
+  color: rgba(246, 248, 252, 0.52);
+  text-shadow: 0 1px 3px rgba(20, 14, 40, 0.40);
+}
 
 tooltip {
-  background: rgba(24, 26, 34, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(26, 22, 40, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 16px;
 }
 tooltip label { color: #f6f8fc; }

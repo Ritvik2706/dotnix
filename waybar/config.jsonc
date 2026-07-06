@@ -9,7 +9,7 @@
   "margin-right": 10,
   "spacing": 6,
 
-  "modules-left": ["hyprland/workspaces", "group/appdrawer"],
+  "modules-left": ["group/workspaces", "group/appdrawer"],
   // Center of gravity: a Dynamic-Island-style capsule that holds the clock
   // and expands to show now-playing when a player is active (mpris hides
   // itself when idle, so the island collapses back to just the time).
@@ -45,46 +45,50 @@
   },
 
   // --- Left: workspace pills (1..10) -------------------------------------
-  "hyprland/workspaces": {
-    "format": "{name}",
-    "on-click": "activate",
-    "on-scroll-up": "hyprctl dispatch workspace e+1",
-    "on-scroll-down": "hyprctl dispatch workspace e-1",
-    "sort-by-number": true,
-    // Only show workspaces that are occupied (or currently focused) —
-    // no persistent/empty placeholders.
-    "show-special": false
+  // NOTE: hyprland/workspaces' built-in click sends the legacy
+  // `dispatch workspace N` over IPC, which this Hyprland build Lua-evaluates
+  // and rejects — so clicking did nothing. Instead each workspace is a custom
+  // module whose on-click uses the working `hl.dsp.focus(...)` Lua form.
+  // waybar-ws.sh draws occupied/active pills (empty ones collapse, preserving
+  // the old "only occupied/focused" look); waybar-ws-watch.sh refreshes them
+  // instantly via SIGRTMIN+1 on Hyprland events.
+  "group/workspaces": {
+    "orientation": "horizontal",
+    "on-scroll-up": "hyprctl dispatch 'hl.dsp.focus({workspace=\"e+1\"})'",
+    "on-scroll-down": "hyprctl dispatch 'hl.dsp.focus({workspace=\"e-1\"})'",
+    "modules": [
+      "custom/ws-watch",
+      "custom/ws1", "custom/ws2", "custom/ws3", "custom/ws4", "custom/ws5",
+      "custom/ws6", "custom/ws7", "custom/ws8", "custom/ws9", "custom/ws10"
+    ]
   },
+
+  // Hidden listener: pokes waybar (SIGRTMIN+1) on Hyprland workspace events.
+  "custom/ws-watch": {
+    "exec": "~/.config/custom_scripts/waybar-ws-watch.sh",
+    "format": ""
+  },
+
+  "custom/ws1":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 1",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=1})'" },
+  "custom/ws2":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 2",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=2})'" },
+  "custom/ws3":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 3",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=3})'" },
+  "custom/ws4":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 4",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=4})'" },
+  "custom/ws5":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 5",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=5})'" },
+  "custom/ws6":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 6",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=6})'" },
+  "custom/ws7":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 7",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=7})'" },
+  "custom/ws8":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 8",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=8})'" },
+  "custom/ws9":  { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 9",  "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=9})'" },
+  "custom/ws10": { "format": "{}", "return-type": "json", "interval": 5, "signal": 1, "exec": "~/.config/custom_scripts/waybar-ws.sh 10", "on-click": "hyprctl dispatch 'hl.dsp.focus({workspace=10})'" },
 
   // --- Left: focused app (sketchybar "front_app") ------------------------
   "hyprland/window": {
-    "format": "{class}",
+    // Real app icon (from the icon theme → WhiteSur-dark) instead of a Nerd
+    // Font glyph. Resolved from the window class via its .desktop entry.
+    "format": "",
+    "icon": true,
+    "icon-size": 18,
     "max-length": 40,
-    "separate-outputs": true,
-    "rewrite": {
-      "": "",
-      "zen.*": "",
-      ".*ghostty.*": "",
-      "kitty": "",
-      "[Aa]lacritty": "",
-      "foot": "",
-      "firefox.*": "",
-      "[Cc]hrom(e|ium).*": "",
-      "[Bb]rave.*": "",
-      "[Cc]ode": "",
-      "[Cc]ursor": "",
-      "obsidian": "",
-      "[Dd]iscord|vesktop|[Ww]ebCord": "",
-      "[Ss]potify": "",
-      "org.telegram.desktop": "",
-      "[Ss]lack": "",
-      "org.gnome.Nautilus|thunar|nemo|[Dd]olphin": "",
-      "[Ss]team": "",
-      "mpv|vlc": "",
-      "org.pwmt.zathura|[Ee]vince|okular": "",
-      "imv|org.gnome.Loupe|feh": "",
-      "pavucontrol": ""
-    }
+    "separate-outputs": true
   },
 
   // --- Left: tray apps (Discord, etc.) ---------------------------------
@@ -96,8 +100,8 @@
 
   // --- Center: now playing (sketchybar "media") -------------------------
   "mpris": {
-    "format": "{player_icon}  {title}",
-    "format-paused": "{status_icon}  {title}",
+    "format": "{player_icon}   {title}",
+    "format-paused": "{status_icon}   {title}",
     "max-length": 28,
     "ellipsis": "…",
     "tooltip-format": "{title}\n{artist} — {album}",
@@ -117,8 +121,8 @@
 
   // --- Right: volume (sketchybar "volume") -----------------------------
   "pulseaudio": {
-    "format": "  {volume}%",
-    "format-muted": "  muted",
+    "format": " {volume}%",
+    "format-muted": " muted",
     "format-icons": {
       "headphone": "",
       "headset": "",
@@ -135,31 +139,57 @@
       "warning": 30,
       "critical": 15
     },
-    "format": "{icon}  {capacity}%",
-    "format-charging": "  {capacity}%",
-    "format-plugged": "  {capacity}%",
+    "format": "{icon} {capacity}%",
+    "format-charging": " {capacity}%",
+    "format-plugged": " {capacity}%",
     "format-icons": [""],
     "tooltip-format": "{capacity}% — {timeTo}"
   },
 
   // --- Left: system monitor (cpu · ram · temp) -------------------------
+  // Telemetry as LIGHT, not number (see style.css "LUMEN"): each metric is
+  // one glyph whose inner luminance ramps with load — near-dark at idle so
+  // the pill dissolves, igniting to full white as it works, then amber, then
+  // coral only when something actually deserves attention. The ramp is done
+  // with pango spans in format-icons (waybar swaps the icon by value range),
+  // since GTK CSS can't select on load. Exact numbers live in the tooltips.
   "cpu": {
-    "format": "  {usage}%",
+    "format": "{icon} {usage}%",
+    "format-icons": [
+      "<span foreground='#767d96'></span>",
+      "<span foreground='#aeb5ca'></span>",
+      "<span foreground='#f6f8fc'></span>",
+      "<span foreground='#ffce6e'></span>",
+      "<span foreground='#ff7a8c'></span>"
+    ],
     // Matched to memory/temperature so the sysmon modules tick together —
     // fewer staggered repaints means fewer Hyprland blur recomputes when idle.
     "interval": 5,
-    "tooltip": false
+    "tooltip": true
   },
   "memory": {
-    "format": "  {percentage}%",
+    "format": "{icon} {used:0.1f}G",
+    "format-icons": [
+      "<span foreground='#767d96'></span>",
+      "<span foreground='#aeb5ca'></span>",
+      "<span foreground='#f6f8fc'></span>",
+      "<span foreground='#ffce6e'></span>",
+      "<span foreground='#ff7a8c'></span>"
+    ],
     "interval": 5,
-    "tooltip-format": "RAM: {used:0.1f} / {total:0.1f} GiB"
+    "tooltip-format": "RAM: {used:0.1f} / {total:0.1f} GiB ({percentage}%)"
   },
   "temperature": {
     // Drop in hwmon-path / thermal-zone if auto-detect picks the wrong sensor.
     "critical-threshold": 80,
-    "format": "  {temperatureC}°",
-    "format-critical": "  {temperatureC}°",
+    "format": "{icon} {temperatureC}°",
+    "format-icons": [
+      "<span foreground='#767d96'></span>",
+      "<span foreground='#aeb5ca'></span>",
+      "<span foreground='#f6f8fc'></span>",
+      "<span foreground='#ffce6e'></span>"
+    ],
+    "format-critical": " {temperatureC}°",
     "interval": 5,
     "tooltip-format": "CPU temperature: {temperatureC}°C"
   },
@@ -173,7 +203,7 @@
       "mode-mon-col": 3,
       "on-scroll": 1,
       "format": {
-        "today": "<span color='#44d62c'><b>{}</b></span>"
+        "today": "<span color='#c2a8ff'><b>{}</b></span>"
       }
     },
     "actions": {
