@@ -23,9 +23,16 @@ hl.env("WLR_DRM_DEVICES", "/dev/dri/card2:/dev/dri/card1")
 -- This is what previously fragmented the profile and looked like a settings reset.
 hl.env("MOZ_LEGACY_PROFILES", "1")
 
--- XWayland HiDPI: paired with misc.lua's xwayland.force_zero_scaling, these tell
--- GTK/Qt XWayland apps the 1.6x display scale so they render sharp at native px.
+-- HiDPI scaling.
+-- Qt: prefer native Wayland so the compositor applies the monitor scale (~1.6x)
+-- exactly once. The old QT_SCALE_FACTOR=1.6 was a blunt multiplier applied ON TOP
+-- of the compositor scale for native-Wayland Qt apps (qbittorrent etc.), blowing
+-- them up to ~2.5x. Fall back to xcb (Xwayland) for Qt apps without Wayland support;
+-- force a single app back with `QT_QPA_PLATFORM=xcb <app>` if it misbehaves.
+hl.env("QT_QPA_PLATFORM", "wayland;xcb")
+hl.env("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+
+-- GTK XWayland apps: paired with misc.lua's xwayland.force_zero_scaling, this hints
+-- the 1.6x display scale so they render sharp at native px.
 -- (Steam ignores these; it's scaled via -forcedesktopscaling 1.6 in its .desktop.)
 hl.env("GDK_SCALE", "1.6")
-hl.env("QT_SCALE_FACTOR", "1.6")
-hl.env("QT_AUTO_SCREEN_SCALE_FACTOR", "0")

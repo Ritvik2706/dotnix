@@ -5,11 +5,11 @@
 
 // Point every generic family at JetBrainsMono Nerd Font, for both the
 // Western and the catch-all Unicode language groups (covers most pages).
-user_pref("font.name.serif.x-western",      "JetBrainsMono Nerd Font");
-user_pref("font.name.sans-serif.x-western", "JetBrainsMono Nerd Font");
+user_pref("font.name.serif.x-western",      "SF Pro Text");
+user_pref("font.name.sans-serif.x-western", "SF Pro Text");
 user_pref("font.name.monospace.x-western",  "JetBrainsMono Nerd Font");
-user_pref("font.name.serif.x-unicode",      "JetBrainsMono Nerd Font");
-user_pref("font.name.sans-serif.x-unicode", "JetBrainsMono Nerd Font");
+user_pref("font.name.serif.x-unicode",      "SF Pro Text");
+user_pref("font.name.sans-serif.x-unicode", "SF Pro Text");
 user_pref("font.name.monospace.x-unicode",  "JetBrainsMono Nerd Font");
 
 // Make sans-serif the "default" generic so unstyled text uses it too.

@@ -93,7 +93,7 @@ AURORA_PALETTE = np.array([
 ], dtype=float)
 
 
-def make_aurora(speed=0.24, spread=0.05, val=1.0, hold=0.25, palette=AURORA_PALETTE):
+def make_aurora(speed=0.16, spread=0.05, val=0.65, hold=0.25, palette=AURORA_PALETTE):
     """Slow wave through an aurora palette (mint green -> purple -> pink),
     looping. `hold` (0..0.5) keeps each color solid for longer and squeezes
     the blend into a shorter, harder transition band."""
