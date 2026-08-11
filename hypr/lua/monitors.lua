@@ -15,3 +15,14 @@ hl.monitor({
 
 -- Pin the panel if needed (QHD@240 confirmed working via auto):
 -- hl.monitor({ output = "eDP-2", mode = "2560x1440@240", position = "0x0", scale = 1 })
+
+-- Hisense 4K TV over HDMI. The current cable can't sustain 4K — 4K@30 shows
+-- "no signal" (tested 2026-07-16), and no 4K@60 mode is even advertised
+-- (HDMI 1.4 bandwidth). 1080p@60 is confirmed working. With an HDMI 2.0+
+-- cable, switch to: mode = "3840x2160@60", scale = 2
+hl.monitor({
+	output = "HDMI-A-1",
+	mode = "1920x1080@60",
+	position = "auto-right",
+	scale = 1,
+})

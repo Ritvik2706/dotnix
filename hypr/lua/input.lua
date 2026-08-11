@@ -9,8 +9,10 @@ hl.config({
 		-- altwin:swap_alt_win swap is gone. Caps↔Escape stays.
 		kb_options = "caps:swapescape",
 
-		sensitivity = 0, -- mouse sensitivity
-		-- accel_profile = "", -- flat or adaptive; empty means libinput default
+		-- Global default stays adaptive so the trackpad keeps its acceleration
+		-- curve; flat/no-accel is scoped to the real mice in the device blocks
+		-- at the bottom of this file.
+		sensitivity = 0,
 		left_handed = false,
 		follow_mouse = 1,
 		float_switch_override_focus = 0,
@@ -23,9 +25,37 @@ hl.config({
 			clickfinger_behavior = true, -- 2-finger click = right click (no click zones)
 			disable_while_typing = true, -- palm/typing rejection
 			scroll_factor = 0.45, -- slightly smoother/heavier glide
+			middle_button_emulation = false, -- L+R chord stays two real clicks
 		},
 	},
 })
+
+--------------------------------------------------------------------------------
+-- Per-device: raw 1:1 pointing for real mice only
+--------------------------------------------------------------------------------
+-- Windows' default pointer speed (6/11 slider) is raw counts→pixels with
+-- "Enhance pointer precision" off: sensitivity 0 + accel_profile flat.
+-- Scoped per-device so the trackpad above keeps libinput's adaptive curve —
+-- a trackpad without accel can't flick across a 2560px screen in one swipe.
+-- scroll_method is an input-level (not input:touchpad) option, so pin it on the
+-- touchpad device itself: two-finger scroll only, never the legacy edge strip.
+hl.device({
+	name = "1a58201b:00-06cb:cd73-touchpad",
+	scroll_method = "2fg",
+})
+
+for _, mouse in ipairs({
+	"cestus-310-opticalmouse", -- wired Cestus 310
+	"x66-2.4g-1", -- X66 wireless dongle's pointer endpoint
+	"razer-razer-blade-2", -- Blade's own HID pointer endpoints
+	"razer-razer-blade-4",
+}) do
+	hl.device({
+		name = mouse,
+		sensitivity = 0,
+		accel_profile = "flat",
+	})
+end
 
 --------------------------------------------------------------------------------
 -- Trackpad gestures — tuned for a macOS-like, momentum-y feel

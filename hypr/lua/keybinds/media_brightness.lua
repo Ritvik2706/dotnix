@@ -33,6 +33,14 @@ hl.bind(
 
 -- Plain F-keys mirror the Fn-layer media keys (no Fn needed)
 hl.bind(
+	"F1",
+	hl.dsp.exec_cmd(
+		[[wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-muted-symbolic.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | grep -q MUTED && echo 'Muted' || echo 'Unmuted')"]]
+	),
+	{ locked = true }
+)
+
+hl.bind(
 	"F3",
 	hl.dsp.exec_cmd(
 		[[wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-high.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]

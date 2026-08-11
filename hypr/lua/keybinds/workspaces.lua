@@ -17,6 +17,12 @@ for i = 1, 10 do
 	hl.bind(main .. " + CTRL + SHIFT + " .. key, hl.dsp.window.move({ workspace = i + 10 }))
 end
 
+-- ===== TV workspaces (Hisense over HDMI-A-1) =====
+for i = 1, 3 do
+	hl.bind("ALT + F" .. i, hl.dsp.focus({ workspace = 20 + i }))
+	hl.bind("ALT + SHIFT + F" .. i, hl.dsp.window.move({ workspace = 20 + i }))
+end
+
 hl.bind(main .. " + TAB", hl.dsp.focus({ workspace = "previous" }))
 
 -- Quick next/prev workspace

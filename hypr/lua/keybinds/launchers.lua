@@ -31,34 +31,6 @@ hl.bind(
 -- ===== App launcher (wofi) =====
 hl.bind(main .. " + D", hl.dsp.exec_cmd(vars.menu))
 
--- ===== sesh / project picker submap =====
-hl.bind(main .. " + TAB", hl.dsp.submap("proj"))
-
-hl.define_submap("proj", function()
-	local function pick(key, cmd)
-		hl.bind(key, function()
-			hl.dispatch(hl.dsp.submap("reset"))
-			hl.exec_cmd(cmd)
-		end)
-	end
-
-	-- Smart picker - tmux popup if client exists, otherwise new terminal
-	pick("N", "~/.config/custom_scripts/sesh-picker.sh")
-
-	-- Direct jumps - uses tmux run-shell to switch sessions directly
-	pick("D", "tmux run-shell 'sesh connect dotfiles'")
-	pick("W", "tmux run-shell 'sesh connect web'")
-	pick("S", "tmux run-shell 'sesh connect systeme'")
-	pick("O", "tmux run-shell 'sesh connect objet'")
-
-	-- Switch to last sesh workspace
-	pick("L", "tmux run-shell 'sesh last'")
-
-	-- Cancel keys (leave submap with no action)
-	hl.bind("ESCAPE", hl.dsp.submap("reset"))
-	hl.bind("BACKSPACE", hl.dsp.submap("reset"))
-end)
-
 -- ===== tmux session prefix (Super+A, then a key) =====
 -- Jumps to the terminal workspace and switches the tmux client to a session
 hl.bind(main .. " + A", hl.dsp.submap("tmuxsesh"))
@@ -75,6 +47,7 @@ hl.define_submap("tmuxsesh", function()
 	jump("D", "dotfiles")
 	jump("P", "~/github/projects")
 	jump("U", "~/github/uni")
+	jump("V", "~/github/vault")
 
 	hl.bind("ESCAPE", hl.dsp.submap("reset"))
 	hl.bind("BACKSPACE", hl.dsp.submap("reset"))

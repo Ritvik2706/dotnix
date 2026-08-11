@@ -38,10 +38,10 @@
     "modules": ["pulseaudio", "battery"]
   },
 
-  // System monitor capsule — CPU · RAM · temp, sits right of the app coin.
+  // System monitor capsule — CPU · RAM · network, sits right of the app coin.
   "group/sysmon": {
     "orientation": "horizontal",
-    "modules": ["cpu", "memory", "temperature"]
+    "modules": ["cpu", "memory", "network"]
   },
 
   // --- Left: workspace pills (1..10) -------------------------------------
@@ -179,19 +179,29 @@
     "interval": 5,
     "tooltip-format": "RAM: {used:0.1f} / {total:0.1f} GiB ({percentage}%)"
   },
-  "temperature": {
-    // Drop in hwmon-path / thermal-zone if auto-detect picks the wrong sensor.
-    "critical-threshold": 80,
-    "format": "{icon} {temperatureC}°",
-    "format-icons": [
-      "<span foreground='#767d96'></span>",
-      "<span foreground='#aeb5ca'></span>",
-      "<span foreground='#f6f8fc'></span>",
-      "<span foreground='#ffce6e'></span>"
-    ],
-    "format-critical": " {temperatureC}°",
+  // --- Right: network (wifi strength / wired) -------------------------
+  // Windows-taskbar reading: the glyph IS the value — arc bars fill with
+  // signal, a LAN plug replaces them on ethernet, a struck-through arc means
+  // no link. Colour stays neutral until the link is actually poor (amber) or
+  // gone (coral), matching the sysmon "light, not number" rule. Numbers
+  // (SSID, %, IP, throughput) live in the tooltip.
+  "network": {
     "interval": 5,
-    "tooltip-format": "CPU temperature: {temperatureC}°C"
+    "format-wifi": "{icon}",
+    "format-ethernet": "󰌘",
+    "format-linked": "<span foreground='#ffce6e'>󰌘</span>",
+    "format-disconnected": "<span foreground='#ff7a8c'>󰤮</span>",
+    "format-icons": [
+      "<span foreground='#ff7a8c'>󰤟</span>",
+      "<span foreground='#ffce6e'>󰤢</span>",
+      "<span foreground='#f6f8fc'>󰤥</span>",
+      "<span foreground='#f6f8fc'>󰤨</span>"
+    ],
+    "tooltip-format-wifi": "{essid}  ({signalStrength}%)\n{ifname} — {ipaddr}\n{frequency} GHz · ↓{bandwidthDownBits} ↑{bandwidthUpBits}",
+    "tooltip-format-ethernet": "Wired — {ifname}\n{ipaddr}\n↓{bandwidthDownBits} ↑{bandwidthUpBits}",
+    // No click action: this box runs iwd (no NetworkManager), and neither
+    // iwgtk nor impala is installed — wire one up here if that changes.
+    "tooltip-format-disconnected": "No network"
   },
 
   // --- Right: clock (sketchybar "date") --------------------------------

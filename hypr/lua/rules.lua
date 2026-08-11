@@ -76,6 +76,21 @@ hl.window_rule({
 	size = "1024 600",
 })
 
+-- Catch-all for file dialogs the explicit title lists above miss (apps title
+-- these all sorts of ways: "Save Page As…", "Export Image", "Select Folder",
+-- "Choose a file to upload"). Anchored to a leading verb + a file-ish noun so
+-- ordinary app windows can't match. (?i) = case-insensitive, RE2.
+hl.window_rule({
+	name = "filedialog-catchall",
+	match = {
+		title = [[(?i)^(save|open|export|import|select|choose|attach|upload)\b.*\b(as|file|files|folder|folders|directory|image|document|location|picture|video|to upload|wallpaper)\b.*$]],
+	},
+	xray = false,
+	float = true,
+	center = true,
+	size = "1024 600",
+})
+
 -- Wallpaper chooser — custom size
 hl.window_rule({
 	name = "wallpaper-chooser-size",

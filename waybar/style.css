@@ -391,7 +391,7 @@ window#waybar {
 #tray > .needs-attention { -gtk-icon-effect: highlight; }
 
 /* ---------------------------------------------------------------------- *
- *  CAPSULE INTERIORS — sysmon (cpu·ram·temp) and stats (vol·batt·clock)
+ *  CAPSULE INTERIORS — sysmon (cpu·ram·net) and stats (vol·batt·clock)
  *  read as single unbroken slabs; children are transparent and parted by
  *  an etched hairline (a dark groove with a light catch on its near side).
  * ---------------------------------------------------------------------- */
@@ -418,7 +418,7 @@ window#waybar {
 
 #sysmon #cpu,
 #sysmon #memory,
-#sysmon #temperature,
+#sysmon #network,
 #stats #pulseaudio,
 #stats #battery,
 #nowisland #mpris,
@@ -452,18 +452,25 @@ window#waybar {
    boundaries; shorter readings center in the reserved slot. */
 #sysmon #cpu,
 #sysmon #memory,
-#sysmon #temperature { padding: 1px 10px 0; }
+#sysmon #network { padding: 1px 10px 0; }
 #sysmon #cpu        { min-width: 46px; }
 /* memory shows "12.3G" — one char wider than the % readings */
 #sysmon #memory     { min-width: 54px; }
-#sysmon #temperature{ min-width: 42px; }
+/* icon-only (no number beside it) — narrower slot than cpu/ram */
+#sysmon #network    { min-width: 34px; }
+/* wifi-strength arcs / LAN plug come from the Nerd Font (MDI range) — feather
+   has no partial-bar wifi set — so this one segment overrides the stack. */
+#sysmon #network {
+  font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font", sans-serif;
+  font-size: 15px;
+}
 
 /* Optical centering — a stadium cap curves INTO the segment, so equal
    padding reads as content crowding the round end. The sides that face a
    cap get extra room (the divider sides stay tight); each pill's content
    then sits visually, not just arithmetically, centered. */
 #sysmon #cpu        { padding-left: 15px; }
-#sysmon #temperature{ padding-right: 15px; }
+#sysmon #network    { padding-right: 15px; }
 #stats #pulseaudio  { padding-left: 19px; }
 #stats #battery     { padding-right: 15px; }
 #stats #pulseaudio  { min-width: 50px; }
@@ -471,7 +478,7 @@ window#waybar {
 
 /* Etched dividers — skip each capsule's first child. */
 #sysmon #memory,
-#sysmon #temperature,
+#sysmon #network,
 #stats #battery {
   border-left: 1px solid rgba(20, 14, 40, 0.20);
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.10);
@@ -489,7 +496,7 @@ window#waybar {
    with a halo, so a continuous capsule still answers per-module. */
 #sysmon #cpu:hover,
 #sysmon #memory:hover,
-#sysmon #temperature:hover,
+#sysmon #network:hover,
 #stats #pulseaudio:hover,
 #stats #battery:hover,
 #nowisland #mpris:hover,
@@ -499,7 +506,7 @@ window#waybar {
 }
 
 /* Color earns its keep only on real, live state. */
-#sysmon #temperature.critical {
+#sysmon #network.disconnected {
   color: #ff7a8c;
   text-shadow: 0 0 11px rgba(255, 122, 140, 0.45);
 }

@@ -16,5 +16,10 @@ for i = 11, 18 do
 	hl.workspace_rule({ workspace = tostring(i), monitor = "HDMI-A-1" })
 end
 
+-- TV workspaces (Alt+F1/F2/F3) — pinned to the Hisense TV
+for i = 21, 23 do
+	hl.workspace_rule({ workspace = tostring(i), monitor = "HDMI-A-1" })
+end
+
 -- Special workspace tweaks
 hl.workspace_rule({ workspace = "special", gaps_in = 5, gaps_out = 15 })
