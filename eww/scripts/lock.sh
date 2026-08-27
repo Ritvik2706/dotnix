@@ -1,1 +1,1 @@
-hyprlock
+systemctl --user start hyprlock.service

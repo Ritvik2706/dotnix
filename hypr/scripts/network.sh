@@ -1,31 +1,31 @@
 #!/bin/sh
-status="$(nmcli general status | grep -oh "\w*connect\w*")"
+# Lock-screen network glyph.
+#
+# This used to shell out to nmcli. NetworkManager is NOT running on this
+# machine (iwd + systemd-networkd are), so every refresh on the lock screen
+# printed "Error: NetworkManager is not running." into hyprlock's stderr and
+# rendered an empty label. Reading the kernel directly works under any
+# backend and needs no daemon at all — which is the right property for
+# something drawn on a lock screen.
 
-if [[ "$status" == "disconnected" ]]; then
-  printf "Disconnected 󰤮⠀"
-elif [[ "$status" == "connecting" ]]; then
-  printf "Connecting 󱍸⠀"
-elif [[ "$status" == "connected" ]]; then
-  wow="$(echo $(nmcli con show --active | awk 'NR==2 {print $5}'))"
-  if [ "$wow" == "ethernet" ]
-  then
-    printf "󰈀⠀\n"
-  else
-    strength="$(echo $(awk 'NR==3 {print $3}' /proc/net/wireless) | sed 's/\.//g')"
-    if [[ "$?" == "0" ]]; then
-      if [[ "$strength" -eq "0" ]]; then
-        printf "󰤯⠀\n"
-      elif [[ ("$strength" -ge "0") && ("$strength" -le "25") ]]; then
-        printf "󰤟⠀\n"
-      elif [[ ("$strength" -ge "25") && ("$strength" -le "50") ]]; then
-        printf "󰤢⠀\n"
-      elif [[ ("$strength" -ge "50") && ("$strength" -le "75") ]]; then
-        printf "󰤥⠀\n"
-      elif [[ ("$strength" -ge "75") && ("$strength" -le "100") ]]; then
-        printf "󰤨⠀\n"
-      fi
-    else
-      printf "Idk :))"
-    fi
-  fi
+# The interface actually carrying the default route, or nothing if offline.
+iface=$(ip -o route get 1.1.1.1 2>/dev/null |
+        awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+
+[ -z "$iface" ] && { printf "Disconnected 󰤮⠀"; exit 0; }
+
+case "$iface" in
+    en*|eth*|usb*) printf "󰈀⠀\n"; exit 0 ;;
+esac
+
+# Wireless: link quality, which the kernel reports out of 70.
+q=$(awk -v i="$iface:" '$1 == i {gsub(/\./, "", $3); print $3; exit}' /proc/net/wireless)
+[ -z "$q" ] && { printf "Connecting 󱍸⠀"; exit 0; }
+
+p=$((q * 100 / 70))
+if   [ "$p" -ge 75 ]; then printf "󰤨⠀\n"
+elif [ "$p" -ge 50 ]; then printf "󰤥⠀\n"
+elif [ "$p" -ge 25 ]; then printf "󰤢⠀\n"
+elif [ "$p" -gt  0 ]; then printf "󰤟⠀\n"
+else                       printf "󰤯⠀\n"
 fi

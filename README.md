@@ -32,6 +32,8 @@ A collection of my personal configuration files for Linux (Manjaro/Arch) with a 
 - **copyq/** - Clipboard manager with advanced features
 - **Kvantum/** - Qt application theming engine
 - **vicinae/** - Application launcher (Raycast-like) with the custom "Lumen" theme
+- **libreoffice/** - "Lumen" application colors for LibreOffice. Not symlinked —
+  the profile is rewritten by the app on exit, so run `libreoffice/apply.sh`
 
 ## Installation
 

@@ -1,0 +1,15 @@
+[SddmGreeterTheme]
+Name=Lumen
+Description=LUMEN — light as the material
+Author=Ritvik
+Copyright=Ritvik
+License=MIT
+Type=sddm-theme
+Version=1.0
+Website=
+Screenshot=preview.png
+MainScript=Main.qml
+ConfigFile=theme.conf
+TranslationsDirectory=
+Email=
+QtVersion=6

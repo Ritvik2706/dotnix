@@ -18,7 +18,16 @@ hl.config({
 		-- today is on_focus_under_fullscreen — uncomment if you miss the old
 		-- "new window kicks me out of fullscreen" behavior:
 		-- on_focus_under_fullscreen = 2,
+		-- Required for hypr/scripts/resume-lock.sh: it replaces a wedged
+		-- hyprlock on wake, and without this Hyprland refuses to hand the
+		-- existing session lock to the new client.
 		allow_session_lock_restore = true,
+		-- How long Hyprland waits, after a lock client dies, before painting
+		-- its red "something went wrong" lockdead screen. The swap above takes
+		-- ~135ms measured, so the 1000ms default already covers it — this is
+		-- headroom for a cold page-in, not a fix. The screen stays LOCKED the
+		-- whole time either way; the delay only governs what is drawn on it.
+		lockdead_screen_delay = 5000,
 		session_lock_xray = true,
 		initial_workspace_tracking = false,
 		focus_on_activate = true,

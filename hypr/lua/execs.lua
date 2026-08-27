@@ -5,9 +5,33 @@
 --------------------------------------------------------------------------------
 
 hl.on("hyprland.start", function()
+	-- ===== LOCK FIRST =====
+	-- The session autologins, so it is unauthenticated until hyprlock covers
+	-- it. systemd already starts hyprlock.service via graphical-session.target;
+	-- this is a SECOND, independent trigger on the compositor's own startup
+	-- hook, because the cost of the two disagreeing is a bare desktop on a
+	-- machine nobody logged into. `systemctl start` is idempotent — if the
+	-- unit is already running this is a no-op — so the belt and the braces
+	-- cannot fight each other.
+	hl.exec_cmd("systemctl --user start hyprlock.service") -- cover the session
+
+	-- The panel is ALREADY DARK at this point — hyprlock-blank.service took the
+	-- backlight to zero back at graphical-session-pre.target, before Hyprland
+	-- could draw a frame. That is what hides the autologin gap: Hyprland is
+	-- compositing a real, unauthenticated desktop from its first frame until
+	-- the line above finishes locking, roughly 400ms later, and without the
+	-- blackout you watch it.
+	--
+	-- This brings the light back, and only once `hyprctl locked` says the
+	-- session is genuinely covered. It is bounded and trap-guarded: if hyprlock
+	-- never comes up the light returns anyway, because a visible unlocked
+	-- desktop is a problem you can see and act on, while a black panel is
+	-- indistinguishable from a dead machine.
+	hl.exec_cmd("~/.config/hypr/scripts/boot-unblank.sh") -- ...then reveal it
+
 	-- ===== Core services =====
 	hl.exec_cmd("awww-daemon") -- wallpaper daemon
-	hl.exec_cmd("awww img /home/ritvik/github/dotnix/wallpapers/samurai.png") -- set wallpaper
+	hl.exec_cmd("awww img /home/ritvik/github/config/dotnix/wallpapers/idk.png") -- set wallpaper
 	hl.exec_cmd("dunst") -- notifications
 	hl.exec_cmd("hypridle") -- idle/suspend/lock management
 	hl.exec_cmd("copyq") -- clipboard manager

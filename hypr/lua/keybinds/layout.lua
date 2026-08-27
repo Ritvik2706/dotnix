@@ -12,6 +12,16 @@ hl.bind(main .. " + F", function()
 	notify.send("Window State", "Fullscreen Toggled")
 end)
 
+-- Zoom: pseudo-fullscreen — float the window, blow it up, center it and keep
+-- it above everything else. Press again to drop it back where it came from.
+hl.bind(main .. " + T", function()
+	hl.dispatch(hl.dsp.exec_cmd("~/.config/hypr/scripts/zoom-window.sh"))
+end) -- the script sends its own toast (it can decline when alone on a workspace)
+
+-- Hand the zoom slot to the next window in the workspace (plain focus cycling
+-- when nothing is zoomed).
+hl.bind(main .. " + grave", hl.dsp.exec_cmd("~/.config/hypr/scripts/zoom-window.sh cycle"))
+
 hl.bind(main .. " + SPACE", hl.dsp.exec_cmd("albert toggle"))
 
 hl.bind(main .. " + U", function()
