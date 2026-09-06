@@ -11,3 +11,6 @@ alias ffind="fzf --preview 'bat --style=numbers --color=always {} || cat {}' --h
 alias fdir="find . -type d | fzf --preview 'tree -C {} | head -100' --height=40% --layout=reverse --border"
 alias fopen="fzf --preview 'bat --style=numbers --color=always {} || cat {}' --height=40% --layout=reverse --border | xargs -r -I {} nvim {}"
 alias fkill="ps aux | fzf --preview 'echo {}' --height=40% --layout=reverse --border | awk '{print \$2}' | xargs -r kill -9"
+
+# Road Trip Ltd company hub (runs from source, in its own venv)
+alias roadtrip='~/github/projects/roadtripltd/.venv/bin/python ~/github/projects/roadtripltd/main.py'

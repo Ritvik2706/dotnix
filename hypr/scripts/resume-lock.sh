@@ -61,13 +61,84 @@
 # readiness check instead of a guess at an animation's length.
 set -uo pipefail
 
+# ── DO NOTHING IF THE SESSION IS NOT LOCKED ──────────────────────────────
+#
+# This script's only job is to replace a lock that was born blind. If the
+# session is already unlocked, running it LOCKS THE MACHINE AGAIN, which is
+# how "I unlocked, touched the trackpad, and hyprlock came back" happens:
+#
+#   1. howdy unlocks the session from a face scan. No key, no pointer — so
+#      the compositor's idle notification never sees any activity and
+#      hypridle still considers the session idle.
+#   2. First touch of the trackpad is that activity. hypridle fires the
+#      screen-blank listener's on-resume — which is this script.
+#   3. `systemctl --user restart hyprlock.service` on an unlocked session is
+#      not a swap, it is a fresh lock.
+#
+# The compositor is the authority on whether anything is covering the
+# session: under ext-session-lock it stays locked even while the client is
+# being replaced, so this is true across the whole swap and false only once
+# an unlock has actually gone through. If it says unlocked, there is nothing
+# to replace and nothing to do.
+[[ $(hyprctl locked 2>/dev/null) == "true" ]] || exit 0
+
+# ── ONLY ONE OF US AT A TIME ─────────────────────────────────────────────
+#
+# A wake from suspend fires this script TWICE: once from after_sleep_cmd, and
+# again from the blank listener's on-resume, because the wake is also the
+# activity that resumes that listener. Two copies racing over one backlight is
+# how you end up staring at a dead-looking laptop:
+#
+#   A: reads BL_PREV=51, sets brightness 0
+#   B: reads BL_PREV=0   <-- A already blanked
+#   A: exits, restores 51
+#   B: exits, restores 0   <-- panel is now dark forever
+#
+# The session behind it is fine — journal says `Unlocking session`, howdy
+# approved, keystrokes land. There is just no light, and no way to tell that
+# from a hung machine, so it costs a hard reboot.
+#
+# The second instance has nothing to add: the first is already swapping the
+# lock. So take a lock and let the loser exit before it touches anything.
+LOCK_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/resume-lock.lock"
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+
+# ── REMEMBERING THE BRIGHTNESS ACROSS A CRASH ────────────────────────────
+#
+# Same failure from the other direction: if an instance dies between blanking
+# and restoring, the value it was holding in a shell variable dies with it and
+# the panel stays at 0. So the pre-blank level goes to a file before the blank,
+# and is read back from there. A stale file is not a problem — it is only ever
+# consulted while we are the one holding the lock, and it is rewritten with a
+# fresh reading each run (except when that reading is 0, see below).
+BL_STATE="${XDG_RUNTIME_DIR:-/run/user/$UID}/resume-lock.brightness"
+BL_MAX=$(brightnessctl -m 2>/dev/null | head -1 | cut -d, -f5)
 BL_PREV=$(brightnessctl -m 2>/dev/null | head -1 | cut -d, -f3)
 
+# NEVER adopt 0 as "the level to come back to". If we read 0 the panel was
+# already blanked by something else, and saving that would make the darkness
+# permanent. Prefer the last good level we recorded; failing that, a visible
+# fraction of max — dim is recoverable, black is not.
+if [[ -z ${BL_PREV:-} || $BL_PREV -eq 0 ]]; then
+    BL_PREV=$(cat "$BL_STATE" 2>/dev/null || true)
+fi
+if [[ -z ${BL_PREV:-} || ! $BL_PREV =~ ^[0-9]+$ || $BL_PREV -eq 0 ]]; then
+    BL_PREV=$(( ${BL_MAX:-255} / 3 ))
+    [[ $BL_PREV -gt 0 ]] || BL_PREV=1
+fi
+printf '%s' "$BL_PREV" > "$BL_STATE" 2>/dev/null || true
+
 restore_backlight() {
-    [[ -n ${BL_PREV:-} ]] && brightnessctl -q set "$BL_PREV" 2>/dev/null
+    brightnessctl -q set "$BL_PREV" 2>/dev/null
     return 0
 }
-trap restore_backlight EXIT
+# EXIT alone is not enough: a bash EXIT trap does not run when the shell is
+# killed by an untrapped signal, and hypridle/systemd can SIGTERM us mid-swap
+# — precisely while the screen is blanked. Catch the signals too, so there is
+# no path out of this script that leaves the backlight down.
+trap 'restore_backlight' EXIT
+trap 'trap - EXIT; restore_backlight; exit 143' TERM INT HUP
 
 blank() { brightnessctl -q set 0 2>/dev/null || true; }
 
@@ -77,6 +148,13 @@ blank
 # 2. Panel electrically on — the new hyprlock must find a live output or it
 #    is born with the same defect. Blank again: dpms on can undo step 1.
 hyprctl dispatch dpms on >/dev/null 2>&1
+#    dpms on restores the panel's own brightness, and it does so ASYNCHRONOUSLY
+#    — the dispatch returns before the backlight has finished coming back. Blank
+#    immediately and the restore lands AFTER it, undoing the blank: the panel
+#    lights onto the seam, which is Hyprland's bare default background in the
+#    ~135ms with no lock client. That is the hand-drawn logo you see flash.
+#    Let the restore land first, then take the light away.
+sleep 0.05
 blank
 
 # 3. Keyboard backlight back (razer-fx is paused with SIGUSR1 when we blank).

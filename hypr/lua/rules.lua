@@ -41,6 +41,18 @@ hl.window_rule({
 ----------------------------------------
 -- FLOATING WINDOWS
 ----------------------------------------
+-- Global default: any floating window gets centered on its monitor.
+-- Without this Hyprland honours whatever position the client asks for, which
+-- for a lot of GTK/Qt/XWayland dialogs is a stale/garbage coordinate and they
+-- land in a corner (bottom-right / top-right). Kept FIRST in this section so
+-- the later rules that deliberately place windows (`move = ...`: pip,
+-- thunar-file-ops, plasma-changeicons) still win.
+hl.window_rule({
+	name = "float-center-default",
+	match = { float = true },
+	center = true,
+})
+
 -- Generic dialogs — float + center
 hl.window_rule({
 	name = "dialogs-float",
@@ -134,6 +146,36 @@ hl.window_rule({
 	float = true,
 	size = "45% 45%",
 	center = true,
+})
+
+-- iwgtk (Wi-Fi) — float + center like the Thunar save-as popup, with the same
+-- REAL transparency: xray=false makes the blur sample the windows actually
+-- behind the panel instead of the global wallpaper frost. GTK paints an opaque
+-- background, so the compositor has to force the translucency (cf.
+-- qbittorrent-glass) for the blur to have anything to show through.
+hl.window_rule({
+	name = "iwgtk",
+	match = { class = [[^(org\.twosheds\.iwgtk|iwgtk)$]] },
+	float = true,
+	size = "1024 600",
+	center = true,
+	xray = false,
+	opacity = "0.90 override 0.84 override",
+	rounding = 16,
+})
+
+-- Blueman (Bluetooth manager + its adapter/sendto dialogs) — float + center.
+-- The GTK app_id shows up as blueman-manager / blueman-adapters / …, and on
+-- some builds the wrapper script leaves a leading dot (.blueman-manager-wrapped).
+hl.window_rule({
+	name = "blueman",
+	match = { class = [[^\.?blueman-.*$]] },
+	float = true,
+	size = "1024 600",
+	center = true,
+	xray = false,
+	opacity = "0.90 override 0.84 override",
+	rounding = 16,
 })
 
 -- KDE helpers / applets
