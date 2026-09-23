@@ -14,6 +14,7 @@ source "$_zsh_dir/completions.zsh"
 source "$_zsh_dir/aliases.zsh"
 source "$_zsh_dir/functions.zsh"
 source "$_zsh_dir/tools.zsh"
+source "$_zsh_dir/prompt-status.zsh"
 
 # WSL-only Windows interop (winget/winutil wrappers, env vars, …)
 [[ -n "$IS_WSL" ]] && source "$_zsh_dir/wsl.zsh"
@@ -23,7 +24,8 @@ source "$_zsh_dir/tools.zsh"
 
 unset _zsh_dir
 
-# Auto-start tmux in interactive shells (skip inside VS Code or existing tmux)
-if command -v tmux &>/dev/null && [[ -z "$TMUX" && "$TERM_PROGRAM" != "vscode" ]]; then
-  tmux new-session -A -s main -c ~/github
+# Set DOTNIX_NO_TMUX=1 to start a plain shell. Keep the terminal's starting
+# directory when creating main; attaching preserves the existing workspace.
+if [[ -o interactive && -t 0 && -t 1 && -z "$TMUX" && "$TERM_PROGRAM" != "vscode" && "${DOTNIX_NO_TMUX:-0}" != 1 ]] && command -v tmux &>/dev/null; then
+  tmux new-session -A -s main -c "$PWD"
 fi

@@ -1,3 +1,11 @@
+# Claude Code shortcuts
+alias c='claude'                          # short invoke
+alias cc='claude --continue'              # resume most recent session in this dir
+alias cr='claude --resume'                # interactive picker to pick a specific session
+alias cp='claude --permission-mode plan'  # start read-only, review before it touches anything
+alias co='claude --model opus'            # quick model override for a harder task
+alias cq='noglob cq'                     # allow unquoted questions containing ? or *
+
 # File listing (requires eza)
 alias ls='eza -a --icons'
 alias ll='eza -al --icons'

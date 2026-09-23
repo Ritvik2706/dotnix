@@ -178,6 +178,23 @@ hl.window_rule({
 	rounding = 16,
 })
 
+-- Screen-share chooser (xdg-desktop-portal-hyprland). Qt6 Widgets, so the
+-- GTK Lumen sheet can't reach it — the palette comes from
+-- qt/lumen-share-picker.qss via the /usr/local/bin shim. Qt paints an opaque
+-- background regardless, so the compositor supplies the glass here, and
+-- xray=false makes the blur sample the windows actually behind it (you're
+-- picking one of them, so seeing them frosted is the point).
+hl.window_rule({
+	name = "share-picker-glass",
+	match = { class = [[^(hyprland-share-picker)$]] },
+	float = true,
+	size = "900 620",
+	center = true,
+	xray = false,
+	opacity = "0.92 override 0.88 override",
+	rounding = 16,
+})
+
 -- KDE helpers / applets
 hl.window_rule({ name = "plasmawindowed-float", match = { class = ".*plasmawindowed.*" }, float = true })
 hl.window_rule({ name = "kcm-float", match = { class = "kcm_.*" }, float = true })

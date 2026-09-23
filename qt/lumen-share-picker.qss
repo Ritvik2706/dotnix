@@ -1,0 +1,130 @@
+/* ── LUMEN · hyprland-share-picker ──────────────────────────────────────
+ * The screen-share chooser xdg-desktop-portal-hyprland pops up. It is a
+ * Qt6 Widgets app, so the GTK3 Lumen sheet (gtk-3.0/gtk.css) can never
+ * reach it — this is that same palette restated in QSS.
+ *
+ * Applied via /usr/local/bin/hyprland-share-picker, a PATH shim that
+ * shadows /usr/bin and passes `-stylesheet` (this build of the portal has
+ * no custom_picker_binary option, and /usr/local/bin sorts before /usr/bin
+ * in the systemd user PATH, so the shim survives pacman upgrades).
+ *
+ * Translucency is NOT done here: Qt only honours alpha on a widget that
+ * set WA_TranslucentBackground, which this app does not. The glass comes
+ * from the Hyprland rule "share-picker-glass" in hypr/lua/rules.lua
+ * (opacity + xray=false), mirroring the iwgtk / qbittorrent treatment.
+ *
+ * Palette mirrors gtk.css:
+ *   text #f6f8fc · accent lilac #c2a8ff · coral #ff9e7a
+ * ────────────────────────────────────────────────────────────────────── */
+
+QWidget {
+  background-color: #161820;
+  color: #f6f8fc;
+  font-family: "SF Pro Text";
+  font-size: 10pt;
+}
+
+QDialog, QMainWindow { background-color: #161820; }
+
+/* ── Tabs: Screen / Window / Region ── */
+QTabWidget::pane {
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  background-color: rgba(255,255,255,0.03);
+  top: -1px;
+}
+QTabBar { qproperty-drawBase: 0; }
+QTabBar::tab {
+  background: transparent;
+  color: rgba(246,248,252,0.55);
+  padding: 7px 18px;
+  margin-right: 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+QTabBar::tab:hover { color: #f6f8fc; background: rgba(255,255,255,0.06); }
+QTabBar::tab:selected {
+  color: #ffffff;
+  background: rgba(194,168,255,0.22);
+  border: 1px solid rgba(194,168,255,0.45);
+}
+
+/* ── The list of screens / windows ── */
+QListWidget, QListView, QTreeView, QScrollArea {
+  background-color: transparent;
+  border: none;
+  outline: none;
+}
+QListWidget::item, QListView::item {
+  padding: 9px 12px;
+  border-radius: 10px;
+  margin: 2px 4px;
+}
+QListWidget::item:hover, QListView::item:hover { background: rgba(255,255,255,0.06); }
+QListWidget::item:selected, QListView::item:selected {
+  background: rgba(194,168,255,0.34);
+  color: #ffffff;
+}
+
+/* ── Buttons — the "Screen 0 at 0,0" entries are pushbuttons ── */
+QPushButton {
+  background-color: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  padding: 10px 16px;
+  color: #f6f8fc;
+}
+QPushButton:hover {
+  background-color: rgba(194,168,255,0.16);
+  border-color: rgba(194,168,255,0.40);
+}
+QPushButton:pressed { background-color: rgba(194,168,255,0.30); }
+QPushButton:focus { border-color: rgba(194,168,255,0.55); }
+
+/* ── "Allow a restore token" ── */
+QCheckBox { spacing: 9px; color: rgba(246,248,252,0.80); }
+QCheckBox::indicator {
+  width: 15px; height: 15px;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.04);
+}
+QCheckBox::indicator:hover { border-color: rgba(194,168,255,0.55); }
+QCheckBox::indicator:checked {
+  background: #c2a8ff;
+  border-color: #c2a8ff;
+}
+
+/* ── Menu bar (the "Help" strip) and menus ── */
+QMenuBar { background: transparent; }
+QMenuBar::item { background: transparent; padding: 5px 10px; border-radius: 8px; }
+QMenuBar::item:selected { background: rgba(194,168,255,0.22); }
+QMenu {
+  background-color: #181a22;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  padding: 6px;
+}
+QMenu::item { padding: 6px 22px; border-radius: 8px; }
+QMenu::item:selected { background: rgba(194,168,255,0.30); }
+
+/* ── Scrollbars — thin glass ── */
+QScrollBar:vertical, QScrollBar:horizontal { background: transparent; border: none; }
+QScrollBar:vertical { width: 9px; margin: 2px; }
+QScrollBar:horizontal { height: 9px; margin: 2px; }
+QScrollBar::handle {
+  background: rgba(246,248,252,0.18);
+  border-radius: 4px;
+  min-height: 28px; min-width: 28px;
+}
+QScrollBar::handle:hover { background: rgba(194,168,255,0.50); }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+QToolTip {
+  background-color: #181a22;
+  color: #f6f8fc;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 5px 8px;
+}

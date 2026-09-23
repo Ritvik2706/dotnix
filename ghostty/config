@@ -95,15 +95,8 @@ config-file = ghostty-theme
 #     process will exit when the command exits. Additionally, the
 #     `quit-after-last-window-closed-delay` is unset.
 # ############################################################################ 
-# The following command checks if tmux is installed.
-# If tmux is installed, it automatically attaches to an existing tmux session.
-# If no tmux session exists, a new one is created.
-# If tmux is not installed, it simply starts zsh without tmux.
-#
-# This works with Linux package managers (pacman for Manjaro/Arch)
-# Make sure tmux is installed: sudo pacman -S tmux
-command = zsh --login -c "if command -v tmux >/dev/null 2>&1; then tmux attach || tmux; else zsh; fi"
-# command = zsh --login -c "if command -v tmux >/dev/null 2>&1; then $HOME/github/dotfiles-latest/tmux/tools/prime/tmux-sessionizer.sh $HOME/github/dotfiles-latest || (tmux attach 2>/dev/null || tmux); else exec zsh; fi"
+# Zsh owns tmux startup, including the DOTNIX_NO_TMUX=1 opt-out.
+command = zsh --login
 
 # Horizontal window padding. This applies padding between the terminal cells
 # and the left and right window borders. The value is in points, meaning that

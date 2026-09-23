@@ -1,0 +1,13 @@
+#!/bin/sh
+# LUMEN shim for the xdg-desktop-portal-hyprland screen-share chooser.
+# Installed to /usr/local/bin (which precedes /usr/bin in the systemd user
+# PATH) so it shadows the packaged binary without pacman clobbering it.
+#
+# - QT_QPA_PLATFORMTHEME is unset: it is set to "qt5ct" in shell/.profile,
+#   but qt5ct is not installed and this is a Qt6 app, so the lookup fails
+#   and Qt drops to a light default palette. Unsetting lets the generic
+#   theme read the XDG portal color-scheme (prefer-dark).
+# - Fusion is forced so the QSS below styles a predictable base.
+unset QT_QPA_PLATFORMTHEME
+export QT_STYLE_OVERRIDE=Fusion
+exec /usr/bin/hyprland-share-picker -stylesheet "$HOME/.config/qt/lumen-share-picker.qss" "$@"

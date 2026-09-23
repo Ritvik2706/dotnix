@@ -1,6 +1,12 @@
 # Shell functions — cross-platform. WSL branches on $IS_WSL (set in .zshrc);
 # purely-Windows helpers (winget, winutil, …) live in wsl.zsh instead.
 
+# One-shot headless query, useful for quick answers without opening a session
+function cq { claude -p "$*" }
+
+# Pipe file/command output straight into Claude
+calog() { tail -n 200 "$1" | claude -p "explain any errors in this log" }
+
 # Open PDFs — Sioyek on the Windows side under WSL, a native viewer otherwise.
 # No args = fzf picker over *.pdf below the current directory.
 pdf() {
