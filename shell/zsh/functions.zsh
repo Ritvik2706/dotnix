@@ -107,10 +107,11 @@ twitch() {
 }
 
 # Open a graphical file manager at the given path (default: current directory).
-# OneCommander on the Windows side under WSL; the system default otherwise.
+# Windows File Explorer under WSL; the system default otherwise.
 fe() {
   if [[ -n "$IS_WSL" ]]; then
-    "/mnt/c/Program Files/OneCommander/OneCommander.exe" "${@:-.}" &>/dev/null & disown
+    # explorer.exe needs a Windows path; it exits 1 even on success, hence &>/dev/null
+    /mnt/c/Windows/explorer.exe "$(wslpath -w "${1:-.}")" &>/dev/null & disown
   else
     xdg-open "${1:-.}" &>/dev/null & disown
   fi

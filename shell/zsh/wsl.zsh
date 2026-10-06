@@ -9,7 +9,8 @@
 alias win='cd /mnt/c/Users/Ritvik'
 
 # winget — strips Windows CR characters that corrupt WSL terminal output
-winget() { winget.exe "$@" | tr -d '\r'; }
+# Absolute path so it works even when Windows dirs aren't appended to $PATH
+winget() { /mnt/c/Users/Ritvik/AppData/Local/Microsoft/WindowsApps/winget.exe "$@" | tr -d '\r'; }
 
 # Shortcuts
 alias wgu='winget upgrade --all'        # upgrade everything

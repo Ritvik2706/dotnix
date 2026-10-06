@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+if ! command -v sesh &>/dev/null; then
+  tmux display-message "sesh not installed (yay -S sesh)"
+  exit 1
+fi
+
 # Keep the list and preview on the terminal background.
 selection=$(
   sesh list --icons | fzf-tmux -p 80%,70% \

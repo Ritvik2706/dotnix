@@ -2,14 +2,13 @@
 alias c='claude'                          # short invoke
 alias cc='claude --continue'              # resume most recent session in this dir
 alias cr='claude --resume'                # interactive picker to pick a specific session
-alias cp='claude --permission-mode plan'  # start read-only, review before it touches anything
 alias co='claude --model opus'            # quick model override for a harder task
 alias cq='noglob cq'                     # allow unquoted questions containing ? or *
 
 # File listing (requires eza)
-alias ls='eza -a --icons'
-alias ll='eza -al --icons'
-alias lt='eza -a --tree --level=1 --icons'
+alias ls='eza -a --icons=auto'
+alias ll='eza -al --icons=auto'
+alias lt='eza -a --tree --level=1 --icons=auto'
 
 # NVIDIA PRIME render offload (Wayland/Hyprland)
 alias nvidia-run='__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only'
