@@ -72,7 +72,7 @@ hl.config({
 		workspace_swipe_direction_lock = true, -- lock to horizontal once moving
 		workspace_swipe_direction_lock_threshold = 10,
 		workspace_swipe_forever = true, -- chain multiple switches in one swipe
-		workspace_swipe_create_new = false, -- don't spawn empty workspaces past the end
+		workspace_swipe_create_new = true, -- swiping past the last workspace creates a new one
 	},
 })
 

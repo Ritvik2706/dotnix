@@ -5,56 +5,44 @@
 local vars = require("lua.vars")
 local main = vars.mainMod
 
--- ==== Output volume (basic controls) ====
--- (was bindel/bindl: repeating + locked so they work on the lockscreen)
-hl.bind(
-	"XF86AudioRaiseVolume",
-	hl.dsp.exec_cmd(
-		[[wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-high.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]
-	),
-	{ repeating = true, locked = true }
-)
+-- ==== Output volume ====
+-- Each action is defined once and bound to both the Fn-layer media key and the
+-- plain F-key (no Fn needed). Repeating + locked so they work on the lockscreen.
+local VOL_ICONS = "/usr/share/icons/candy-icons/status/scalable/"
+local VOL_PCT = [[$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')]]
+local function vol_toast(icon, body, with_bar)
+	return string.format(
+		[[dunstify -a "Volume" -i "%s%s" -r 72932 -u low -h string:x-dunst-stack-tag:volume %s"Volume" "%s"]],
+		VOL_ICONS,
+		icon,
+		with_bar and ("-h int:value:" .. VOL_PCT .. " ") or "",
+		body
+	)
+end
 
-hl.bind(
-	"XF86AudioLowerVolume",
-	hl.dsp.exec_cmd(
-		[[wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-medium.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]
-	),
-	{ repeating = true, locked = true }
-)
-
-hl.bind(
-	"XF86AudioMute",
-	hl.dsp.exec_cmd(
-		[[wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-muted-symbolic.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | grep -q MUTED && echo 'Muted' || echo 'Unmuted')"]]
-	),
-	{ locked = true }
-)
-
--- Plain F-keys mirror the Fn-layer media keys (no Fn needed)
-hl.bind(
-	"F1",
-	hl.dsp.exec_cmd(
-		[[wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-muted-symbolic.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | grep -q MUTED && echo 'Muted' || echo 'Unmuted')"]]
-	),
-	{ locked = true }
-)
-
-hl.bind(
-	"F3",
-	hl.dsp.exec_cmd(
-		[[wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-high.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]
-	),
-	{ repeating = true, locked = true }
-)
-
-hl.bind(
-	"F2",
-	hl.dsp.exec_cmd(
-		[[wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && dunstify -a "Volume" -i "/usr/share/icons/candy-icons/status/scalable/audio-volume-medium.svg" -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]
-	),
-	{ repeating = true, locked = true }
-)
+local volume = {
+	up = {
+		cmd = "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ && " .. vol_toast("audio-volume-high.svg", VOL_PCT .. "%", true),
+		keys = { "XF86AudioRaiseVolume", "F3" },
+		opts = { repeating = true, locked = true },
+	},
+	down = {
+		cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && " .. vol_toast("audio-volume-medium.svg", VOL_PCT .. "%", true),
+		keys = { "XF86AudioLowerVolume", "F2" },
+		opts = { repeating = true, locked = true },
+	},
+	mute = {
+		cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle && "
+			.. vol_toast("audio-volume-muted-symbolic.svg", [[$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | grep -q MUTED && echo 'Muted' || echo 'Unmuted')]]),
+		keys = { "XF86AudioMute", "F1" },
+		opts = { locked = true },
+	},
+}
+for _, v in pairs(volume) do
+	for _, key in ipairs(v.keys) do
+		hl.bind(key, hl.dsp.exec_cmd(v.cmd), v.opts)
+	end
+end
 
 -- Display brightness (Fn+F7/F8 on Razer Blade) — requires brightnessctl
 -- Install: sudo pacman -S brightnessctl

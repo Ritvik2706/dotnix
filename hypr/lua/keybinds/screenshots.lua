@@ -1,21 +1,26 @@
 --------------------------------------------------------------------------------
--- Hyprland — keybinds/screenshots.lua (grim/slurp)
+-- Hyprland — keybinds/screenshots.lua (grim/slurp via scripts/screenshot.sh)
+-- Every shot lands on the clipboard; "save" also writes ~/Pictures/Screenshots.
 --------------------------------------------------------------------------------
 
 local vars = require("lua.vars")
 local main = vars.mainMod
 
--- Area selection to clipboard
-hl.bind(main .. " + V", hl.dsp.exec_cmd([[bash -lc 'grim -g "$(slurp)" - | wl-copy']]))
+local function shot(target, action)
+	return hl.dsp.exec_cmd("~/.config/hypr/scripts/screenshot.sh " .. target .. " " .. action)
+end
+
+-- Area selection
+hl.bind(main .. " + V", shot("area", "copy"))
+hl.bind(main .. " + B", shot("area", "save"))
 hl.bind(main .. " + SHIFT + V", hl.dsp.exec_cmd("/home/ritvik/.config/custom_scripts/ocr-sel"))
 
--- Area selection saved to Screenshots directory
-hl.bind(main .. " + B", hl.dsp.exec_cmd([[bash -lc 'grim -g "$(slurp)" "$HOME/Pictures/Screenshots/screenshot-$(date +%F-%H-%M-%S).png"']]))
+-- Focused window
+hl.bind(main .. " + CTRL + V", shot("window", "copy"))
+hl.bind(main .. " + CTRL + B", shot("window", "save"))
 
--- Whole screen to clipboard
-hl.bind("Print", hl.dsp.exec_cmd([[bash -lc 'grim - | wl-copy']]))
-
--- Whole screen saved to Screenshots directory
-hl.bind("SHIFT + Print", hl.dsp.exec_cmd([[bash -lc 'grim "$HOME/Pictures/Screenshots/screenshot-$(date +%F-%H-%M-%S).png"']]))
+-- Whole screen
+hl.bind("Print", shot("screen", "copy"))
+hl.bind("SHIFT + Print", shot("screen", "save"))
 
 -- hl.bind(main .. " + XF86LaunchB", hl.dsp.exec_cmd("/home/ritvik/.config/custom_scripts/ocr-shot.sh"))

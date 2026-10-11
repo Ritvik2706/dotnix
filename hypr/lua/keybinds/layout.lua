@@ -22,7 +22,7 @@ end) -- the script sends its own toast (it can decline when alone on a workspace
 -- when nothing is zoomed).
 hl.bind(main .. " + grave", hl.dsp.exec_cmd("~/.config/hypr/scripts/zoom-window.sh cycle"))
 
-hl.bind(main .. " + SPACE", hl.dsp.exec_cmd("albert toggle"))
+hl.bind(main .. " + SPACE", hl.dsp.window.float({ action = "toggle" }))
 
 hl.bind(main .. " + U", function()
 	hl.dispatch(hl.dsp.window.center())
@@ -40,6 +40,12 @@ hl.bind(main .. " + apostrophe", function()
 end)
 
 -- ===== Groups ===== (lived at the bottom of conf/rules/rules.conf)
+-- Make the focused window a group (tabbed stack) / dissolve it again.
+-- Drag other windows onto its groupbar to add them.
+hl.bind(main .. " + SHIFT + G", hl.dsp.group.toggle())
+-- Cycle tabs inside the focused group
+hl.bind(main .. " + bracketright", hl.dsp.group.next())
+hl.bind(main .. " + bracketleft", hl.dsp.group.prev())
 -- Detach the current window from the group ("pull it out")
 hl.bind(main .. " + SHIFT + U", hl.dsp.window.move({ out_of_group = true }))
 -- Re-attach a focused window to the nearest group on the left.

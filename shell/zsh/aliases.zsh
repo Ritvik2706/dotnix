@@ -21,3 +21,7 @@ alias fkill="ps aux | fzf --preview 'echo {}' --height=40% --layout=reverse --bo
 
 # Road Trip Ltd company hub (runs from source, in its own venv)
 alias roadtrip='~/github/projects/roadtripltd/.venv/bin/python ~/github/projects/roadtripltd/main.py'
+
+# Arch's openai-codex package ships a bare binary without the package layout the
+# app-server daemon needs, so run codex in-process
+alias codex='codex --no-daemon'

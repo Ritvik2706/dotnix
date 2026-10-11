@@ -8,7 +8,6 @@ local main = vars.mainMod
 -- ===== App Launchers =====
 hl.bind(main .. " + G", hl.dsp.exec_cmd("zen-browser"))
 hl.bind(main .. " + Y", hl.dsp.exec_cmd("thunar"))
-hl.bind(main .. " + C", hl.dsp.exec_cmd("copyq show"))
 
 -- Handy pickers (safe fallbacks if missing)
 hl.bind(
@@ -17,12 +16,7 @@ hl.bind(
 		[[sh -lc 'command -v hyprpicker >/dev/null && hyprpicker -a || notify-send "Hyprpicker not installed"']]
 	)
 )
-hl.bind(
-	main .. " + E",
-	hl.dsp.exec_cmd(
-		[[sh -lc 'command -v wofi-emoji >/dev/null && wofi-emoji --action copy || notify-send "Emoji picker not installed"']]
-	)
-)
+hl.bind(main .. " + E", hl.dsp.exec_cmd("vicinae cmd launch core:search-emojis")) -- vicinae's built-in picker
 
 -- Optional TUI helpers (uncomment if you use them)
 -- hl.bind(main .. " + N", hl.dsp.exec_cmd("kitty -e nmtui"))

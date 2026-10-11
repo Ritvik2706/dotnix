@@ -22,7 +22,7 @@ hl.config({
 			inactive_border = "rgba(FFFFFF1F)",
 		},
 
-		-- snap = { enabled = true },
+		snap = { enabled = true }, -- floating windows snap to edges/each other
 	},
 
 	-- Grouped windows: a brighter sky-tinted glass rim to read as focused.

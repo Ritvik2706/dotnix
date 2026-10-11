@@ -15,6 +15,14 @@
 # hypridle's after_sleep_cmd.
 set -uo pipefail
 
+# Keyboard backlight first, before any of the early exits below: idle-blank.sh
+# paused razer-fx with SIGUSR1, and if this wake bails out (session already
+# unlocked by howdy, or resume-lock.sh owning the wake) nothing else would ever
+# send the SIGUSR2 — the keys stay dark until razer-fx is restarted. Resuming
+# is idempotent and harmless in every state.
+RAZER_PID_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/razer-fx.pid"
+[[ -r $RAZER_PID_FILE ]] && kill -USR2 "$(cat "$RAZER_PID_FILE")" 2>/dev/null
+
 # Nothing to do on an unlocked session, and importantly nothing to *undo*:
 # this must never be able to put a lock back (see resume-lock.sh's note on
 # howdy unlocking without any input event).
@@ -30,6 +38,4 @@ flock -n 9 || exit 0
 
 hyprctl dispatch dpms on >/dev/null 2>&1
 
-RAZER_PID_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/razer-fx.pid"
-[[ -r $RAZER_PID_FILE ]] && kill -USR2 "$(cat "$RAZER_PID_FILE")" 2>/dev/null
 exit 0

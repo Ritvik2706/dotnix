@@ -36,10 +36,21 @@ hl.bind(
 	{ locked = true }
 )
 
--- Idle inhibit toggle: disabled — SUPER+I is taken by "previous workspace"
--- (the old config had both bound, and `hyprctl dispatch inhibit_idle` no
--- longer exists). If you want it back, pick a free key and use:
--- hl.bind(main .. " + ???", hl.dsp.window.set_prop({ prop = "idle_inhibit", value = "always" }), { locked = true })
+-- Caffeine: keep the machine awake while the FOCUSED window exists (movie,
+-- long build, presentation). Per-window idle_inhibit, which hypridle honours
+-- even with ignore_dbus_inhibit = true; hypridle itself keeps running, so
+-- lid-close still locks before suspend. Press again on the same window to undo.
+local caffeinated = {}
+hl.bind(main .. " + CTRL + I", function()
+	local w = hl.get_active_window()
+	if not w then
+		return
+	end
+	local on = not caffeinated[w.address]
+	caffeinated[w.address] = on or nil
+	hl.dispatch(hl.dsp.window.set_prop({ prop = "idle_inhibit", value = on and "always" or "none" }))
+	notify.send(on and "Caffeine ON" or "Caffeine OFF", (on and "Staying awake for " or "Idle restored for ") .. w.class, { app = "Idle", icon = "desktop", replace_id = 72946, stack_tag = "idle" })
+end)
 
 -- Dunst (notification center)
 hl.bind(main .. " + BACKSPACE", function()
@@ -49,19 +60,23 @@ end, { locked = true })
 
 hl.bind(main .. " + SHIFT + BACKSPACE", hl.dsp.exec_cmd("dunstctl history-pop"), { locked = true })
 
--- Performance mode (toggle animations & opacity live)
-hl.bind(main .. " + Scroll_Lock", function()
-	hl.config({
-		animations = { enabled = false },
-		decoration = { active_opacity = 1.0, inactive_opacity = 1.0 },
-	})
-	notify.send("Performance Mode", "ON (No Animations)", { app = "Performance", replace_id = 72941, urgency = "normal", stack_tag = "performance" })
-end, { locked = true })
-
-hl.bind(main .. " + SHIFT + Scroll_Lock", function()
-	hl.config({
-		animations = { enabled = true },
-		decoration = { active_opacity = 0.95, inactive_opacity = 0.9 },
-	})
-	notify.send("Performance Mode", "OFF (Animations Restored)", { app = "Performance", replace_id = 72941, urgency = "normal", stack_tag = "performance" })
-end, { locked = true })
+-- Performance / battery mode: one toggle. ON kills animations, blur and
+-- shadows live; OFF is a config reload, so it always restores exactly what the
+-- files say (no hardcoded "restore" values to drift out of sync).
+-- The Blade has no Scroll Lock key, so it also lives on SUPER+F12.
+local perf_on = false
+local function toggle_perf()
+	perf_on = not perf_on
+	if perf_on then
+		hl.config({
+			animations = { enabled = false },
+			decoration = { blur = { enabled = false }, shadow = { enabled = false } },
+		})
+		notify.send("Performance Mode", "ON (no animations, blur, shadows)", { app = "Performance", replace_id = 72941, urgency = "normal", stack_tag = "performance" })
+	else
+		hl.exec_cmd("hyprctl reload")
+		notify.send("Performance Mode", "OFF (config restored)", { app = "Performance", replace_id = 72941, urgency = "normal", stack_tag = "performance" })
+	end
+end
+hl.bind(main .. " + Scroll_Lock", toggle_perf)
+hl.bind(main .. " + F12", toggle_perf)
