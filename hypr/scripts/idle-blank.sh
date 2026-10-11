@@ -36,7 +36,7 @@ done
 # before the output goes away.
 sleep 0.3
 
-hyprctl dispatch dpms off >/dev/null 2>&1
+hyprctl dispatch 'hl.dsp.dpms({action="off"})' >/dev/null 2>&1
 
 # Pause razer-fx so the keyboard goes dark and stops rendering (SIGUSR2 in
 # unblank.sh resumes it).

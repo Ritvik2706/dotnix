@@ -36,6 +36,29 @@ hl.bind(
 	{ locked = true }
 )
 
+-- ===== LOCK ON LID CLOSE =====
+-- Lock the instant the lid shuts, while the panel is still live, instead of
+-- at suspend time. A lock taken at suspend never gets to draw, so the wake
+-- had to swap it out — the old-lock / black / new-lock sequence on every lid
+-- open. One that drew before sleeping is simply kept (hypr/scripts/
+-- sleep-lock.sh, resume-lock.sh). Skipped when docked to an external screen.
+hl.bind(
+	"switch:on:Lid Switch",
+	hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/sleep-lock.sh lid"),
+	{ locked = true }
+)
+
+-- ===== FACE UNLOCK RESCAN =====
+-- SUPER + CTRL + ALT + F, beside the escape hatch above and `locked = true`
+-- for the same reason. Forces face unlock (hypr/scripts/face-unlock.sh) to
+-- look now. `rearm` does nothing on an unlocked session and can never start
+-- a lock, so this is harmless to hit by accident.
+hl.bind(
+	main .. " + CTRL + " .. alt .. " + F",
+	hl.dsp.exec_cmd("$HOME/.config/hypr/scripts/face-unlock.sh rearm"),
+	{ locked = true }
+)
+
 -- Caffeine: keep the machine awake while the FOCUSED window exists (movie,
 -- long build, presentation). Per-window idle_inhibit, which hypridle honours
 -- even with ignore_dbus_inhibit = true; hypridle itself keeps running, so

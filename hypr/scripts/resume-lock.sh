@@ -142,12 +142,45 @@ trap 'trap - EXIT; restore_backlight; exit 143' TERM INT HUP
 
 blank() { brightnessctl -q set 0 2>/dev/null || true; }
 
+# ── THE HEALTHY PATH: keep the lock you already have ─────────────────────
+#
+# Everything below swaps hyprlock, and a swap is visible however carefully it
+# is hidden: the old lock for a beat, black, then a new lock screen. It is
+# only NEEDED for a lock born blind. sleep-lock.sh judged the lock at suspend
+# time and left a verdict naming it if it had been born on a lit panel and had
+# lived long enough to draw — the usual case now that closing the lid locks
+# straight away. If the lock we are waking up to is that one, leave it alone.
+#
+# Trust, but verify: watch it for a moment after wake. A lock that cannot
+# render says so in its own log ("resource is still pending") within a label
+# tick, and if this one does, fall through and swap after all. The settle
+# skips the instant of wake, where even a healthy lock can log one stale tick.
+VERDICT_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/hyprlock-verdict"
+VERDICT=$(cat "$VERDICT_FILE" 2>/dev/null || true)
+rm -f "$VERDICT_FILE"
+LOCK_PID=$(systemctl --user show -p MainPID --value hyprlock.service 2>/dev/null)
+if [[ -n $VERDICT && $VERDICT == "$LOCK_PID" ]]; then
+    hyprctl dispatch 'hl.dsp.dpms({action="on"})' >/dev/null 2>&1
+    RAZER_PID_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/razer-fx.pid"
+    [[ -r $RAZER_PID_FILE ]] && kill -USR2 "$(cat "$RAZER_PID_FILE")" 2>/dev/null
+    "$(dirname "${BASH_SOURCE[0]}")/face-unlock.sh" rearm
+
+    sleep 0.6
+    WATCH_FROM=$(date +%s.%N)
+    sleep 1.0
+    if ! journalctl --user _PID="$LOCK_PID" --since "@${WATCH_FROM%.*}" -o short-unix -q 2>/dev/null \
+        | awk -v t="$WATCH_FROM" '$1 > t && /resource is still pending/ { found = 1 } END { exit !found }'; then
+        exit 0   # healthy: nothing was ever swapped, nothing to see
+    fi
+    echo "resume-lock: kept lock $LOCK_PID is not rendering — swapping" >&2
+fi
+
 # 1. Dark before anything else, so the frozen frame is never shown.
 blank
 
 # 2. Panel electrically on — the new hyprlock must find a live output or it
 #    is born with the same defect. Blank again: dpms on can undo step 1.
-hyprctl dispatch dpms on >/dev/null 2>&1
+hyprctl dispatch 'hl.dsp.dpms({action="on"})' >/dev/null 2>&1
 #    dpms on restores the panel's own brightness, and it does so ASYNCHRONOUSLY
 #    — the dispatch returns before the backlight has finished coming back. Blank
 #    immediately and the restore lands AFTER it, undoing the blank: the panel
@@ -190,4 +223,9 @@ done
 #    beyond this.
 sleep 0.1
 
-# 7. trap restores the backlight here.
+# 7. You just opened the lid: have face unlock look for you. The swap started
+#    a fresh scanner, which comes up dormant like every lock; this arms it
+#    (or, if it is not up yet, leaves the request for it to find).
+"$(dirname "${BASH_SOURCE[0]}")/face-unlock.sh" rearm
+
+# 8. trap restores the backlight here.

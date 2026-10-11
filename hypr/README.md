@@ -100,6 +100,42 @@ Organized keybinding modules in `conf/keybinds/`:
 - 🖥️ **Multi-Monitor**: Flexible monitor and workspace configuration
 - 🎯 **Window Rules**: Smart window management and positioning
 
+## Lock Screen & Face Unlock
+
+hyprlock is the only authentication surface (`system/lock-setup.sh` wires
+autologin → locked session). Face unlock runs **beside** the lock, not in its
+PAM stack, so the password field is live the instant the lock appears.
+
+| Piece | Role |
+|---|---|
+| `/etc/pam.d/hyprlock` | password only (written by `lock-setup.sh`) |
+| `scripts/face-unlock.sh` | runs howdy's matcher in parallel; a match unlocks via SIGUSR1 |
+| `system/systemd/hyprlock-face.service` | one scanner per lock; can never start a lock itself |
+| `hyprlock.conf` FACE label | one quiet status line under the dots |
+
+**Behaviour.** Every lock starts *dormant*, so locking while you're still in
+the chair doesn't instantly let you back in. It looks for you when you come
+back: first input after 5s of none, waking the panel, opening the lid, or
+**Super+Ctrl+Alt+F**. Up to 3 scans per arming, only with the lid open and
+the panel on. Like Face ID, the password is required once after every
+restart and after 48h without it (tunable at the top of `face-unlock.sh`).
+
+**Lid.** Closing the lid locks immediately (unless an external screen is
+on), so the lock has drawn before the machine sleeps. On wake that same lock
+is kept — no swap, no black flash. `scripts/sleep-lock.sh` judges each lock
+at suspend; `scripts/resume-lock.sh` swaps only a lock that was born blind or
+turns out not to be rendering.
+
+**Tools.**
+```bash
+system/lock-setup.sh            # install / update (idempotent)
+system/lock-setup.sh --check    # read-only health check
+system/lock-setup.sh --test     # end-to-end test on the real lock
+system/lock-setup.sh --revert   # back to an SDDM password greeter
+journalctl --user -t face-unlock -f   # live scanner log
+sudo howdy add                  # enroll another face model (do 2–3, varied light)
+```
+
 ## Dependencies
 
 Make sure you have the following installed:

@@ -36,6 +36,9 @@ LOCK_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/resume-lock.lock"
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
-hyprctl dispatch dpms on >/dev/null 2>&1
+hyprctl dispatch 'hl.dsp.dpms({action="on"})' >/dev/null 2>&1
+
+# You are back: have face unlock look for you.
+"$(dirname "${BASH_SOURCE[0]}")/face-unlock.sh" rearm
 
 exit 0
