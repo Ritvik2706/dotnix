@@ -31,10 +31,12 @@ hl.on("hyprland.start", function()
 
 	-- ===== Core services =====
 	hl.exec_cmd("awww-daemon") -- wallpaper daemon
-	hl.exec_cmd("awww img /home/ritvik/github/config/dotnix/wallpapers/idk.png") -- set wallpaper
-	hl.exec_cmd("dunst") -- notifications
+	-- hl.exec_cmd("awww img /home/ritvik/github/config/dotnix/wallpapers/idk.png") -- the daemon restores the last one itself; the island's picker (Super+P) chooses it
+	-- hl.exec_cmd("dunst") -- notifications: replaced by the lumen island (dunst.service masked so dbus cannot revive it)
+	hl.exec_cmd("~/.local/bin/lumen --scene ~/.config/lumen/shells/island/island.plm --no-hud --stall 0") -- the island: bar, notifications, clipboard (Super+C), launcher (Super+D)
 	hl.exec_cmd("hypridle") -- idle/suspend/lock management
-	hl.exec_cmd("copyq") -- clipboard manager
+	hl.exec_cmd("~/.config/hypr/scripts/screen-corners.py 12") -- MacBook-style rounded display corners (radius in logical px)
+	-- hl.exec_cmd("copyq") -- clipboard manager: replaced by the lumen island's clipboard (Super+C)
 	hl.exec_cmd("xfsettingsd") -- Xfce settings daemon (themes, fonts, etc.)
 	-- LUMEN GTK theme: GTK on Wayland reads these dconf values in preference to
 	-- gtk-3.0/settings.ini, so enforce the dark base + prefer-dark here. The
@@ -44,11 +46,13 @@ hl.on("hyprland.start", function()
 	-- hl.exec_cmd("systemctl --user start onedrive") -- Uncomment if OneDrive is configured
 
 	-- ===== Desktop UI elements =====
-	hl.exec_cmd("sh -c 'rm -f /tmp/waybar-hidden; waybar'") -- status bar (flag cleared so it starts visible & in sync)
+	-- hl.exec_cmd("sh -c 'rm -f /tmp/waybar-hidden; waybar'") -- status bar: replaced by the lumen island
 
 	-- ===== Applications (workspace-pinned via window rules) =====
 	hl.exec_cmd("ghostty") -- → workspace 2
-	-- Claude app (Chromium PWA) → workspace 11; launched on demand via super+S (toggle_claude.sh)
+	-- After a switch from niri (island Controls → Switch): reopen what was open there.
+	hl.exec_cmd("~/.config/lumen/shells/island/scripts/restore-apps.sh restore")
+	-- Claude Desktop → special:claude popup; launched on demand via super+S (toggle_claude.sh)
 
 	-- Auto-start wlsunset at login (sunset→sunrise)
 	hl.exec_cmd("wlsunset -l 43.6 -L 3.9")
@@ -59,6 +63,4 @@ hl.on("hyprland.start", function()
 	-- on lid-close/screen-off; hypridle signals it by PID (see hypridle.conf).
 	hl.exec_cmd("/home/ritvik/github/config/dotnix/razer/razer-fx.py aurora reactive starlight:BFEFFF")
 
-	-- ===== Optional / custom scripts =====
-	-- hl.exec_cmd("/home/ritvik/.config/custom_scripts/launch_claude_hypr.sh")
 end)

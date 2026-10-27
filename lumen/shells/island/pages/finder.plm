@@ -1,0 +1,376 @@
+// Files: a finder over the folders that matter (~/github, Documents,
+// Downloads, Pictures, Videos), ranked like sesh/zoxide by how often and how
+// lately each was opened, and a file manager inside them, all in vim's keys.
+// Super+Y opens it; `?` lists every key (sorting, marking, copy/cut/paste,
+// trash, rename, new, tmux sessions…). The selection previews on the right:
+// text and code, pictures, a PDF's first page, a video's frame, a folder.
+part Finder {
+    //  A row, as Finder lists: its icon (WhiteSur's, by what it is), its name, and quietly to the
+    //  right what matters about it —inside a folder its size and age in two columns, in a search
+    //  where it lives under the name—. Chosen, a soft tint of the island's light; under the pointer,
+    //  a trace. Marked (Space), a bead at its edge; pinned, its number on the icon's corner; cut, faded.
+    component FRow(r: record) {
+        size: 420, if(fnd_listing, 36, 44)
+        let rh = if(fnd_listing, 36, 44)
+        zone box row { from: 0, 0; size: 420, rh; corner: 12 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel; carries: "{r.drag}" }
+        box { from: 0, 0; size: 420, rh; corner: 12 continuous; color: ink; opacity: if(r.sel, 0, 5% * row.hover + 3% * row.pressed) }
+        body {
+            gradient: 0, 0 to 420, rh, mix(chip_hi, lilac, 0.30), mix(chip_hi, sunset, 0.24)
+            light: 4%, 0, 18
+            opacity: if(r.sel, 100%, 0)
+            box { from: 0, 0; size: 420, rh; corner: 12 continuous }
+        }
+        body {
+            gradient: 3, rh / 2 - 8 to 7, rh / 2 + 8, soft_l, soft_s; light: 6%, 10, 2
+            opacity: if(r.mark, 100%, 0)
+            box { from: 3, rh / 2 - 8; size: 4, 16; corner: 2 continuous }
+        }
+        group {
+            opacity: if(r.cut, 40%, 100%)
+            image r.ic { at: 12, rh / 2 - 13; size: 26, 26 }
+            text r.name { at: 48, if(fnd_listing, rh / 2, 15.5); anchor: left center; width: if(fnd_listing, 206, 340); lines: 1; size: 13; weight: 500; family: "SF Pro Display"; color: ink }
+            text r.sub { at: 48, 31; anchor: left center; width: 340; lines: 1; size: 10.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(fnd_listing, 0, 45%) }
+            text r.size { at: 322, rh / 2; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(fnd_listing, 42%, 0) }
+            text r.date { at: 408, rh / 2; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(fnd_listing, 52%, 0) }
+        }
+        //  Pinned: its number on the icon's corner, as a badge (1–4 open it from anywhere).
+        group {
+            opacity: if(r.pin > 0, 1, 0)
+            body {
+                gradient: 28, rh / 2 - 17 to 42, rh / 2 - 3, soft_l, soft_s; light: 6%, 4, 7; shadow: 0, 1, 3, 30%
+                ellipse { at: 35, rh / 2 - 10; radius: 7 }
+            }
+            text number(r.pin, 0, "") { at: 35, rh / 2 - 9.5; anchor: center; size: 9; weight: 700; family: "SF Pro Display"; color: pearl_ink }
+        }
+        on release row { emit fnd_open_row(r.index) }
+    }
+
+    //  An item as an icon (the icons view): its icon large, its name under it; chosen, a tile of
+    //  the island's soft light behind both, as Finder's icon view and iOS Files' grid.
+    component FTile(r: record) {
+        size: 105, 114
+        zone box tz { from: 3, 2; size: 99, 110; corner: 16 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel; carries: "{r.drag}" }
+        box { from: 3, 2; size: 99, 110; corner: 16 continuous; color: ink; opacity: if(r.sel, 0, 5% * tz.hover + 3% * tz.pressed) }
+        body {
+            gradient: 3, 2 to 102, 112, mix(chip_hi, lilac, 0.30), mix(chip_hi, sunset, 0.24)
+            light: 4%, 2, 18
+            opacity: if(r.sel, 100%, 0)
+            box { from: 3, 2; size: 99, 110; corner: 16 continuous }
+        }
+        group {
+            opacity: if(r.cut, 40%, 100%)
+            image r.icl { at: 26.5, 10; size: 52, 52 }
+            text r.name { at: 52.5, 70; anchor: center top; width: 92; lines: 2; align: center; line_height: 1.15; size: 11.5; weight: 500; family: "SF Pro Display"; color: ink }
+        }
+        body {
+            gradient: 10, 30 to 14, 46, soft_l, soft_s; light: 6%, 30, 2
+            opacity: if(r.mark, 100%, 0)
+            box { from: 10, 30; size: 4, 16; corner: 2 continuous }
+        }
+        group {
+            opacity: if(r.pin > 0, 1, 0)
+            body {
+                gradient: 66, 6 to 82, 22, soft_l, soft_s; light: 6%, 6, 8; shadow: 0, 1, 3, 30%
+                ellipse { at: 74, 14; radius: 8 }
+            }
+            text number(r.pin, 0, "") { at: 74, 14.5; anchor: center; size: 9.5; weight: 700; family: "SF Pro Display"; color: pearl_ink }
+        }
+        on release tz { emit fnd_open_row(r.index) }
+    }
+
+    //  A crumb of the path in the header: a folder you can go back to, quiet, lit under the
+    //  pointer; the last one is where you are, in full ink (a click copies its path). Between
+    //  them, a fine chevron. Each sized to its own name.
+    component Crumb(c: record) {
+        measure cw
+        group {
+            size: cw.width + if(c.last, 4, 22), 30
+            zone box cz { from: -4, 3; size: cw.width + 8, 24; corner: 12 continuous; cursor: pointer; label: "{c.name}" }
+            box { from: -4, 3; size: cw.width + 8, 24; corner: 12 continuous; color: ink; opacity: 7% * cz.hover + 4% * cz.pressed }
+            text c.name { at: 0, 15; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(c.last, 100%, 50% + 35% * cz.hover); measure: cw }
+            path { at: cw.width + 11, 15; stroke: 1.5; color: ink; opacity: if(c.last, 0, 32%); move -1.6, -4; line 1.6, 0; line -1.6, 4 }
+            on press cz while not c.last { emit fnd_crumb(c.index) }
+            on press cz while c.last { emit fnd_yank_dir }
+        }
+    }
+
+    //  An entry of a folder's preview as a list: a small icon, its name beside it.
+    component PvRow(t: record) {
+        size: 312, 31
+        image t.ic { at: 6, 6; size: 19, 19 }
+        text t.name { at: 34, 15.5; anchor: left center; width: 264; lines: 1; size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(t.dir, 92%, 78%) }
+    }
+
+    //  An entry of a folder's preview: its icon, its name under it (two lines at most), as Finder's icons.
+    component PvTile(t: record) {
+        size: 104, 100
+        image t.ic { at: 26, 4; size: 52, 52 }
+        text t.name { at: 52, 64; anchor: center top; width: 94; lines: 2; align: center; line_height: 1.15; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 85% }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_fnd)
+        move: 28 * (1 - on_fnd), 0
+
+        group {
+            move: fx0 + 16, 44
+            zone ellipse fdb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, fdb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * fdb.hover - fdb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * fdb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * fdb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            //  ?: every key, in the preview panel (lit while it shows).
+            prop hk = 0 ~240ms
+            follow hk = if(fnd_help_on, 1, 0)
+            zone ellipse fhb { at: 56, 18; radius: 16; cursor: pointer; label: "Keyboard shortcuts (?)" }
+            body {
+                gradient: 40, 2 to 72, 34, mix(mix(chip, chip_hi, fhb.hover), soft_l, hk), mix(mix(chip, chip_hi, fhb.hover), soft_s, hk)
+                glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * fhb.hover - fhb.pressed, 4.2, 21%
+                ellipse { at: 56, 18; radius: 16 - 0.6 * fhb.pressed }
+            }
+            text "?" { at: 56, 18.5; anchor: center; size: 14; weight: 700; family: "SF Pro Display"; color: mix(ink, pearl_ink, hk) }
+
+            //  The title (where you are), and the search button that becomes the field.
+            prop fsx = 0 ~300ms
+            follow fsx = if((fnd_insert and not fnd_prompting) or not fq_empty, 1, 0)
+            prop f_ins = 0 ~200ms
+            follow f_ins = if(fnd_insert and not fnd_prompting, 1, 0)
+            let ffl = 384 - 304 * fsx
+            let srt_w = srtm.width + 18
+            //  The path has what the sort leaves.
+            let pick_w = if(fnd_scoped, 380 - srt_w - 8, 380) - 8 - 82
+            group {
+                opacity: 1 - smooth(0, 0.5, fsx)
+                move: -10 * fsx, 0
+                group {
+                    clip box { from: 78, 0; size: pick_w + 4, 36 }
+                    row {
+                        at: 82, 3; gap: 0
+                        for c in fcrumbs { Crumb(c) }
+                    }
+                }
+                //  Inside a folder: how it is sorted (s cycles, S reverses).
+                group {
+                    opacity: if(fnd_scoped, 1, 0)
+                    body {
+                        color: chip; glass: 25%; blur: 0%; light: 3%, 6, 12
+                        box { from: 380 - srt_w, 6; size: srt_w, 24; corner: 12 continuous }
+                    }
+                    text fnd_sort { at: 380 - srt_w / 2, 18; anchor: center; size: 10.5; weight: 600; family: "SF Pro Display"; color: tint_ink; measure: srtm }
+                }
+            }
+            body {
+                color: mix(chip, chip_hi, fsb.hover * (1 - fsx)); glass: 25%; blur: 0%; light: 4%, 2, 18
+                shadow: 0, (1.2 + 0.5 * fsb.hover - fsb.pressed) * (1 - fsx), 4.2, 21%; opacity: 1 - fsx
+                box { from: ffl, 0; size: 420 - ffl, 36; corner: 18 continuous }
+            }
+            box { from: ffl, 0; size: 420 - ffl, 36; corner: 18 continuous; color: well; opacity: 30% * fsx }
+            body { color: well; opacity: 30% * fsx; box { from: ffl + 12, 0; size: max(0, 420 - ffl - 24), 2; corner: 1 continuous } }
+            box { from: ffl, 0; size: 420 - ffl, 36; corner: 18 continuous; stroke: 1; color: soft_l; opacity: 45% * f_ins }
+            image ic_search { at: 395 - 303 * fsx, 11; size: 14, 14; tint: ink; opacity: 85% - 25% * fsx * (1 - f_ins) }
+            group {
+                opacity: smooth(0.55, 1, fsx)
+                input fq { at: 114, 9; width: 294; size: 13.5; color: ink; placeholder: ""; label: "Search files" }
+                text pick(fnd_scoped, "Search files", "Search this folder") {
+                    at: 114, 18; anchor: left center; size: 13.5; weight: 500; family: "SF Pro Display"
+                    color: ink; opacity: 40%; show: fq_empty
+                }
+            }
+            zone box fsb { from: ffl, 0; size: 420 - ffl, 36; corner: 18 continuous; cursor: pointer; label: "Search (i)"; active: not fnd_insert }
+        }
+
+        //  The results: always a list (how a folder's contents look is the preview's choice).
+        zone box fnd_list { from: fx0 + 12, 88; size: 420, 458; label: "Files" }
+        column {
+            at: fx0 + 12, 88; gap: 2
+            for r in fhits { FRow(r) }
+        }
+        text pick(fq_empty, "No matches", "Nothing here yet") {
+            at: fx0 + 222, 112; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: if(fhits.count == 0, 50%, 0)
+        }
+
+        //  The preview: a pressed-in panel on the right, its name and what it is on top.
+        let pvx = fx0 + 444
+        let pvy = 44
+        box { from: pvx, pvy; size: pvw, 502; corner: 22 continuous; color: well; opacity: 26% }
+        body { color: well; opacity: 26%; box { from: pvx + 16, pvy; size: 308, 2; corner: 1 continuous } }
+        box { from: pvx, pvy; size: pvw, 502; corner: 22 continuous; stroke: 0.6; color: ink; opacity: 8% }
+        group {
+            opacity: if(fhits.count > 0, 1, 0)
+            text pv_name { at: pvx + 18, pvy + 22; anchor: left center; width: pvw - 70; lines: 1; size: 13.5; weight: 600; family: "SF Pro Display"; color: ink }
+            text pv_meta { at: pvx + 18, pvy + 40; anchor: left center; width: pvw - 70; lines: 1; size: 10.5; weight: 500; family: "SF Pro Display"; color: tint_ink }
+            line { from: pvx + 18, pvy + 54.5; to: pvx + pvw - 18, pvy + 54.5; width: 0.7; color: ink; opacity: 10% }
+            //  Its path, to the clipboard (as yp).
+            zone ellipse pcopy { at: pvx + pvw - 30, pvy + 28; radius: 14; cursor: pointer; label: "Copy the path" }
+            body {
+                color: mix(chip, chip_hi, pcopy.hover); glass: 25%; blur: 0%; light: 4%, pvy + 14, 14; shadow: 0, 1.2, 4, 20%
+                ellipse { at: pvx + pvw - 30, pvy + 28; radius: 14 - 0.5 * pcopy.pressed }
+            }
+            image ic_clip { at: pvx + pvw - 37, pvy + 21; size: 14, 14; tint: ink; opacity: 85% }
+            //  A folder's contents, as icons or as a list (V): the switch sits left of the copy button.
+            group {
+                show: pv_kind == 7 and not fnd_side
+                let vsx = pvx + pvw - 54 - 68
+                move: 0, pvy + 10
+            //  A list, or icons: iOS's segmented control, its bead of soft light sliding to the one chosen.
+            prop vsel = 0 ~shape
+            follow vsel = if(pvd_list, 0, 1)
+            body {
+                color: chip; glass: 25%; blur: 0%; light: 3%, 5, 13
+                box { from: vsx, 5; size: 60, 26; corner: 13 continuous }
+            }
+            body {
+                gradient: vsx + 2 + 28 * vsel, 7 to vsx + 30 + 28 * vsel, 29, soft_l, soft_s
+                glass: 25%; blur: 0%; light: 7%, 7, 11; shadow: 0, 1, 3.5, 24%
+                box { from: vsx + 2 + 28 * vsel, 7; size: 28, 22; corner: 11 continuous }
+            }
+            //  The list: three lines, a dot before each.
+            group {
+                move: vsx + 16, 18
+                repeat k in 0..3 {
+                    ellipse { at: -4.5, -4 + 4 * k; radius: 1; color: mix(ink, pearl_ink, 1 - vsel) }
+                    box { from: -2, -4.6 + 4 * k; size: 8, 1.3; corner: 0.65; color: mix(ink, pearl_ink, 1 - vsel) }
+                }
+            }
+            //  Icons: four small squares.
+            group {
+                move: vsx + 44, 18
+                repeat k in 0..4 {
+                    box { from: -5 + 5.6 * mod(k, 2), -5 + 5.6 * floor(k / 2); size: 4.4, 4.4; corner: 1.2 continuous; color: mix(ink, pearl_ink, vsel) }
+                }
+            }
+            zone box vs_list { from: vsx, 5; size: 30, 26; corner: 13 continuous; cursor: pointer; label: "Contents as a list (V)" }
+            zone box vs_icons { from: vsx + 30, 5; size: 30, 26; corner: 13 continuous; cursor: pointer; label: "Contents as icons (V)" }
+            }
+            //  Text and code, as it is written.
+            text pv_text {
+                at: pvx + 18, pvy + 68; anchor: left top; width: pvw - 36; lines: 29
+                size: 10.5; family: "JetBrainsMono Nerd Font"; color: ink; opacity: if(pv_kind == 1, 82%, 0)
+            }
+            //  An archive: what is in it, as a list.
+            text pv_text {
+                at: pvx + 18, pvy + 68; anchor: left top; width: pvw - 36; lines: 24
+                size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(pv_kind == 3, 75%, 0)
+            }
+            //  A folder: what is in it, as a list, two columns of twelve; what does not fit, counted under it.
+            group {
+                opacity: if(pv_kind == 7 and pvd_list and not fnd_side, 1, 0)
+                grid {
+                    at: pvx + 18, pvy + 70; columns: 2; width: 624; gap: 0; row: 31
+                    for t in pvd { PvRow(t) }
+                }
+                text "+{pvd_more} more" { at: pvx + pvw - 22, pvy + 70 + 12 * 31 + 14; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(pvd_more > 0, 55%, 0) }
+            }
+            //  A folder: what is in it, as icons, six to a row; what does not fit, counted in the last place.
+            group {
+                opacity: if(pv_kind == 7 and not pvd_list and not fnd_side, 1, 0)
+                grid {
+                    at: pvx + 18, pvy + 70; columns: 6; width: 624; gap: 0; row: 100
+                    for t in pvd { PvTile(t) }
+                }
+                group {
+                    opacity: if(pvd_more > 0, 1, 0)
+                    body {
+                        color: chip; light: 4%, pvy + 74, 26
+                        box { from: pvx + 18 + 5 * 104 + 26, pvy + 70 + 3 * 100 + 4; size: 52, 52; corner: 14 continuous }
+                    }
+                    text "+{pvd_more}" { at: pvx + 18 + 5 * 104 + 52, pvy + 70 + 3 * 100 + 30; anchor: center; size: 14; weight: 600; family: "SF Pro Display"; color: ink; opacity: 80% }
+                    text "more" { at: pvx + 18 + 5 * 104 + 52, pvy + 70 + 3 * 100 + 71; anchor: center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 55% }
+                }
+            }
+            //  Beside a view: one column of names, as many as fit.
+            group {
+                opacity: if(pv_kind == 7 and fnd_side, 1, 0)
+                clip box { from: pvx + 8, pvy + 64; size: pvw - 16, 400 }
+                column {
+                    at: pvx + 12, pvy + 70; gap: 0
+                    for t in pvd { PvRow(t) }
+                }
+            }
+            text pv_text { at: pvx + pvw / 2, pvy + 250; anchor: center; size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(pv_kind == 7, 45%, 0) }
+            //  A picture (or a PDF's first page, or a video's frame), fitted and rounded;
+            //  zoomed and moved while looking closer, its frame growing to the panel's.
+            prop vz = 1 ~200ms
+            follow vz = pv_z
+            prop vx = 0 ~200ms
+            follow vx = pv_px
+            prop vy = 0 ~200ms
+            follow vy = pv_py
+            prop vf = 0 ~220ms
+            follow vf = if(fnd_view, 1, 0)
+            group {
+                show: pv_kind == 2
+                let vcx = pvx + pvw / 2
+                let vcy = pvy + 264
+                let pfw = min(pv_iw * vz, pvw - 36)
+                let pfh = min(pv_ih * vz, 400)
+                box { from: vcx - pfw / 2, vcy - pfh / 2; size: pfw, pfh; corner: 12 continuous; color: chip_hi }
+                group {
+                    clip box { from: vcx - pfw / 2, vcy - pfh / 2; size: pfw, pfh; corner: 12 continuous }
+                    //  The picture comes fitted into a 624×400 canvas: scaled evenly (`pv_cs`) so it fills its frame, never squeezed.
+                    image pv_img { at: vcx - 312 * pv_cs * vz + vx, vcy - 200 * pv_cs * vz + vy; size: 624 * pv_cs * vz, 400 * pv_cs * vz }
+                }
+                box { from: vcx - pfw / 2, vcy - pfh / 2; size: pfw, pfh; corner: 12 continuous; stroke: 0.6 + 0.6 * vf; color: mix(ink, soft_l, vf); opacity: 16% + 54% * vf }
+            }
+            zone box pv_area { from: pvx + 18, pvy + 64; size: pvw - 36, 400; cursor: pointer; label: "Look closer (v)"; active: pv_kind == 2 }
+            //  A document's words (Word, LibreOffice…), as prose, until its first page is drawn.
+            text pv_text {
+                at: pvx + 18, pvy + 68; anchor: left top; width: pvw - 36; lines: 21
+                size: 13.5; weight: 400; family: "SF Pro Display"; color: ink; opacity: if(pv_kind == 6, 85%, 0)
+            }
+            //  ?: every key, in place of the preview.
+            text fnd_help_text {
+                at: pvx + 18, pvy + 68; anchor: left top; width: pvw - 36; lines: 29
+                size: 10.5; family: "JetBrainsMono Nerd Font"; color: ink; opacity: if(pv_kind == 5, 85%, 0)
+            }
+            //  Nothing to show: a large symbol of what it is.
+            group {
+                opacity: if(pv_kind == 4, 1, 0)
+                image ic_doc { at: pvx + pvw / 2 - 12, pvy + 230; size: 24, 24; tint: ink; opacity: 30% }
+                text "No preview" { at: pvx + pvw / 2, pvy + 270; anchor: center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 40% }
+            }
+        }
+
+        //  What the keys do, quietly, along the panel's foot.
+        line { from: pvx + 18, pvy + 476.5; to: pvx + pvw - 18, pvy + 476.5; width: 0.7; color: ink; opacity: 8% }
+        text pick(fnd_side, "⏎ open · v look closer · t tmux · e nvim · ? all keys", "⏎ open · v closer · ? keys") {
+            at: pvx + pvw / 2, pvy + 489; anchor: center; size: 10; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(fnd_toast_on, 0, if(fnd_view, 0, 38%))
+        }
+        text pv_zoom {
+            at: pvx + pvw / 2, pvy + 489; anchor: center; size: 10; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: if(fnd_toast_on, 0, if(fnd_view, 80%, 0))
+        }
+        text fnd_toast {
+            at: pvx + pvw / 2, pvy + 489; anchor: center; width: pvw - 40; lines: 1; align: center; size: 10.5; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: if(fnd_toast_on, 100%, 0)
+        }
+
+        //  Rename, a new file, a new folder: a field of glass rising over the list's foot.
+        prop prm = 0 ~260ms
+        follow prm = if(fnd_prompting, 1, 0)
+        group {
+            opacity: smooth(0.2, 1, prm)
+            move: 0, 10 * (1 - prm)
+            body {
+                gradient: fx0 + 12, 502 to fx0 + 432, 546, well_t, well_b
+                opacity: 97%; light: 3%, 502, 22; shadow: 0, 6, 18, 34%
+                box { from: fx0 + 12, 502; size: 420, 44; corner: 22 continuous }
+            }
+            box { from: fx0 + 12.5, 502.5; size: 419, 43; corner: 21.5 continuous; stroke: 1; color: soft_l; opacity: 45% }
+            text fnd_prompt_label { at: fx0 + 30, 524; anchor: left center; size: 11; weight: 700; family: "SF Pro Display"; color: tint_ink; measure: prlm }
+            input fnd_in { at: fx0 + 40 + prlm.width, 515; width: 380 - prlm.width - 24; size: 13; color: ink; placeholder: ""; label: "Name" }
+        }
+    }
+
+    on press fdb while not side { emit go_home }
+    on press fdb while side { side = false }
+    on press fhb { emit fnd_help }
+    on press vs_list { emit fnd_view_as(0) }
+    on press vs_icons { emit fnd_view_as(1) }
+    on press pcopy { emit fnd_yank }
+    on press fsb { fnd_insert = true; focus fq }
+    on scroll fnd_list { emit fnd_scroll(wheel) }
+    on press pv_area { fnd_view = true; emit pv_grab }
+    on drag pv_area { emit pv_drag_x(drag.dx); emit pv_drag_y(drag.dy) }
+    on scroll pv_area { fnd_view = true; emit pv_zoom(if(wheel > 0, 1.15, 0.87)) }
+}

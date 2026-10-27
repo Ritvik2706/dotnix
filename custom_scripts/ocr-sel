@@ -67,6 +67,13 @@ make_preview() {
 if TEXT="$(tesseract "$SRC" stdout --oem "$OEM" --psm "$PSM" -l "$LANGS" \
            -c preserve_interword_spaces=1 | tr -d '\f' || true)"; then
   if [ -n "$TEXT" ]; then
+    # The lumen island shows the copy in its centre pill, marked as scanned
+    # text; it only needs telling first. Without the island, a notification.
+    if ~/.local/bin/lumen --say island "emit copy_kind 1" >/dev/null 2>&1; then
+      printf "%s" "$TEXT" | wl-copy
+      printf "%s\n" "$TEXT"
+      exit 0
+    fi
     printf "%s" "$TEXT" | wl-copy
 
     PREVIEW="$(make_preview "$TEXT")"
@@ -93,6 +100,7 @@ if TEXT="$(tesseract "$SRC" stdout --oem "$OEM" --psm "$PSM" -l "$LANGS" \
   fi
 fi
 
+~/.local/bin/lumen --say island "emit copy_kind 2" >/dev/null 2>&1 || \
 notify-send \
   --app-name="OCR" \
   --category=clipboard \

@@ -31,7 +31,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 REPO=$(cd .. && pwd)
 
 USER_NAME=${SUDO_USER:-$USER}
-SESSION=hyprland-uwsm.desktop
+# lumen-session: Hyprland or niri, whichever the island last switched to
+# (system/lumen-session). It runs Hyprland through uwsm exactly as
+# hyprland-uwsm.desktop did.
+SESSION=lumen.desktop
 AUTOLOGIN_CONF=/etc/sddm.conf.d/20-autologin.conf
 HOWDY_CONF=/etc/howdy/config.ini
 UNIT_SRC="$REPO/system/systemd/hyprlock.service"
@@ -365,6 +368,8 @@ if command -v systemd-analyze >/dev/null; then
 fi
 chmod +x "$REPO/hypr/scripts/face-unlock.sh"
 sudo -v || { echo "sudo is needed for /etc/pam.d and /etc/sddm.conf.d" >&2; exit 1; }
+chmod +x "$REPO/system/lumen-session"
+sudo install -m 644 "$REPO/system/lumen.desktop" /usr/share/wayland-sessions/lumen.desktop
 [[ -f /usr/share/wayland-sessions/$SESSION ]] \
     || { echo "session file $SESSION not found" >&2; exit 1; }
 

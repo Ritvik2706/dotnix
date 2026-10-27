@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=Lumen (Hyprland or niri)
+Comment=The compositor last chosen from the lumen island; switch between them without logging out
+Exec=/home/ritvik/github/config/dotnix/system/lumen-session
+Type=Application

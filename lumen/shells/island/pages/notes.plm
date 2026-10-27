@@ -1,0 +1,86 @@
+// The notifications page of the open card: what has arrived and not been dealt
+// with, newest first. A click opens one; × dismisses it; Clear empties it.
+part Notes {
+    component NoteRow(r: record) {
+        size: 360, 60
+        zone box row { from: 0, 0; size: 360, 60; corner: 24 continuous; cursor: pointer; label: "{r.title}" }
+        body {
+            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 30
+            box { from: 0, 0; size: 360, 60; corner: 24 continuous }
+        }
+
+        body {
+            color: chip_hi; glass: 25%; blur: 0%; light: 4%, 10, 20
+            box { from: 12, 10; size: 40, 40; corner: 13 continuous }
+        }
+        //  A quiet bell first: what shows if neither a picture nor the app's icon does.
+        image ic_bell { at: 25, 23; size: 14, 14; tint: ink; opacity: 40% }
+        group {
+            show: r.is_pic
+            clip box { from: 12, 10; size: 40, 40; corner: 13 continuous }
+            image r.pic { at: 12, 10; size: 40, 40 }
+        }
+        image r.pic { at: 20, 18; size: 24, 24; show: not r.is_pic }
+        box { from: 12, 10; size: 40, 40; corner: 13 continuous; stroke: 1.2; color: coral; opacity: 80% * r.urgent }
+
+        text r.app { at: 64, 15; anchor: left center; width: 200; lines: 1; size: 10; weight: 600; family: "SF Pro Display"; color: if(r.urgent, coral, tint_ink); opacity: 85% }
+        text r.ago { at: 318, 15; anchor: right center; size: 10; weight: 500; family: "SF Pro Display"; color: ink; opacity: 40% }
+        text r.title { at: 64, 31; anchor: left center; width: 254; lines: 1; size: 13; weight: 600; family: "SF Pro Display"; color: ink }
+        text r.body { at: 64, 46; anchor: left center; width: 254; lines: 1; size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 65% }
+
+        group {
+            opacity: max(row.hover, del.hover)
+            body {
+                color: mix(chip_hi, rose, del.hover); light: 4%, 19, 11
+                ellipse { at: 337, 30; radius: 11 - 0.5 * del.pressed }
+            }
+            image ic_x { at: 331, 24; size: 12, 12; tint: mix(ink, rose_ink, del.hover); opacity: 85% }
+        }
+        zone ellipse del { at: 337, 30; radius: 12; cursor: pointer; label: "Dismiss" }
+
+        on press row { emit note_open_row(r.index) }
+        on press del { emit note_del_row(r.index) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_notes)
+        move: 28 * (1 - on_notes), 0
+
+        group {
+            move: ex0 + 16, 44
+            zone ellipse nbk { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, nbk.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * nbk.hover - nbk.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * nbk.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * nbk.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            text "Notifications" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+
+            group {
+                show: n_count > 0
+                body {
+                    color: mix(rose, #7c3d4d, nclr.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + nclr.hover - nclr.pressed, 4.9, 20%
+                    box { from: 284, 2; size: 68, 32; corner: 16 continuous }
+                }
+                image ic_trash { at: 296, 10; size: 15, 15; tint: rose_ink; opacity: 90% }
+                text "Clear" { at: 315, 18; anchor: left center; size: 11.5; weight: 600; family: "SF Pro Display"; color: rose_ink }
+            }
+            zone box nclr { from: 284, 2; size: 68, 32; corner: 16 continuous; cursor: pointer; label: "Clear all notifications"; active: n_count > 0 }
+        }
+        line { from: ex0 + 20, 88; to: ex0 + 364, 88; width: 0.7; color: ink; opacity: 10% }
+
+        zone box notes_list { from: ex0 + 12, 94; size: 360, nl_h; label: "Notifications" }
+        column nlist {
+            at: ex0 + 12, 94; gap: 2
+            for r in notes { NoteRow(r) }
+        }
+        text "You're all caught up" {
+            at: ex0 + 192, 118; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: notes.count == 0
+        }
+    }
+
+    on press nbk { emit go_home }
+    on press nclr { emit notes_clear }
+    on scroll notes_list { emit notes_scroll(wheel) }
+}

@@ -112,3 +112,4 @@ tmux/plugins/
 zen/*
 !zen/user.js
 !zen/userChrome.css
+ghostty/wall-colours

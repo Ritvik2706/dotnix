@@ -1,0 +1,136 @@
+// The camera: a live viewfinder (mirrored, as FaceTime shows you), Photo and
+// Video, and the shutter. A photo flashes the viewfinder white, clicks, and
+// drops into the thumbnail at the left (saved in ~/Pictures/Camera); a video
+// turns the shutter into a coral square and counts in the header. The camera
+// only runs while this page shows.
+part Camera {
+    //  The viewfinder fills the card under its header: 896 × 504 (16:9), edge
+    //  to edge; everything else floats on it as pieces of glass, as iOS 26's
+    //  camera has it (no title, no bars).
+    let vf_x = ex0 + 16
+    let vf_y = 44
+    let vw = 896
+    let vh = 504
+    let ctl_y = vf_y + vh - 46       // the shutter's row
+    prop flash = 0 ~380ms             // the white of a photo, fading
+    prop shot_pop = 1 ~spring(520, 45.6)
+    prop cmode = 0 ~260ms
+    follow cmode = if(cam_video, 1, 0)
+    prop recv2 = 0 ~240ms
+    follow recv2 = if(cam.recording, 1, 0)
+
+    group {
+        opacity: smooth(0.4, 1, on_cam)
+        move: 28 * (1 - on_cam), 0
+
+        //  The viewfinder: what the camera sees, cut to a rounded 16:9.
+        box { from: vf_x, vf_y; size: vw, vh; corner: 22 continuous; color: #0d0b12 }
+        //  Under the picture, so its first frame covers them: starting, or why it could not.
+        image ic_cam_l { at: vf_x + vw / 2 - 10, vf_y + vh / 2 - 30; size: 20, 20; tint: ink; opacity: 35% }
+        text "Starting the camera…" {
+            at: vf_x + vw / 2, vf_y + vh / 2 + 8; anchor: center; size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(cam.on, 45%, 0)
+        }
+        text cam.error {
+            at: vf_x + vw / 2, vf_y + vh / 2 + 8; anchor: center; width: 300; lines: 1; align: center
+            size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(cam.on, 0, 55%)
+        }
+        group {
+            clip box { from: vf_x, vf_y; size: vw, vh; corner: 22 continuous }
+            image cam_view { at: vf_x, vf_y; size: vw, vh }
+            box { from: vf_x, vf_y; size: vw, vh; color: #ffffff; opacity: flash }
+        }
+        box { from: vf_x, vf_y; size: vw, vh; corner: 22 continuous; stroke: 0.6; color: ink; opacity: 14% }
+
+        //  Back, top left; recording, top right: glass on the picture.
+        zone ellipse cmb { at: vf_x + 32, vf_y + 32; radius: 18; cursor: pointer; label: "Back" }
+        body {
+            color: mix(shade, chip_hi, cmb.hover); opacity: 70% + 20% * cmb.hover; glass: 25%; blur: 0%; light: 4%, 0, 18; shadow: 0, 2, 8, 28%
+            ellipse { at: vf_x + 32, vf_y + 32; radius: 18 - 0.6 * cmb.pressed }
+        }
+        path { at: vf_x + 32, vf_y + 32; stroke: 1.9; color: ink; opacity: 85% + 15% * cmb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+        group {
+            opacity: recv2
+            let rp = vf_x + vw - 18 - 74
+            body {
+                gradient: rp, vf_y + 20 to rp + 74, vf_y + 46, coral, #e85d72
+                glass: 25%; blur: 0%; light: 6%, 0, 13; shadow: 0, 2, 8, 28%
+                box { from: rp, vf_y + 19; size: 74, 26; corner: 13 continuous }
+            }
+            ellipse { at: rp + 15, vf_y + 32; radius: 3.4; color: #ffffff }
+            text cam_rec_time { at: rp + 25, vf_y + 32; anchor: left center; size: 12; weight: 700; family: "SF Pro Display"; color: #ffffff }
+        }
+
+        //  Photo or Video, bottom left: a capsule of dark glass, a lighter pill sliding under
+        //  the mode in use, its name in warm light (small capitals, as iOS).
+        let md_x = vf_x + 24
+        let md_y = ctl_y - 14
+        body {
+            color: shade; opacity: 55%; glass: 25%; blur: 0%; light: 4%, 0, 14; shadow: 0, 2, 8, 26%
+            box { from: md_x, md_y; size: 128, 28; corner: 14 continuous }
+        }
+        box { from: md_x + 0.5, md_y + 0.5; size: 127, 27; corner: 13.5 continuous; stroke: 0.8; color: ink; opacity: 20% }
+        body {
+            color: ink; opacity: 16%; glass: 25%; blur: 0%; light: 5%, 0, 11
+            box { from: md_x + 3 + 61 * cmode, md_y + 3; size: 61, 22; corner: 11 continuous }
+        }
+        text "PHOTO" { at: md_x + 33.5, md_y + 14; anchor: center; size: 10.5; weight: 700; family: "SF Pro Display"; color: mix(warm, ink, cmode); opacity: 100% - 30% * cmode }
+        text "VIDEO" { at: md_x + 94.5, md_y + 14; anchor: center; size: 10.5; weight: 700; family: "SF Pro Display"; color: mix(ink, warm, cmode); opacity: 70% + 30% * cmode }
+        zone box cm_photo { from: md_x, md_y; size: 64, 28; corner: 14 continuous; cursor: pointer; label: "Photo"; active: not cam.recording }
+        zone box cm_video { from: md_x + 64, md_y; size: 64, 28; corner: 14 continuous; cursor: pointer; label: "Video"; active: not cam.recording }
+
+        //  The last photo, small, bottom right beside the folder: it pops as a new one lands.
+        group {
+            show: cam_has_last
+            pivot: vf_x + vw - 104, ctl_y
+            scale: shot_pop
+            body {
+                color: chip_hi; shadow: 0, 2, 8, 30%
+                box { from: vf_x + vw - 124, ctl_y - 20; size: 40, 40; corner: 11 continuous }
+            }
+            group {
+                clip box { from: vf_x + vw - 124, ctl_y - 20; size: 40, 40; corner: 11 continuous }
+                image cam_last { at: vf_x + vw - 139.5, ctl_y - 20; size: 71, 40 }
+            }
+            box { from: vf_x + vw - 124, ctl_y - 20; size: 40, 40; corner: 11 continuous; stroke: 1; color: #ffffff; opacity: 55% }
+        }
+        zone box cm_last { from: vf_x + vw - 124, ctl_y - 20; size: 40, 40; corner: 11 continuous; cursor: pointer; label: "Open the last photo"; active: cam_has_last }
+
+        //  The shutter: a white ring, and inside it white for a photo, coral for a
+        //  video, a coral rounded square while one is being made.
+        let sh_x = vf_x + vw / 2
+        let sh_y = ctl_y
+        body {
+            color: #000000; opacity: 14%; shadow: 0, 2, 10, 30%
+            ellipse { at: sh_x, sh_y; radius: 30 }
+        }
+        ellipse { at: sh_x, sh_y; radius: 27; stroke: 3; color: #ffffff; opacity: 95% }
+        let core = 22 - 2 * shut.pressed
+        let core_s = core * 2 - (core * 2 - 22) * recv2
+        body {
+            color: mix(#ffffff, coral, max(cmode, recv2)); light: 6%, 0, 22
+            box { at: sh_x, sh_y; size: core_s, core_s; corner: (core_s / 2) * (1 - recv2) + 5 * recv2 continuous }
+        }
+        zone ellipse shut { at: sh_x, sh_y; radius: 28; cursor: pointer; label: "Shutter"; active: cam.on }
+
+        //  The folder, at the right.
+        zone ellipse cm_dir { at: vf_x + vw - 44, sh_y; radius: 20; cursor: pointer; label: "Open Pictures/Camera" }
+        body {
+            color: mix(shade, chip_hi, cm_dir.hover); opacity: 70% + 20% * cm_dir.hover; glass: 25%; blur: 0%; light: 4%, 0, 20; shadow: 0, 2, 8, 28%
+            ellipse { at: vf_x + vw - 44, sh_y; radius: 20 - 0.6 * cm_dir.pressed }
+        }
+        image ic_folder_s { at: vf_x + vw - 52, sh_y - 8; size: 16, 16; tint: ink; opacity: 85% }
+    }
+
+    on press cmb { panel = home }
+    on press cm_photo { cam_video = false }
+    on press cm_video { cam_video = true }
+    on press shut while not cam_video { emit cam_photo; flash: 0.85 ~1ms; flash: 0 after 40ms }
+    on press shut while cam_video and not cam.recording { emit cam_record }
+    on press shut while cam_video and cam.recording { emit cam_record_stop }
+    on press cm_last { emit cam_open_last }
+    on press cm_dir { emit cam_open_dir }
+    on change cam_shots { shot_pop: 0.6 ~1ms; shot_pop: 1 after 20ms }
+    on key space while expanded and panel == cam and not cam_video { emit cam_photo; flash: 0.85 ~1ms; flash: 0 after 40ms }
+    on key Return while expanded and panel == cam and not cam_video { emit cam_photo; flash: 0.85 ~1ms; flash: 0 after 40ms }
+    on key Escape while expanded and panel == cam { expanded = false }
+}

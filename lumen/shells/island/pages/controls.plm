@@ -1,0 +1,96 @@
+// The Controls page: the card's second Control Center page, under the home
+// one (the dots in the header, or the wheel, go between them). Sixteen
+// round buttons of glass with their names under them, as iOS draws its
+// controls: what opens something on top, what switches something below.
+// Lit, a button fills with the island's soft tint; recording, with coral.
+part Controls {
+    component Control(glyph: number, lit: bool, pick: event, name: text) {
+        size: 88, 84
+        zone ellipse c { at: 44, 26; radius: 25; cursor: pointer; label: "{name}"; role: toggle; checked: lit }
+        prop k = 0 ~240ms
+        follow k = if(lit, 1, 0)
+        prop lift = 0 ~160ms
+        follow lift = c.hover - c.pressed
+        body {
+            gradient: 20, 2 to 68, 50, mix(mix(chip, chip_hi, max(lift, 0)), if(glyph == 7, coral, soft_l), k), mix(mix(chip, chip_hi, max(lift, 0)), if(glyph == 7, #e85d72, soft_s), k)
+            glass: 25%; blur: 0%; light: 5%, 2, 24
+            shadow: 0, 1.8 + 0.8 * max(lift, 0) - 0.8 * c.pressed, 7 + 2 * max(lift, 0), 22%
+            ellipse { at: 44, 26 - 1 * max(lift, 0); radius: 24 - 0.8 * c.pressed }
+        }
+        //  Its symbol: dark on a lit button (white on the coral one).
+        group {
+            move: 34, 16 - 1 * max(lift, 0)
+            image cc_grid { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 0 }
+            image cc_clip { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 1 }
+            image cc_moon { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 2 }
+            image cc_photo { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 3 }
+            image cc_smile { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 4 }
+            image cc_shot { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 6 }
+            image cc_rec { at: 0, 0; size: 20, 20; tint: coral; opacity: 95%; show: glyph == 7 and not lit }
+            image cc_stop { at: 0, 0; size: 20, 20; tint: #ffffff; opacity: 95%; show: glyph == 7 and lit }
+            image cc_picker { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 8 }
+            image cc_mixer { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 9 }
+            image cc_night { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 10 }
+            image cc_awake { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 11 }
+            image cc_leaf { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 12 and profile == saver }
+            image cc_gauge { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 12 and profile == balanced }
+            image cc_rocket { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 12 and profile == performance }
+            image cc_timer { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 13 }
+            image cc_watch { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 14 }
+            image cc_camera { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 15 }
+            image cc_folder { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 16 }
+        }
+        //  Its name; recording says Stop, the power button says which mode it is in.
+        text pick(if(glyph == 7 and lit, 1, if(glyph == 12, if(profile == saver, 2, if(profile == performance, 4, 3)), if(glyph == 11 and lit, 5, 0))), name, "Stop", "Power Saver", "Balanced", "Performance", awake_left) {
+            at: 44, 66; anchor: center; width: 86; lines: 1; align: center
+            size: 10.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 70% + 25% * max(k, c.hover)
+        }
+        //  What it opens may be shorter than this page: the card keeps counting the
+        //  pointer as inside it until it is back over the card (see `hit`).
+        on press c { hold_h = pointer.y + 14; emit pick }
+    }
+
+    group {
+        opacity: smooth(0.45, 1, on_ctl)
+        move: 0, 26 * (1 - on_ctl)
+        grid {
+            at: ex0 + (412 - 352) / 2, 50; columns: 4; width: 352; gap: 0; row: 84   // centred in the card
+            Control(0, false, launch_open, "Apps")
+            Control(1, false, clip_open, "Clipboard")
+            Control(4, false, emoji_open, "Emoji")
+            Control(3, false, wall_open, "Wallpaper")
+            Control(6, false, shot_open, "Screenshot")
+            Control(7, recording, rec_open, "Record")
+            Control(8, false, pick_color, "Colour Picker")
+            Control(9, false, open_mix, "Sound")
+            Control(2, dnd, dnd_toggle, "Focus")
+            Control(10, night, night_toggle, "Night Light")
+            Control(11, awake, awake_tap, "Keep Awake")
+            Control(12, profile != balanced, profile_next, "Power Mode")
+            Control(13, tmr_on and tmr_mode == timer, open_timer, "Timer")
+            Control(14, tmr_on and tmr_mode == watch, open_watch, "Stopwatch")
+            Control(15, cam.on, open_cam, "Camera")
+            Control(16, false, find_open, "Files")
+        }
+    }
+
+    //  Which page: the page showing is a small capsule,
+    //  the other a dot, side by side in the header's middle. Only on the two Control Center pages.
+    prop pc = 0 ~300ms
+    follow pc = if(panel == ctl, 1, 0)
+    let pcx = (ex0 + exr) / 2
+    let pcy = 22
+    group {
+        opacity: smooth(0.4, 1, max(on_home, on_ctl)) * smooth(0.5, 1, open)
+        body {
+            color: well; opacity: 26%
+            box { at: pcx, pcy; size: 46, 14; corner: 7 continuous }
+        }
+        box { at: pcx - 9, pcy; size: 5 + 9 * (1 - pc), 5; corner: 2.5 continuous; color: ink; opacity: 45% + 50% * (1 - pc) }
+        box { at: pcx + 9, pcy; size: 5 + 9 * pc, 5; corner: 2.5 continuous; color: ink; opacity: 45% + 50% * pc }
+        zone box pc_home { at: pcx - 11, pcy; size: 22, 18; corner: 9 continuous; cursor: pointer; label: "Home"; active: panel == home or panel == ctl }
+        zone box pc_ctl { at: pcx + 11, pcy; size: 22, 18; corner: 9 continuous; cursor: pointer; label: "Controls"; active: panel == home or panel == ctl }
+    }
+    on press pc_home { panel = home }
+    on press pc_ctl { panel = ctl }
+}

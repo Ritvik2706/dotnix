@@ -1,0 +1,30 @@
+{
+  "name": "dusk",
+  "about": "The hand-tuned Lumen look made for wallpapers/idk.png (purple dusk). Every generated theme is this one re-hued: lightness and chroma stay, the hues come from the wallpaper. family: primary = the wallpaper's leading hue, secondary = its second, neutral = glass and greys, faintly tinted with the leading hue.",
+  "hues": { "primary": 277, "secondary": 32 },
+  "chroma": { "primary": 0.14, "secondary": 0.08 },
+  "roles": {
+    "ink":       ["#f6f8fc", "neutral"],
+    "cool":      ["#ab9cff", "primary"],
+    "warm":      ["#ffb38c", "secondary"],
+    "lilac":     ["#c2a8ff", "primary"],
+    "sunset":    ["#ff9e7a", "secondary"],
+    "dusk":      ["#252530", "neutral"],
+    "deep":      ["#1e1e28", "neutral"],
+    "rim_grey":  ["#b4b8c4", "neutral"],
+    "idle_c":    ["#767d96", "neutral"],
+    "low_c":     ["#aeb5ca", "neutral"],
+    "chip":      ["#3a3a42", "neutral"],
+    "chip_hi":   ["#4b4b54", "neutral"],
+    "pearl":     ["#e9eaef", "neutral"],
+    "pearl_ink": ["#26252c", "neutral"],
+    "shade":     ["#15121e", "neutral"],
+    "stack1_t":  ["#2a2638", "neutral"],
+    "stack1_b":  ["#1b1828", "neutral"],
+    "stack2_t":  ["#2f2b3e", "neutral"],
+    "stack2_b":  ["#201c2e", "neutral"],
+    "well_t":    ["#2b2834", "neutral"],
+    "well_b":    ["#211f29", "neutral"],
+    "rim":       ["#c9b6ff", "primary"]
+  }
+}

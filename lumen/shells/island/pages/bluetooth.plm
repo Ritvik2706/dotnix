@@ -1,0 +1,84 @@
+// The Bluetooth page of the open card: my devices, then the ones nearby while it looks.
+// A row says which by its position; the logic (island.luau) knows the address.
+part Bluetooth {
+    component DevRow(r: record) {
+        let cap = if(r.caption > 0, 26, 0)
+        prop grow = 0 ~260ms
+        follow grow = if(r.menu, 1, 0)
+        size: 360, if(r.caption > 0, 26, 0) + 46 + 40 * r.menu
+
+        //  A section starts here: "My devices", or "Nearby".
+        text pick(r.caption, "", "MY DEVICES", "NEARBY") {
+            at: 12, 15; anchor: left center; size: 8.5; weight: 600; family: "SF Pro Display"
+            color: ink; opacity: 40%; show: r.caption > 0
+        }
+
+        group {
+            move: 0, cap
+            zone box row { from: 0, 0; size: 360, 46; corner: 23 continuous; cursor: pointer; label: "{r.name}"; selected: r.connected }
+            //  At rest flat; under the pointer it rises; connected, a raised chip.
+            body {
+                color: chip_hi; opacity: 38% * row.hover + 22% * grow; light: 4%, 0, 23
+                box { from: 0, 0; size: 360, 46 + 40 * grow; corner: 23 continuous }
+            }
+            body {
+                gradient: 0, 0 to 360, 46, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
+                glass: 25%; blur: 0%; light: 4%, 0, 23; shadow: 0, 1.8, 7, 20%; show: r.connected
+                box { from: 0, 0; size: 360, 46; corner: 23 continuous }
+            }
+
+            image r.icon { at: 12, 13; size: 20, 20; tint: ink; opacity: 85%; show: not r.busy }
+            arc { at: 22, 18; radius: 9; span: 270deg; width: 1.8; color: tint_ink; rotate: turn * 120deg; show: r.busy }
+
+            text r.name { at: 44, 16; anchor: left center; width: 230; lines: 1; size: 13.5; weight: 500; family: "SF Pro Display"; color: ink }
+            text r.status {
+                at: 44, 32; anchor: left center; width: 230; lines: 1; size: 11; weight: 500; family: "SF Pro Display"
+                color: if(r.connected, tint_ink, ink); opacity: if(r.connected, 85%, 50%)
+            }
+
+            //  Its battery, when it says.
+            group {
+                show: r.battery >= 0
+                box { from: 300, 18.5; size: 16, 9; corner: 2.5 continuous; stroke: 1; color: ink; opacity: 55% }
+                box { from: 316.5, 21; size: 1.5, 4; corner: 0.75 continuous; color: ink; opacity: 55% }
+                box { from: 302, 20.5; size: max(0.1, 12 * r.battery / 100), 5; corner: 1 continuous; color: if(r.battery <= 20, coral, ink); opacity: 80% }
+                text number(r.battery, 0, "%") { at: 348, 23; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 75% }
+            }
+
+            //  Right-click: forget it.
+            group {
+                opacity: grow
+                zone box fgt { from: 44, 50; size: 84, 28; corner: 10 continuous; cursor: pointer; label: "Forget"; active: r.menu }
+                body {
+                    color: mix(rose, #7c3d4d, fgt.hover); glass: 25%; blur: 0%; light: 4%, 50, 14; shadow: 0, 1.2 + fgt.hover, 4.9, 20%
+                    box { from: 44, 50; size: 84, 28; corner: 14 continuous }
+                }
+                text "Forget" { at: 86, 64; anchor: center; size: 11.5; weight: 500; family: "SF Pro Display"; color: rose_ink }
+            }
+        }
+
+        on press row { emit bt_pick(r.index) }
+        on press right row { emit bt_menu(r.index) }
+        on press fgt { emit bt_forget(r.index) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_bt)
+        move: 28 * (1 - on_bt), 0
+
+        group {
+            move: ex0 + 16, 44
+            Header("Bluetooth", bt_on, bt_scanning, go_home, bt_power)
+        }
+        line { from: ex0 + 20, 82; to: ex0 + 364, 82; width: 0.7; color: ink; opacity: 10% }
+
+        column bl ~calm {
+            at: ex0 + 12, 88; view: 360, bl_h; gap: 2; step: 48
+            for r in devs { DevRow(r) }
+        }
+        text pick(bt_on, "Bluetooth is off", "Looking for devices…") {
+            at: ex0 + 192, 112; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: devs.count == 0
+        }
+    }
+}

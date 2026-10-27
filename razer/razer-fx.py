@@ -280,6 +280,17 @@ def main():
     ap.add_argument("--fps", type=float, default=15.0)
     args = ap.parse_args()
 
+    # One at a time: two copies fight over the matrix and the keys flicker
+    # (a nested niri started from a terminal runs the autostart again).
+    try:
+        with open(PIDFILE) as f:
+            other = int(f.read().strip())
+        with open(f"/proc/{other}/cmdline", "rb") as f:
+            if b"razer-fx" in f.read() and other != os.getpid():
+                sys.exit(f"razer-fx already running (pid {other})")
+    except (OSError, ValueError):
+        pass
+
     dm = DeviceManager(); dm.sync_effects = False
     dev = next((d for d in dm.devices if d.has("lighting_led_matrix")), None)
     if dev is None:

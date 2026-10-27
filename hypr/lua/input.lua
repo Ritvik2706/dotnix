@@ -88,7 +88,7 @@ end
 hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 hl.gesture({ fingers = 4, direction = "horizontal", action = "workspace" })
 
--- 4-finger swipe down → mute, swipe up → unmute (with a dunst OSD).
+-- 4-finger swipe down → mute, swipe up → unmute (the lumen island shows it).
 -- NOTE: 2-finger edge gestures aren't possible — libinput reserves 2-finger
 -- motion for scrolling and exposes no trackpad-region/edge info — so this
 -- lives on a full 4-finger vertical swipe instead.
@@ -96,14 +96,14 @@ hl.gesture({
 	fingers = 4,
 	direction = "down",
 	action = dispatch(hl.dsp.exec_cmd(
-		[[wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 && dunstify -a "Volume" -i audio-volume-muted -r 72932 -u low -h string:x-dunst-stack-tag:volume "Volume" "Muted"]]
+		[[wpctl set-mute @DEFAULT_AUDIO_SINK@ 1]]
 	)),
 })
 hl.gesture({
 	fingers = 4,
 	direction = "up",
 	action = dispatch(hl.dsp.exec_cmd(
-		[[wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 && dunstify -a "Volume" -i audio-volume-high -r 72932 -u low -h string:x-dunst-stack-tag:volume -h int:value:$(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}') "Volume" "Unmuted — $(wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')%"]]
+		[[wpctl set-mute @DEFAULT_AUDIO_SINK@ 0]]
 	)),
 })
 

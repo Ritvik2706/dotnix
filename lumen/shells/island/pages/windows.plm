@@ -1,0 +1,90 @@
+// The window viewer: hovering the workspace capsule you are on, it grows into
+// a card of every window, most recently used first, as live pictures with
+// their app's icon and name; a click goes there. The rail stays on top as its
+// header. Alt+Tab opens it on the one before this; Tab steps, letting go of
+// Alt goes there.
+part Windows {
+    component WinTile(r: record) {
+        size: 156, 132
+        zone box t { from: 0, 0; size: 156, 88; corner: 12 continuous; cursor: pointer; label: "{r.app}: {r.title}"; selected: r.sel }
+        //  Coming in: one after another, each rising a little out of a fade.
+        let st = smooth(0.3 + 0.07 * r.index, 1, wo)
+        prop lift = 0 ~160ms
+        follow lift = t.hover - t.pressed
+        prop on = 0 ~220ms
+        follow on = if(r.sel, 1, 0)
+        group {
+            opacity: st
+            move: 0, 10 * (1 - st) - 2 * max(lift, 0) + 0.8 * t.pressed
+            //  The chosen one: a ring of softly tinted glass, a little away.
+            box { from: -3.5, -3.5; size: 163, 95; corner: 15.5 continuous; stroke: 2; color: mix(soft_l, soft_s, 0.4); opacity: 95% * on }
+            body {
+                color: mix(chip, chip_hi, max(lift, 0)); shadow: 0, 2 + 2 * max(lift, 0), 8 + 6 * max(lift, 0), 24% + 8% * max(lift, 0)
+                box { from: 0, 0; size: 156, 88; corner: 12 continuous }
+            }
+            //  Until its picture comes: the app's name on the chip.
+            text r.app { at: 78, 44; anchor: center; width: 140; lines: 1; align: center; size: 11; weight: 600; family: "SF Pro Display"; color: ink; opacity: 40% }
+            group {
+                clip box { from: 0, 0; size: 156, 88; corner: 12 continuous }
+                image r.picture { at: 0, 0; size: 156, 88 }
+            }
+            box { from: 0, 0; size: 156, 88; corner: 12 continuous; stroke: 0.6; color: ink; opacity: 14% + 12% * t.hover }
+            //  Its desktop: a small frosted tag.
+            body {
+                color: shade; opacity: 62%
+                box { from: 7, 7; size: 20, 17; corner: 8.5 continuous }
+            }
+            box { from: 7, 7; size: 20, 17; corner: 8.5 continuous; stroke: 0.6; color: ink; opacity: 18% }
+            text r.ws { at: 17, 15.6; anchor: center; size: 10; weight: 700; family: "SF Pro Display"; color: ink }
+            //  Hovered: a small × to close it, as the iOS switcher swipes one away.
+            group {
+                opacity: smooth(0, 1, max(t.hover, wx.hover))
+                body {
+                    color: mix(shade, rose, wx.hover); opacity: 72% + 28% * wx.hover
+                    ellipse { at: 144, 12; radius: 9 - 0.6 * wx.pressed }
+                }
+                ellipse { at: 144, 12; radius: 9; stroke: 0.6; color: ink; opacity: 22% }
+                image ic_x { at: 139.5, 7.5; size: 9, 9; tint: ink; opacity: 92% }
+            }
+
+            //  Underneath: the app's icon and name, then what the window says.
+            ellipse { at: 8, 104; radius: 8; color: chip_hi }
+            image r.icon { at: 0, 96; size: 16, 16 }
+            text r.app {
+                at: 22, 104; anchor: left center; width: 132; lines: 1
+                size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: 85% + 15% * on
+            }
+            text r.title {
+                at: 1, 122; anchor: left center; width: 154; lines: 1
+                size: 10.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 48% + 20% * on
+            }
+        }
+        zone ellipse wx { at: 144, 12 - 2 * max(lift, 0); radius: 11; cursor: pointer; label: "Close {r.app}"; active: wv }
+        on press t { emit win_pick_cell(r.index) }
+        on press wx { emit win_close_cell(r.index) }
+    }
+
+    group {
+        opacity: smooth(0.45, 1, wo)
+        clip box { from: wcl, wct; size: wcr - wcl, wch; corner: 14 + 8 * wo continuous }
+
+        //  The header's right end: how many, in the island's soft tint.
+        text pick(wins_total == 1, "{wins_total} windows", "1 window") {
+            at: wl + wv_w - 20, 24; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"
+            color: tint_ink; opacity: if(wins_total > 0, 100%, 0)
+        }
+        line { from: wl + 16, 48.5; to: wl + wv_w - 16, 48.5; width: 0.7; color: ink; opacity: 10% * wo }
+
+        zone box win_grid { from: wl + 16, 62; size: wv_w - 32, wn_h; label: "Windows"; active: wv }
+        grid {
+            at: wl + 16, 62; columns: 3; width: wv_w - 32; gap: 12; row: 132
+            for r in wins { WinTile(r) }
+        }
+        text "No windows open" {
+            at: wl + wv_w / 2, 82; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: if(wins.count == 0, 50%, 0)
+        }
+    }
+
+    on scroll win_grid { emit win_scroll(wheel) }
+}

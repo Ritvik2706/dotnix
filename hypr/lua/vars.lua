@@ -7,7 +7,7 @@ local M = {}
 M.mainMod = "SUPER" -- Main modifier key (physical Windows key on the Razer)
 M.altMod  = "ALT"
 M.term    = "ghostty"
-M.menu    = "vicinae toggle" -- launcher (vicinae server runs via systemd --user)
+M.menu    = '~/.local/bin/lumen --say island "emit launch_open"' -- launcher: the lumen island (was: vicinae toggle)
 M.opacity = 1
 
 -- Color palette — Liquid Glass (matches waybar style.css)

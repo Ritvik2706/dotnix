@@ -26,6 +26,14 @@ notify() {
     -h int:value:"$2" "$1" "$body"
 }
 
+# The lumen island's brightness gauge: told at once (its service only looks
+# every 0.7 s) and which way, so it can stretch when pushed past an end.
+# Falls back to a notification if the island isn't running.
+osd() {
+  # $1: up|down  $2: percent
+  "$HOME/.local/bin/lumen" --say island "emit bright_$1 $2" >/dev/null 2>&1 || notify "Brightness" "$2"
+}
+
 # Round to nearest integer percent to avoid “sticking” from truncation.
 get_pct() {
   local cur max
@@ -112,21 +120,21 @@ case "${1:-}" in
       new=$(set_pct 12)
       now=$(get_pct)
     fi
-    notify "Brightness" "$now"
+    osd up "$now"
     ;;
   down)
     cur=$(get_pct); dec=$(step_down "$cur"); new=$((cur - dec))
-    new=$(set_pct "$new"); notify "Brightness" "$new"
+    new=$(set_pct "$new"); osd down "$new"
     ;;
   focus)  # toggle ~18% <-> previous
     cur=$(get_pct)
     if [[ -f "$PREV_FILE" ]]; then
       prev=$(cat "$PREV_FILE" || echo 50)
       rm -f "$PREV_FILE"
-      new=$(set_pct "$prev"); notify "Brightness" "$new" "Restored"
+      new=$(set_pct "$prev"); osd up "$new"
     else
       echo "$cur" > "$PREV_FILE"
-      new=$(set_pct 18); notify "Focus mode" "$new"
+      new=$(set_pct 18); osd down "$new"
     fi
     ;;
   boost)  # temporary 100% for 15s, then restore
@@ -134,9 +142,9 @@ case "${1:-}" in
     cur=$(get_pct)
     echo "1" > "$LOCK_FILE"
     echo "$cur" > "$PREV_FILE"
-    set_pct 100 >/dev/null; notify "Boost" 100 "Max brightness"
+    set_pct 100 >/dev/null; osd up 100
     ( sleep 15; \
-      if [[ -f "$PREV_FILE" ]]; then prev=$(cat "$PREV_FILE"); set_pct "$prev" >/dev/null; notify "Brightness" "$prev" "Restored"; fi; \
+      if [[ -f "$PREV_FILE" ]]; then prev=$(cat "$PREV_FILE"); set_pct "$prev" >/dev/null; osd down "$prev"; fi; \
       rm -f "$LOCK_FILE" ) >/dev/null 2>&1 &
     ;;
   kbd-up)

@@ -1,0 +1,82 @@
+// The wallpaper page of the open card: the pictures in the wallpapers folder,
+// three to a row, the one on screen marked with a bead. Super+P opens it; the
+// arrows (or h j k l) move, Enter or a click puts it on the desktop, growing
+// out from the island; Esc closes. The logic hands it only the nine in sight.
+part Wall {
+    component WallTile(r: record) {
+        size: 112, 70
+        zone box t { from: 0, 0; size: 112, 70; corner: 14 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel }
+        prop lift = 0 ~160ms
+        follow lift = t.hover - t.pressed
+
+        //  The chosen one: a ring of softly tinted glass around it, a little away.
+        prop on = 0 ~240ms
+        follow on = if(r.sel, 1, 0)
+        box { from: -3, -3; size: 118, 76; corner: 17 continuous; stroke: 2; color: mix(soft_l, soft_s, 0.4); opacity: 90% * on }
+
+        //  The picture, filling its squircle edge to edge (a placeholder until its thumbnail is made).
+        group {
+            move: 0, -1.2 * max(lift, 0) + 0.6 * t.pressed
+            body {
+                color: mix(chip, chip_hi, max(lift, 0)); shadow: 0, 1.8 + 0.8 * max(lift, 0), 7 + 2 * max(lift, 0), 22%
+                box { from: 0, 0; size: 112, 70; corner: 14 continuous }
+            }
+            group {
+                clip box { from: 0, 0; size: 112, 70; corner: 14 continuous }
+                image r.thumb { at: 0, 0; size: 112, 70 }
+            }
+            box { from: 0, 0; size: 112, 70; corner: 14 continuous; stroke: 0.6; color: ink; opacity: 12% + 10% * t.hover }
+
+            //  The one on screen: a bead of white glass with a check, top right.
+            group {
+                show: r.cur
+                body {
+                    gradient: 90, 6 to 106, 22, soft_l, soft_s
+                    glass: 25%; blur: 0%; light: 7%, 5, 8; shadow: 0, 1, 4, 30%
+                    ellipse { at: 98, 14; radius: 8 }
+                }
+                image ic_check { at: 93, 9; size: 10, 10; tint: pearl_ink }
+            }
+        }
+        on press t { emit wall_pick_cell(r.index) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_wall)
+        move: 28 * (1 - on_wall), 0
+
+        //  The header: back, the title, and how many there are.
+        group {
+            move: ex0 + 16, 44
+            zone ellipse wb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, wb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * wb.hover - wb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * wb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * wb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            text "Wallpaper" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+            text number(wall_total, 0, "") {
+                at: 352, 18; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"
+                color: tint_ink; show: wall_total > 0
+            }
+        }
+
+        zone box wall_grid { from: ex0 + 16, 88; size: 352, wg_h; label: "Wallpapers" }
+        grid {
+            at: ex0 + 16, 88; columns: 3; width: 352; gap: 8; row: 70
+            for r in walls { WallTile(r) }
+        }
+        text "No pictures in the wallpapers folder" {
+            at: ex0 + 192, 112; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: walls.count == 0
+        }
+        //  What the chosen one is called.
+        text wall_name {
+            at: ex0 + 192, 88 + wg_h + 16; anchor: center; width: 340; lines: 1; align: center
+            size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: 60%
+        }
+    }
+
+    on press wb { emit go_home }
+    on scroll wall_grid { emit wall_scroll(wheel) }
+}

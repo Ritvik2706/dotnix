@@ -1,0 +1,25 @@
+// Written by theme/wallpaper-theme.py for skyline.jpg (theme: generated): the island's colours, from what is behind it. Don't edit.
+part Theme {
+    let ink       = #f4f9fb
+    let cool      = #49baed
+    let warm      = #86d3f7
+    let lilac     = #6bc5f4
+    let sunset    = #65c8f4
+    let dusk      = #1c282e
+    let deep      = #162127
+    let rim_grey  = #adbbc1
+    let idle_c    = #668391
+    let low_c     = #a2bac5
+    let chip      = #343c41
+    let chip_hi   = #444e53
+    let pearl     = #e6ebee
+    let pearl_ink = #20272b
+    let shade     = #08161d
+    let stack1_t  = #182c37
+    let stack1_b  = #0a1d27
+    let stack2_t  = #1c313d
+    let stack2_b  = #0d222d
+    let well_t    = #1f2c33
+    let well_b    = #182228
+    let glass_alpha = 49%
+}

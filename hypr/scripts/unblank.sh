@@ -26,7 +26,12 @@ RAZER_PID_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/razer-fx.pid"
 # Nothing to do on an unlocked session, and importantly nothing to *undo*:
 # this must never be able to put a lock back (see resume-lock.sh's note on
 # howdy unlocking without any input event).
-[[ $(hyprctl locked 2>/dev/null) == "true" ]] || exit 0
+# Is the session locked? Hyprland says so; niri can't be asked, so there a
+# running hyprlock stands in for it (it only stays up once it holds the lock).
+session_locked() {
+    if [[ -n ${NIRI_SOCKET:-} ]]; then pidof -q hyprlock; else [[ $(hyprctl locked 2>/dev/null) == true ]]; fi
+}
+session_locked || exit 0
 
 # A wake from suspend fires this and resume-lock.sh together. resume-lock.sh
 # holds this flock while it deliberately keeps the backlight at 0 across its
@@ -36,7 +41,8 @@ LOCK_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/resume-lock.lock"
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
-hyprctl dispatch 'hl.dsp.dpms({action="on"})' >/dev/null 2>&1
+if [[ -n ${NIRI_SOCKET:-} ]]; then niri msg action power-on-monitors >/dev/null 2>&1
+else hyprctl dispatch 'hl.dsp.dpms({action="on"})' >/dev/null 2>&1; fi
 
 # You are back: have face unlock look for you.
 "$(dirname "${BASH_SOURCE[0]}")/face-unlock.sh" rearm

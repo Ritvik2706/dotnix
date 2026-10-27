@@ -1,0 +1,6 @@
+Snapshot of the island the user liked (2026-10-16, updated): first-version lens
+look, frost 100% across the whole glass (edge included), single centre island,
+hover to expand. Restore with:
+  cp liked/island.plm liked/island.luau .
+Runs on lumen (~/github/projects/lumen), which carries both lens fixes it
+needs: the fractional-scale capture fix and the bevel taking the same frost.

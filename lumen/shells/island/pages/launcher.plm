@@ -1,0 +1,94 @@
+// The launcher page of the open card: apps by name; a leading space searches
+// files instead. Super+D opens it on its search. ↑ ↓ (or Ctrl+j/k) choose,
+// Enter launches or opens, Tab goes into a folder and Shift+Tab back out,
+// Esc closes. The logic hands it only the rows in sight.
+part Launcher {
+    component LaunchRow(r: record) {
+        size: 360, 48
+        zone box row { from: 0, 0; size: 360, 48; corner: 24 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel }
+
+        body {
+            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 24
+            box { from: 0, 0; size: 360, 48; corner: 24 continuous }
+        }
+        body {
+            gradient: 0, 0 to 360, 48, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
+            glass: 25%; blur: 0%; light: 4%, 0, 24; shadow: 0, 1.8, 7, 20%; show: r.sel
+            box { from: 0, 0; size: 360, 48; corner: 24 continuous }
+        }
+
+        //  An app: its own icon. A file or a folder: the island's symbols.
+        image r.icon { at: 12, 10; size: 28, 28; show: r.kind == 0 }
+        image ic_doc { at: 14, 12; size: 24, 24; tint: ink; opacity: 80%; show: r.kind == 1 }
+        image ic_folder { at: 14, 12; size: 24, 24; tint: soft_l; opacity: 90%; show: r.kind == 2 }
+
+        text r.name {
+            at: 52, if(r.has_sub, 18, 24); anchor: left center; width: 270; lines: 1
+            size: 13.5; weight: 500; family: "SF Pro Display"; color: ink
+        }
+        text r.sub {
+            at: 52, 33; anchor: left center; width: 270; lines: 1
+            size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 45%; show: r.has_sub
+        }
+        //  A folder can be gone into (Tab).
+        image ic_chev { at: 330, 17; size: 14, 14; tint: ink; opacity: 35% + 30% * r.sel; show: r.kind == 2 }
+
+        on press row { emit launch_pick_row(r.index) }
+    }
+
+    measure where_m
+
+    group {
+        opacity: smooth(0.4, 1, on_launch)
+        move: 28 * (1 - on_launch), 0
+
+        //  The header is the search: back, and the field, lit while it is typed in.
+        group {
+            move: ex0 + 16, 44
+            zone ellipse lb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, lb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * lb.hover - lb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * lb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * lb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+
+            box { from: 40, 0; size: 312, 36; corner: 18 continuous; color: well; opacity: 30% }
+            body { color: well; opacity: 30%; box { from: 52, 0; size: 288, 2; corner: 1 continuous } }
+            box { from: 40, 0; size: 312, 36; corner: 18 continuous; stroke: 1; color: soft_l; opacity: 40% }
+            image ic_search { at: 52, 11; size: 14, 14; tint: ink; opacity: 75% }
+            input launch_q { at: 74, 9; width: 270 - (where_m.width + 39) * files_mode; size: 13.5; color: ink; placeholder: ""; label: "Search apps, or files after a space" }
+            text "Search apps · space for files" {
+                at: 74, 18; anchor: left center; size: 13.5; weight: 500; family: "SF Pro Display"
+                color: ink; opacity: 40%; show: launch_q_empty
+            }
+
+            //  In files mode, where it is looking: a small chip at the end of the field.
+            group {
+                show: files_mode
+                body {
+                    color: mix(chip_hi, lilac, 0.14); glass: 25%; blur: 0%; light: 4%, 6, 12
+                    box { from: 344 - where_m.width - 31, 6; size: where_m.width + 31, 24; corner: 12 continuous }
+                }
+                image ic_folder { at: 344 - where_m.width - 25, 11; size: 14, 14; tint: ink; opacity: 85% }
+                text launch_where {
+                    at: 338, 18; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"
+                    color: ink; opacity: 85%; measure: where_m
+                }
+            }
+        }
+
+        //  Under the rows, so a press reaches them; the wheel works over all of it.
+        zone box launch_list { from: ex0 + 12, 88; size: 360, ll_h; label: "Results" }
+        column llist {
+            at: ex0 + 12, 88; gap: 2
+            for r in hits { LaunchRow(r) }
+        }
+        text pick(launch_state, "", "Nothing found", "Looking…") {
+            at: ex0 + 192, 112; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: hits.count == 0
+        }
+    }
+
+    on press lb { emit go_home }
+    on scroll launch_list { emit launch_scroll(wheel) }
+}

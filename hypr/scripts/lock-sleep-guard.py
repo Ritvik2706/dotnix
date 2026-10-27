@@ -82,6 +82,11 @@ def release_inhibitor():
 
 
 def locked():
+    # niri has no "locked" query, but hyprlock only exits after unlocking (and
+    # niri keeps the session locked if it dies): running means locked. Same
+    # rule as session_locked in lock-state.sh.
+    if os.environ.get("NIRI_SOCKET"):
+        return subprocess.run(["pidof", "-q", "hyprlock"]).returncode == 0
     return sh("hyprctl", "locked") == "true"
 
 

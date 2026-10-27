@@ -14,13 +14,34 @@ tmp="$(mktemp --suffix=.png)"
 trap 'rm -f "$tmp"' EXIT
 
 case "$target" in
-	area) geom="$(slurp)" || exit 0 ;;
-	window) geom="$(hyprctl activewindow -j | jq -r '"\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')" ;;
+	area)
+		# Glass-inspired selection: cool dimming, a luminous edge, and a
+		# barely tinted interior. These colors affect only the picker.
+		geom="$(slurp \
+			-b '10162266' \
+			-c 'EAF4FFFF' \
+			-s 'DCEEFF0A' \
+			-w 2 \
+			-d \
+			-F 'sans-serif')" || exit 0
+		;;
+	window)
+		if [[ -n ${NIRI_SOCKET:-} ]]; then
+			# niri doesn't say where a tiled window is, but shoots one itself
+			# (straight to $tmp; it is copied below like the others).
+			niri msg action screenshot-window --path "$tmp" >/dev/null
+			for _ in {1..40}; do [[ -s $tmp ]] && break; sleep 0.05; done
+			geom=niri
+		else
+			geom="$(hyprctl activewindow -j | jq -r '"\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')"
+		fi ;;
 	screen) geom="" ;;
 	*) echo "usage: $0 <area|window|screen> <copy|save>" >&2; exit 1 ;;
 esac
 
-if [[ -n "$geom" ]]; then
+if [[ "$geom" == niri ]]; then
+	[[ -s $tmp ]] || exit 1
+elif [[ -n "$geom" ]]; then
 	grim -g "$geom" "$tmp"
 else
 	grim "$tmp"

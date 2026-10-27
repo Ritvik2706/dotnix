@@ -78,9 +78,11 @@ mkdir -p -m 700 "$STATE" 2>/dev/null
 log()    { printf '%s\n' "$*"; }
 # Atomic, so hyprlock's label never reads a half-written line.
 status() { printf '%s' "$1" > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE" 2>/dev/null; return 0; }
-# The compositor is the authority on whether the session is covered. Only a
-# literal "true" counts: an unreachable Hyprland must never look locked.
-locked() { [[ $(hyprctl locked 2>/dev/null) == "true" ]]; }
+# The compositor is the authority on whether the session is covered (see
+# lock-state.sh: Hyprland's word, or under niri, hyprlock still running).
+# shellcheck source=lock-state.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lock-state.sh"
+locked() { session_locked; }
 # A sleep that a trapped signal (the rearm nudge) cuts short.
 nap()    { sleep "$1" & local p=$!; wait "$p" 2>/dev/null; kill "$p" 2>/dev/null; return 0; }
 age()    { local m; m=$(stat -c %Y "$1" 2>/dev/null) || return 1; echo $(( EPOCHSECONDS - m )); }
@@ -97,9 +99,12 @@ cmd_rearm() {
     if systemctl --user is-active --quiet "$FACE_UNIT"; then
         : > "$REARM_FILE"
         systemctl --user kill --kill-whom=main -s URG "$FACE_UNIT" 2>/dev/null
+        # Called from hypridle (stdout nowhere): say so in the scanner's log.
+        logger -t face-unlock "rearm: you're back — scanner nudged" 2>/dev/null
         return 0
     fi
     locked || return 0
+    logger -t face-unlock "rearm: locked with no scanner — starting one" 2>/dev/null
     # Locked but no scanner (it is between restarts, or died): start one.
     # Requisite= on the unit makes this a no-op unless hyprlock.service is
     # active — it can never be the thing that locks the screen.
@@ -130,6 +135,15 @@ cmd_lock_exited() {
     # ~0.85s, exit later still), so the compositor has normally long caught
     # up; a short grace covers the rest without stalling a swap that
     # happened to exit 0.
+    # niri can't be asked, but needs no asking: under ext-session-lock a clean
+    # exit 0 from hyprlock IS the unlock (it only exits after unlocking).
+    if [[ -n ${NIRI_SOCKET:-} ]]; then
+        if (( ! by_face )); then
+            : > "$PASSWORD_OK"
+            log "password unlock recorded"
+        fi
+        return 0
+    fi
     for _ in {1..4}; do
         r=$(hyprctl locked 2>/dev/null)
         case $r in
@@ -176,7 +190,7 @@ lid_open() {
     done
     return 0
 }
-panel_on() { [[ $(hyprctl monitors -j 2>/dev/null) == *'"dpmsStatus": true'* ]]; }
+# panel_on: lock-state.sh (the kernel's DPMS, under either compositor)
 present()  { lid_open && panel_on; }   # lid first: a file read, no fork
 
 scan() {
@@ -274,6 +288,7 @@ cmd_run() {
             nudged=0
             rm -f "$REARM_FILE"
             armed=1 attempts=0 cam_errors=0
+            present || log "armed, but not present yet (lid shut or panel off)"
         fi
 
         if ! present; then

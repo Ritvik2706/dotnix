@@ -4,11 +4,8 @@ set -euo pipefail
 if tmux list-clients >/dev/null 2>&1; then
   # We're already in/attached to tmux somewhere → focus ghostty window and show popup
   
-  # Focus the ghostty window (find any ghostty window and focus it)
-  ghostty_window=$(hyprctl clients -j | jq -r '.[] | select(.class == "com.mitchellh.ghostty") | .address' | head -1)
-  if [ -n "$ghostty_window" ]; then
-    hyprctl dispatch focuswindow address:$ghostty_window
-  fi
+  # Focus the ghostty window (Hyprland or niri: see the island's wm.sh)
+  ~/.config/lumen/shells/island/scripts/wm.sh focus-class com.mitchellh.ghostty || true
   
   # Show the full-featured sesh popup (same as C-a T)
   tmux run-shell "sesh connect \"\$(

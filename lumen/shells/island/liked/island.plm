@@ -1,0 +1,363 @@
+// Island — LUMEN's dynamic island: the whole bar, as one piece of glass that
+// changes shape.
+//
+// One silhouette, three states (the body never changes, only its springs):
+//   rest      a stadium: the active workspace (a lit chip), the time centred,
+//             the battery. Nothing else competes for the eye.
+//   live      something is playing: the pill widens, a teal waveform (the one
+//             cold pop, as in waybar) and the track ride inside it.
+//   expanded  hover it: it grows into a card with every workspace, the date,
+//             now-playing (when there is a player), and the telemetry
+//             waybar showed — wifi · cpu · ram · volume · battery.
+//
+// LUMEN, translated:
+//   · light is the material: smoked glass, a lit rim, no flat fill.
+//   · the prism: at rest the compositor blurs behind it (`lens: false`, cheap —
+//     Marea's "light liquid"); while it expands the real lens fades in and the
+//     edge disperses into cool/warm, so refraction only costs while it's open.
+//     (Needs lumen's fractional-scale capture fix, or the lens fills with RGB
+//     noise at 1.6× — stock pleamar 0.4.12 has the bug.)
+//   · telemetry as light (waybar's ramp): dim at idle, white as it works,
+//     amber, then coral only when something deserves attention.
+//   · glide, not snap: every geometry spring is critically damped (`~ms`), so
+//     nothing overshoots, and every motion can be interrupted halfway.
+//   · quiet by default: no `time` anywhere, so a still island draws nothing.
+
+scene Island {
+    surface {
+        size: full, 240       // the top edge: room for the card and its shadow; empty parts let clicks through
+        anchor: top
+        margin: 5             // same line as waybar's capsules
+        level: overlay
+        reserve: 34           // windows tile below the resting pill (like waybar: 34 + the 5 px margin);
+                              // the expanded card draws past this strip, over the windows
+    }
+
+    permissions {
+        services: "clock", "media", "media.*", "files", "files.write", "workspaces", "workspaces.focus", "audio", "audio.*", "battery", "network"
+        run: "curl", "cat", "pavucontrol"
+    }
+
+    // ── palette (waybar/style.css, LUMEN v2) ─────────────────────
+    let ink    = #f6f8fc
+    let cool   = #ab9cff      // prism, twilight side
+    let warm   = #ffb38c      // prism, sunset side
+    let teal   = #6fd3ec      // cup-teal: lit only while media is live
+    let smoked = #1c1830      // the under-glass that seats white text
+    let lilac  = #c2a8ff      // the live workspace, lit from within…
+    let sunset = #ff9e7a      // …into sunset coral
+    let idle_c = #767d96      // telemetry ramp: idle → low → working → amber → coral
+    let low_c  = #aeb5ca
+    let amber  = #ffce6e
+    let coral  = #ff7a8c
+    let charge = #76ff58
+
+    // ── springs: GLIDE as springs, no overshoot ──────────────────
+    spring shape = 300, 34.6  // critically damped (2·√300): fast, no overshoot — hover has to feel instant
+
+    // ── what the system reports, with no logic ───────────────────
+    service clock { time: text = "--:--"; date: text }
+    service media { playing: bool; title: text; artist: text }
+    service battery { present: bool; percent: number = 100; charging: bool }
+    service audio { volume: number; muted: bool }
+    service network as net { online: bool = true; strength: number = 1 }
+
+    // ── what the logic reports ───────────────────────────────────
+    text cover_path = ""
+    fact has_art = false
+    fact has_player = false   // any MPRIS player at all (the logic knows; texts don't compare)
+    image cover = from cover_path, 56, 56
+    repeat i in 1..11 {
+        fact ws.$i.there = false
+    }
+    fact ws_active = 1
+    fact cpu = 0              // %
+    fact mem = 0              // GiB used
+    fact mem_frac = 0         // 0..1
+
+    event toggle ->
+    event next ->
+    event previous ->
+    event go ->
+    event ws_step ->
+    event vol_step ->
+    event mixer ->
+
+    // ── state ────────────────────────────────────────────────────
+    fact expanded = false
+
+    measure clockm
+    measure batm
+
+    prop open  = 0 ~360ms     // 0 pill → 1 card
+    prop live  = 0 ~420ms     // 0 clock only → 1 now-playing pill
+    prop bloom = 0 ~420ms     // hover: the rim ignites
+    prop media_in = 0 ~420ms  // the card's media row, there or not
+    prop pw = 160 ~shape
+    prop ph = 34  ~shape
+    prop pr = 17  ~shape
+
+    follow open  = if(expanded, 1, 0)
+    follow live  = if(media.playing, 1, 0)
+    follow bloom = hit.hover
+    follow media_in = if(has_player, 1, 0)
+
+    //  The rest pill is symmetric round the time, so the time sits dead centre:
+    //  the wider of its two ends (the workspace chip, the battery) sets both.
+    let pad = 6
+    let bat_w = 28 + batm.width
+    let side = max(22, bat_w)
+    let rest_w = 2 * (pad + side + 14) + clockm.width
+    let card_h = 112 + 72 * media_in
+    follow pw = if(expanded, 420, if(media.playing, max(rest_w, 400), rest_w))
+    follow ph = if(expanded, card_h, 34)
+    follow pr = if(expanded, 30, 17)
+
+    let cx = screen.width / 2
+    let x0 = cx - pw / 2
+    let ex0 = cx - 210        // the card's left edge once open
+
+    //  Telemetry colours, as indices: a colour choice has to sit in a `color:`.
+    let sig = if(net.strength > 1.5, net.strength / 100, net.strength)   // iwd says 0..1, the docs 0..100
+    let cpu_i = floor(clamp(cpu / 20, 0, 4))
+    let mem_i = floor(clamp(mem_frac * 5, 0, 4))
+    let net_i = if(not net.online, 2, if(sig < 0.25, 2, if(sig < 0.5, 1, 0)))                                // ink · amber · coral
+    let bat_i = if(battery.charging, 3, if(battery.percent <= 15, 2, if(battery.percent <= 30, 1, 0)))      // ink · amber · coral · charge
+
+    prop cpu_s = 0 ~420ms
+    prop mem_s = 0 ~420ms
+    prop bat_s = 1 ~420ms
+    follow cpu_s = cpu / 100
+    follow mem_s = mem_frac
+    follow bat_s = battery.percent / 100
+
+    // ── the glass ────────────────────────────────────────────────
+    body {
+        color: smoked
+        glass: 100%
+        lens: open > 0.02     // at rest "light liquid" (Hyprland blurs); the real lens only while expanding/open
+        refraction: 35% + 115% * open
+        dispersion: 150% + 150% * open
+        frost: 100%            // the whole glass, edge included (local pleamar patch: bevel takes the same frost)
+        ripple: 0%            // no ring of light on click
+        smoke: 22%
+        rim: 6% + 6% * bloom
+        light: 4%, 0, 30
+        shadow: 0, 14 * open, 36 * open, 30% * open
+        box { from: x0, 0; size: pw, ph; corner: pr }
+    }
+
+    //  The prism: the rim isn't white, it's where the light splits —
+    //  violet on the left edge, peach on the right, as in waybar.
+    body {
+        gradient: x0, 0 to x0 + pw, 0, cool, ink 50%, warm
+        opacity: 55% + 30% * bloom
+        box { from: x0 + 0.5, 0.5; size: pw - 1, ph - 1; corner: pr - 0.5; stroke: 1 }
+    }
+
+    //  The pill itself: under everything else, so the card's controls stay on top.
+    //  Its shape is the TARGET one, not the animating one: the instant the
+    //  pointer arrives the whole card is "inside", so a quick move down into it
+    //  can't outrun the spring, leave, and snap it shut.
+    let tw = if(expanded, 420, if(media.playing, max(rest_w, 400), rest_w))
+    let th = if(expanded, card_h, 34)
+    zone box hit { from: cx - tw / 2, 0; size: tw, th; corner: pr; cursor: pointer; label: "Island" }
+
+    // ── the pill's contents (rest + live) ────────────────────────
+    let clock_live = x0 + pw - pad - bat_w - 14 - clockm.width / 2
+
+    group {
+        opacity: 1 - smooth(0, 0.45, open)
+
+        //  The active workspace: a chip lit lilac→coral, its number inside.
+        body {
+            gradient: x0 + pad, 6 to x0 + pad + 22, 28, lilac, sunset
+            opacity: 34%
+            box { from: x0 + pad, 6; size: 22, 22; corner: 11 }
+        }
+        text "{ws_active}" { at: x0 + pad + 11, 17.5; anchor: center; size: 12; weight: 600; family: "SF Pro Display"; color: #ffffff }
+
+        text clock.time {
+            at: mix(cx, clock_live, live), 17; anchor: center
+            size: 13.5; weight: 600; family: "SF Pro Display"; color: ink
+            measure: clockm
+        }
+
+        //  The battery: an outline that fills to the real level.
+        group {
+            move: x0 + pw - pad - bat_w, 0
+            box { from: 0.6, 11.6; size: 21.8, 10.8; corner: 3.4; stroke: 1.2; color: ink; opacity: 85% }
+            box { from: 23, 15; size: 1.8, 4; corner: 0.9; color: ink; opacity: 85% }
+            box { from: 2.6, 13.6; size: max(0.1, 17.8 * bat_s), 6.8; corner: 1.8; color: pick(bat_i, ink, amber, coral, charge) }
+            text number(battery.percent, 0, "%") {
+                at: 28, 17.5; anchor: left center; size: 12.5; weight: 500; family: "SF Pro Display"
+                color: pick(bat_i, ink, amber, coral, charge); measure: batm
+            }
+        }
+
+        //  Live: a waveform that breathes only while playing, then the track.
+        group {
+            opacity: live
+            box { at: x0 + pad + 36, 17; size: 3, 8 + w0; corner: 1.5; color: teal }
+            box { at: x0 + pad + 42, 17; size: 3, 8 + w1; corner: 1.5; color: teal }
+            box { at: x0 + pad + 48, 17; size: 3, 8 + w2; corner: 1.5; color: teal }
+            box { at: x0 + pad + 54, 17; size: 3, 8 + w3; corner: 1.5; color: teal }
+            text media.title {
+                at: x0 + pad + 64, 17; anchor: left center
+                width: max(0, clock_live - clockm.width / 2 - 12 - (x0 + pad + 64)); lines: 1
+                size: 13; weight: 500; family: "SF Pro Display"; color: teal
+            }
+        }
+    }
+
+    prop w0 = 0
+    prop w1 = 0
+    prop w2 = 0
+    prop w3 = 0
+    wave w0 = 4 * live at 7.1
+    wave w1 = 5 * live at 9.3
+    wave w2 = 3.5 * live at 6.2
+    wave w3 = 4.5 * live at 8.4
+
+    // ── the card's contents (expanded) ───────────────────────────
+    //  Occupied workspaces are beads of light; the live one inflates into a
+    //  capsule lit lilac→coral from within. Empty ones take no room.
+    component Desk(i, active: number) {
+        size: if(active == i, 42, 20), 28
+        prop on = 0 ~440ms
+        follow on = if(active == i, 1, 0)
+
+        zone box d { from: 0, 0; size: 20 + 22 * on, 28; corner: 14; cursor: pointer; label: "Workspace {i}" }
+        body {
+            gradient: 0, 0 to 42, 28, lilac, sunset
+            opacity: 34% * on
+            box { from: 1, 1; size: 18 + 22 * on, 26; corner: 13 }
+        }
+        ellipse { at: (20 + 22 * on) / 2, 14; radius: 3 + 0.8 * d.hover; color: ink; opacity: (58% + 40% * d.hover) * (1 - on) }
+        text "{i}" { at: (20 + 22 * on) / 2, 14.5; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: #ffffff; opacity: on }
+        on press d { emit go(i) }
+    }
+
+    //  Where each row sits once open: workspaces, then media (if any), then telemetry.
+    let row_media = 50
+    let row_stats = 50 + 72 * media_in
+    let tx = ex0 + 336
+    let ty = row_media + 28
+
+    group {
+        clip inset 1 box { from: x0, 0; size: pw, ph; corner: pr }
+        group {
+            opacity: smooth(0.5, 1, open)
+            move: 0, 8 * (1 - open)
+
+            // workspaces · date and time
+            zone box ws_z { from: ex0 + 10, 4; size: 250, 36; label: "Workspaces" }
+            row desks ~calm {
+                at: ex0 + 12, 8
+                repeat i in 1..11 { Desk(i, ws_active) { show: ws.$i.there } }
+            }
+            text "{clock.date}  ·  {clock.time}" {
+                at: ex0 + 402, 22; anchor: right center
+                size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 70%
+            }
+
+            // media: cover, track, transport
+            group {
+                opacity: media_in
+                box { from: ex0 + 18, row_media; size: 56, 56; corner: 14; color: teal; opacity: if(has_art, 0, 22%) }
+                group {
+                    clip box { from: ex0 + 18, row_media; size: 56, 56; corner: 14 }
+                    image cover { at: ex0 + 18, row_media; size: 56, 56; show: has_art }
+                }
+                text media.title {
+                    at: ex0 + 88, row_media + 18; anchor: left center; width: 170; lines: 1
+                    size: 14.5; weight: 600; family: "SF Pro Display"; color: ink
+                }
+                text media.artist {
+                    at: ex0 + 88, row_media + 39; anchor: left center; width: 170; lines: 1
+                    size: 12.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 62%
+                }
+
+                //  Transport: veils of light, not glass on glass.
+                ellipse { at: tx - 46, ty; radius: 18; color: ink; opacity: 6% + 10% * prev_z.hover }
+                ellipse { at: tx,      ty; radius: 20; color: ink; opacity: 9% + 10% * play_z.hover }
+                ellipse { at: tx + 46, ty; radius: 18; color: ink; opacity: 6% + 10% * next_z.hover }
+                box { at: tx - 53, ty; size: 2.6, 12; corner: 1.3; color: ink }
+                path { at: tx - 43, ty; color: ink; move 4.5, -6; line -5, 0; line 4.5, 6; close }
+                path { at: tx + 1.5, ty; color: ink; show: not media.playing; move -5, -7.5; line 7.5, 0; line -5, 7.5; close }
+                box { at: tx - 4, ty; size: 4, 14; corner: 2; color: ink; show: media.playing }
+                box { at: tx + 4, ty; size: 4, 14; corner: 2; color: ink; show: media.playing }
+                path { at: tx + 43, ty; color: ink; move -4.5, -6; line 5, 0; line -4.5, 6; close }
+                box { at: tx + 53, ty; size: 2.6, 12; corner: 1.3; color: ink }
+                zone ellipse prev_z { at: tx - 46, ty; radius: 18; cursor: pointer; label: "Previous"; active: has_player }
+                zone ellipse play_z { at: tx,      ty; radius: 20; cursor: pointer; label: "Play or pause"; active: has_player }
+                zone ellipse next_z { at: tx + 46, ty; radius: 18; cursor: pointer; label: "Next"; active: has_player }
+            }
+
+            // telemetry: wifi · cpu · ram · volume · battery, on a veil of light
+            box { from: ex0 + 12, row_stats; size: 396, 44; corner: 18; color: ink; opacity: 6% }
+            group {
+                move: ex0 + 12, row_stats
+
+                //  wifi: the arcs are the value; colour only when the link is poor or gone
+                group {
+                    move: 22, 0
+                    ellipse { at: 9, 29; radius: 1.6; color: pick(net_i, ink, amber, coral) }
+                    arc { at: 9, 29; radius: 5;  span: 90deg; width: 1.8; color: pick(net_i, ink, amber, coral); opacity: if(net.online and sig > 0.15, 100%, 25%) }
+                    arc { at: 9, 29; radius: 9;  span: 90deg; width: 1.8; color: pick(net_i, ink, amber, coral); opacity: if(net.online and sig > 0.45, 100%, 25%) }
+                    arc { at: 9, 29; radius: 13; span: 90deg; width: 1.8; color: pick(net_i, ink, amber, coral); opacity: if(net.online and sig > 0.7, 100%, 25%) }
+                }
+
+                //  cpu: a ring that fills with load
+                group {
+                    move: 70, 0
+                    arc { at: 7, 22; radius: 6; span: 360deg; width: 1.8; color: ink; opacity: 14% }
+                    arc { at: 7, 22; radius: 6; span: max(0.001, cpu_s) * 360deg; width: 1.8; rotate: max(0.001, cpu_s) * 180deg; color: pick(cpu_i, idle_c, low_c, ink, amber, coral) }
+                    text number(cpu, 0, "%") { at: 18, 22.5; anchor: left center; size: 12.5; weight: 500; family: "SF Pro Display"; color: ink }
+                }
+
+                //  ram: the same ring, memory used
+                group {
+                    move: 146, 0
+                    arc { at: 7, 22; radius: 6; span: 360deg; width: 1.8; color: ink; opacity: 14% }
+                    arc { at: 7, 22; radius: 6; span: max(0.001, mem_s) * 360deg; width: 1.8; rotate: max(0.001, mem_s) * 180deg; color: pick(mem_i, idle_c, low_c, ink, amber, coral) }
+                    text number(mem, 1, "G") { at: 18, 22.5; anchor: left center; size: 12.5; weight: 500; family: "SF Pro Display"; color: ink }
+                }
+
+                //  volume: the speaker, its waves lit by level (wheel to change, click for the mixer)
+                group {
+                    move: 230, 0
+                    path { at: 0, 22; color: ink; move 1, -3; line 4, -3; line 9, -7; line 9, 7; line 4, 3; line 1, 3; close }
+                    arc { at: 10, 22; radius: 4; span: 80deg; width: 1.6; rotate: 90deg; color: ink; opacity: if(audio.muted, 0, if(audio.volume > 0.01, 100%, 25%)) }
+                    arc { at: 10, 22; radius: 7.5; span: 80deg; width: 1.6; rotate: 90deg; color: ink; opacity: if(audio.muted, 0, if(audio.volume > 0.5, 100%, 25%)) }
+                    line { from: 1, 15; to: 15, 29; width: 1.6; color: ink; show: audio.muted }
+                    text number(audio.volume * 100, 0, "%") { at: 22, 22.5; anchor: left center; size: 12.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(audio.muted, 40%, 100%) }
+                }
+                zone box vol_z { from: 222, 4; size: 68, 36; corner: 14; cursor: pointer; label: "Volume" }
+
+                //  battery
+                group {
+                    move: 312, 0
+                    box { from: 0.6, 16.6; size: 21.8, 10.8; corner: 3.4; stroke: 1.2; color: ink; opacity: 85% }
+                    box { from: 23, 20; size: 1.8, 4; corner: 0.9; color: ink; opacity: 85% }
+                    box { from: 2.6, 18.6; size: max(0.1, 17.8 * bat_s), 6.8; corner: 1.8; color: pick(bat_i, ink, amber, coral, charge) }
+                    text number(battery.percent, 0, "%") { at: 30, 22.5; anchor: left center; size: 12.5; weight: 500; family: "SF Pro Display"; color: pick(bat_i, ink, amber, coral, charge) }
+                }
+            }
+        }
+    }
+
+    // ── rules ────────────────────────────────────────────────────
+    //  Hover is the whole interaction: in, it opens; out, it closes. No delay
+    //  either way (moving onto a button inside doesn't count as leaving: each
+    //  zone checks the pointer against its own shape).
+    on enter hit { expanded = true }
+    on leave hit { expanded = false }
+
+    on press prev_z { emit previous }
+    on press play_z { emit toggle }
+    on press next_z { emit next }
+    on scroll ws_z { emit ws_step(wheel) }
+    on scroll vol_z { emit vol_step(wheel) }
+    on press vol_z { emit mixer }
+}

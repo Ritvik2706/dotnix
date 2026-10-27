@@ -1,0 +1,79 @@
+// A notification arriving: the pill itself grows into a banner (the island's
+// own glass, prism rim and all), says it, and shrinks back. Hovering holds it;
+// a click opens it; its buttons are pills under it; × lets it go.
+part Notice {
+    component NoteAct(a: record, w: number) {
+        size: w, 32
+        zone box b { from: 0, 0; size: w, 32; corner: 16 continuous; cursor: pointer; label: "{a.label}" }
+        body {
+            color: mix(chip, chip_hi, b.hover); glass: 25%; blur: 0%; light: 4%, 0, 16; shadow: 0, 1.2 + b.hover - b.pressed, 4.9, 20%
+            box { from: 0, 0; size: w, 32; corner: 16 continuous }
+        }
+        text a.label { at: w / 2, 16; anchor: center; width: w - 16; lines: 1; align: center; size: 12; weight: 600; family: "SF Pro Display"; color: ink }
+        on press b { emit note_act(a.index) }
+    }
+    let bx0 = cx - 192
+    let nw = (352 - 8 * (nacts.count - 1)) / max(nacts.count, 1)
+    let nb_in = smooth(0.45, 1, ban)
+
+    //  Inside the glass only: while the pill is still growing, nothing spills out of it.
+    group {
+        clip inset 1 box { from: x0, 0; size: pw, max(34, ph + bpull); corner: pr continuous }
+    group {
+        opacity: nb_in * clamp(1 + bpull / 60, 0, 1) * smooth(0, 1, nswap)
+        move: 0, 6 * (1 - ban) + 0.5 * bpull - 7 * (1 - nswap)
+
+        //  Its picture: the sender's photo filling a squircle, or the app's icon on a chip.
+        body {
+            color: chip_hi; glass: 25%; blur: 0%; light: 4%, 16, 22; shadow: 0, 1.8, 7, 20%
+            box { from: bx0 + 16, 16; size: 44, 44; corner: 14 continuous }
+        }
+        //  A quiet bell first: what shows if neither a picture nor the app's icon does.
+        image ic_bell { at: bx0 + 30, 30; size: 16, 16; tint: ink; opacity: 40% }
+        group {
+            show: n_is_pic
+            clip box { from: bx0 + 16, 16; size: 44, 44; corner: 14 continuous }
+            image n_pic { at: bx0 + 16, 16; size: 44, 44 }
+        }
+        image n_pic { at: bx0 + 24, 24; size: 28, 28; show: not n_is_pic }
+        box { from: bx0 + 16, 16; size: 44, 44; corner: 14 continuous; stroke: 1.2; color: coral; opacity: 80% * n_urgent }
+
+        text n_app {
+            at: bx0 + 72, 23; anchor: left center; width: 250; lines: 1
+            size: 10.5; weight: 600; family: "SF Pro Display"; color: if(n_urgent, coral, tint_ink); opacity: 85%
+        }
+        text "now" {
+            at: bx0 + 366, 23; anchor: right center; size: 10.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 40% * (1 - nx.hover) * (1 - hit.hover)
+        }
+        text n_title {
+            at: bx0 + 72, 40; anchor: left center; width: 290; lines: 1
+            size: 13.5; weight: 600; family: "SF Pro Display"; color: ink
+        }
+        text n_body {
+            at: bx0 + 72, 50; anchor: left top; width: 290; lines: 2; line_height: 1.25
+            size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: 72%
+            measure: n_bm
+        }
+
+        //  Its buttons, as many as it brings (up to three), sharing the width.
+        row nacts_row {
+            at: bx0 + 16, nb_text_h + 6; gap: 8
+            for a in nacts { NoteAct(a, nw) }
+        }
+
+        //  Let it go: a small bead in the corner, there while it is under the pointer.
+        group {
+            opacity: max(hit.hover, nx.hover)
+            body {
+                color: mix(chip_hi, rose, nx.hover); light: 4%, 12, 11
+                ellipse { at: bx0 + 360, 23; radius: 10 - 0.5 * nx.pressed }
+            }
+            image ic_x { at: bx0 + 354.5, 17.5; size: 11, 11; tint: mix(ink, rose_ink, nx.hover); opacity: 85% }
+        }
+    }
+    }
+    //  The count is part of the app line now; clicking the stack opens them all.
+    zone box more_z { from: bx0 + 30, ph - 2; size: 324, 18; corner: 9 continuous; cursor: pointer; label: "See all notifications"; active: ban > 0.9 and n_more > 0 }
+    zone ellipse nx { at: bx0 + 360, 23; radius: 12; cursor: pointer; label: "Dismiss"; active: ban > 0.9 }
+}

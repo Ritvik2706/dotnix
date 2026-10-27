@@ -16,27 +16,66 @@ source "$ZINIT_HOME/zinit.zsh"
 # Everything here blocks the prompt — keep it minimal.
 
 # git.zsh calls _omz_register_handler (from async_prompt.zsh) which we don't
-# load. The prompt uses git_prompt_info synchronously so async is not needed.
+# load. The prompt calls the synchronous _omz_git_prompt_info directly (the
+# public git_prompt_info is the async variant, which would always be empty).
 function _omz_register_handler() { return 0 }
 zinit snippet OMZL::git.zsh
 setopt PROMPT_SUBST
 
-# Prompt — the classic two-line xiong-chiamiov-plus layout
-#   ┌─[user@host] - [path] - [date]
-#   └─[$] <git>
-# recoloured with a cyberpunk neon palette (truecolor %F{#hex}). Defined inline
-# rather than via OMZT:: so the colours live here instead of an upstream theme.
-#   purple #b967ff frame · green #0aff9d user · pink #ff2e97 @ and $
-#   cyan #00f0ff host · bold pink path · yellow #fffb00 date
-PROMPT='%F{#b967ff}%B┌─[%b%f%F{#0aff9d}%n%F{#ff2e97}@%f%F{#00f0ff}%m%F{#b967ff}%B]%b%f - %F{#b967ff}%B[%b%F{#ff2e97}%B%~%b%F{#b967ff}%B]%b%f - %F{#b967ff}%B[%b%F{#fffb00}%D{%a %b %d, %H:%M}%F{#b967ff}%B]%b%f
-%F{#b967ff}%B└─[%b%F{#ff2e97}%B$%b%F{#b967ff}%B] <%b%f$(git_prompt_info)%F{#b967ff}%B>%b%f '
-PS2='%F{#b967ff}%B>%b%f '
+# Prompt — glass, matching the tmux bar and niri: the path in a quiet chip
+# (rounded caps), the time as dim text. user@host only over ssh. Two accents,
+# each from the wallpaper right behind where it sits (theme/wallpaper-theme.py):
+# the folder icon, ❯ and the dirty dot from behind the prompt, the branch from
+# just right of it.
+#     ~/github/config/dotnix    main •  19:28
+#   ❯
+# ❯ is the accent (as is the cursor), red after a failed command; accents never
+# sit near red, so a failure always stands out.
+#   quiet chip #2a3244 · accent #fca6ff (both from the wallpaper); text 15,
+#   dim 8, red 1 are ANSI slots, so they follow ghostty's wallpaper palette
+#   (accent and chip follow the wallpaper, see _dotnix_prompt_theme below)
+_p_l=$'' _p_r=$'' _p_dir=$'' _p_branch=$''
+_p_host=''
+[[ -n $SSH_CONNECTION ]] && _p_host='%F{8}%n@%m%f  '
+PROMPT='${_p_host}%F{${_p_quiet}}${_p_l}%K{${_p_quiet}}%F{${_p_accent}}${_p_dir} %F{15}%(4~|…/%3~|%~)%k%F{${_p_quiet}}${_p_r}%f$(_omz_git_prompt_info)  %F{8}%D{%H:%M}%f
+%(?.%F{${_p_accent}}.%F{1})❯%f '
+PS2='%F{8}·%f '
 
-# git segment shown inside <…> on the second line
-ZSH_THEME_GIT_PROMPT_PREFIX="%F{#b967ff} %f%F{#00f0ff}"
+# git segment after the path chip
+ZSH_THEME_GIT_PROMPT_PREFIX="  %F{#9aa3b5}${_p_branch} "   # re-set by _dotnix_prompt_theme
 ZSH_THEME_GIT_PROMPT_SUFFIX="%f"
-ZSH_THEME_GIT_PROMPT_DIRTY=" %F{#fffb00}✗%f"
-ZSH_THEME_GIT_PROMPT_CLEAN=" %F{#0aff9d}✔%f"
+ZSH_THEME_GIT_PROMPT_DIRTY=" %F{#fca6ff}•"   # re-set by _dotnix_prompt_theme
+ZSH_THEME_GIT_PROMPT_CLEAN=""
+
+# The accent and the chip follow the wallpaper: theme/wallpaper-theme.py
+# writes ~/.cache/lumen/term/zsh, re-read at the next prompt whenever it
+# changes (eldritch magenta and navy until it exists).
+_p_accent='#fca6ff' _p_accent2='#9aa3b5' _p_quiet='#2a3244' _p_theme_mtime=0
+zmodload -F zsh/stat b:zstat
+_dotnix_prompt_theme() {
+  local f=~/.cache/lumen/term/zsh m
+  m=$(zstat +mtime $f 2>/dev/null) || return 0
+  (( m == _p_theme_mtime )) && return 0
+  _p_theme_mtime=$m
+  source $f
+  ZSH_THEME_GIT_PROMPT_PREFIX="  %F{${_p_accent2}}${_p_branch} "
+  ZSH_THEME_GIT_PROMPT_DIRTY=" %F{${_p_accent}}•"
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd _dotnix_prompt_theme
+
+# A blank line between one command's output and the next prompt (not above the
+# very first prompt), so each command reads as its own block.
+_dotnix_prompt_gap() {
+  (( ${+_dotnix_prompt_drawn} )) && print
+  _dotnix_prompt_drawn=1
+}
+# …nor right after clear/reset, which should leave the prompt at the very top.
+_dotnix_prompt_gap_reset() {
+  [[ $1 == (clear|reset)(| *) ]] && unset _dotnix_prompt_drawn
+}
+add-zsh-hook precmd _dotnix_prompt_gap
+add-zsh-hook preexec _dotnix_prompt_gap_reset
 
 zinit snippet OMZP::git              # git aliases: gst, gco, gd, gl, etc.
 zinit snippet OMZP::archlinux        # yay/pacman aliases

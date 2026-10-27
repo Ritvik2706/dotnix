@@ -115,7 +115,7 @@ command = zsh --login
 # left padding to 2 and the right padding to 4. If you want to set both
 # paddings to the same value, you can use a single value. For example,
 # `window-padding-x = 2` will set both paddings to 2.
-window-padding-x = 4
+window-padding-x = 14
 
 # Vertical window padding. This applies padding between the terminal cells and
 # the top and bottom window borders. The value is in points, meaning that it
@@ -134,7 +134,11 @@ window-padding-x = 4
 # top padding to 2 and the bottom padding to 4. If you want to set both
 # paddings to the same value, you can use a single value. For example,
 # `window-padding-y = 2` will set both paddings to 2.
-window-padding-y = 4
+window-padding-y = 10
+
+# Padding clears niri's 24px squircle corners, so the first/last columns never
+# run into the arcs; balance spreads the leftover cell remainder evenly.
+window-padding-balance = true
 
 font-family = "JetBrainsMono Nerd Font"
 font-size = 16
@@ -271,7 +275,24 @@ keybind = super+r=reload_config
 # widgets to show through which isn't generally desirable.
 # 
 # On macOS, changing this configuration requires restarting Ghostty completely.
-background-opacity = 0.9
+# Smoked glass: niri frosts the wallpaper behind it (window rule in
+# niri/config.kdl), so the glow matches the borders and the island, while the
+# near-black tint keeps code readable. Cells with their own background (tmux
+# pills, selections) stay opaque: a pill's rounded caps are glyphs, always
+# drawn opaque, so a translucent pill body wouldn't match its own ends.
+background-opacity = 0.66
+background-opacity-cells = false
+
+# Selection as a lit glass chip (same as tmux's copy-mode), not an inverted block
+selection-background = #3a4357
+selection-foreground = #ebfafa
+
+# Colours follow the wallpaper: theme/wallpaper-theme.py writes wall-colours
+# (untracked: background, foreground, the 16 ANSI colours re-hued from
+# eldritch, cursor, selection) and reloads ghostty. Includes load after this
+# file and after ghostty-theme, so it overrides both; without it, eldritch.
+config-file = ?wall-colours
+app-notifications = no-config-reload
 
 # Whether to blur the background when `background-opacity` is less than 1.
 # 

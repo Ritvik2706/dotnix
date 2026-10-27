@@ -10,3 +10,38 @@
 * {
   font-family: "SF Pro Display", "SF Pro Text", "JetBrainsMono Nerd Font" !important;
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Compact-mode sidebar: the same corner as the window around it.
+   niri (patched) draws window corners as lumen's continuous curve: a
+   superellipse with exponent 4 reaching 1.84 x the 24px radius = 44px
+   along each edge. CSS `corner-shape: squircle` is that superellipse,
+   with border-radius as its reach (enabled by
+   layout.css.corner-shape.enabled in user.js). With
+   zen.theme.content-element-separation = 0 Zen floats the sidebar 10px
+   in from the window edge, so the concentric reach is 44 - 10 = 34px.
+   ────────────────────────────────────────────────────────────── */
+:root[zen-compact-mode="true"] .zen-toolbar-background,
+:root[zen-compact-mode="true"] .zen-toolbar-background::before,
+:root[zen-compact-mode="true"] .zen-toolbar-background::after {
+  border-radius: 34px !important;
+  corner-shape: squircle !important;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Floating URL bar (the search box in the middle of the screen):
+   the lumen island launcher's shapes. The box is a 24px continuous
+   card (reach 24 x 1.84 = 44px, squircle, as above; while it is only
+   the search line, the browser fits that to its height, a capsule);
+   the result rows are pills, like the launcher's rows. Shape only.
+   ────────────────────────────────────────────────────────────── */
+#urlbar[zen-floating-urlbar="true"],
+#urlbar[zen-floating-urlbar="true"] .urlbar-background {
+  border-radius: 44px !important;
+  corner-shape: squircle !important;
+}
+#urlbar[zen-floating-urlbar="true"] .urlbarView-row,
+#urlbar[zen-floating-urlbar="true"] .urlbarView-row-inner {
+  border-radius: 999px !important;
+  corner-shape: round !important;
+}

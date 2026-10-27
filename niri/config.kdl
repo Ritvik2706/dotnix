@@ -1,0 +1,725 @@
+// niri — config.kdl
+//
+// Not a replica of ../hypr: the main features carry over (the lumen island
+// and its keys, screenshots, media, lock, vim navigation, the liquid-glass
+// look), and the rest is done niri's way: an endless strip of columns you
+// scroll through, the overview on Mod+Tab, tabbed columns, springs.
+// ~/.config/niri is a symlink here (install.sh links every top-level dir).
+// niri reloads this file on save; `niri validate` checks it.
+//
+// Docs: https://niri-wm.github.io/niri/Configuration%3A-Introduction.html
+
+// ─── Environment (was lua/env.lua) ───────────────────────────────────────
+environment {
+    // Qt: native Wayland so the compositor scale is applied once; xcb fallback.
+    QT_QPA_PLATFORM "wayland;xcb"
+    QT_AUTO_SCREEN_SCALE_FACTOR "1"
+    // Zen/Firefox: never fork a fresh profile when the install path changes.
+    MOZ_LEGACY_PROFILES "1"
+    XCURSOR_THEME "Bibata-Modern-Ice"
+    XCURSOR_SIZE "21"
+}
+
+cursor {
+    xcursor-theme "Bibata-Modern-Ice"
+    xcursor-size 21
+}
+
+prefer-no-csd
+
+hotkey-overlay {
+    skip-at-startup
+}
+
+screenshot-path "~/Pictures/Screenshots/screenshot-%Y-%m-%d-%H-%M-%S.png"
+
+// ─── Input (was lua/input.lua) ───────────────────────────────────────────
+input {
+    keyboard {
+        xkb {
+            layout "us"
+            options "caps:swapescape"
+        }
+    }
+
+    // macOS-feel trackpad, adaptive acceleration kept.
+    touchpad {
+        tap
+        natural-scroll
+        dwt
+        drag true
+        drag-lock
+        click-method "clickfinger"
+        tap-button-map "left-right-middle"
+        scroll-method "two-finger"
+        scroll-factor 0.45
+    }
+
+    // Real mice: raw 1:1, no acceleration (Windows' 6/11 without EPP).
+    mouse {
+        accel-profile "flat"
+        accel-speed 0.0
+    }
+
+    // Hovering focuses, but never scrolls the strip: brushing the slivers
+    // of the neighbouring columns at the screen edges no longer yanks the
+    // view sideways.
+    focus-follows-mouse max-scroll-amount="0%"
+    workspace-auto-back-and-forth
+}
+
+// ─── Outputs (was lua/monitors.lua) ──────────────────────────────────────
+// Razer Blade 15 panel: QHD@240. Hyprland's scale "auto" came out at 1.6
+// (2560x1440 -> 1600x900 logical, whole pixels both ways).
+output "eDP-2" {
+    mode "2560x1440@240"
+    scale 1.6
+    position x=0 y=0
+    variable-refresh-rate
+}
+
+// Hisense TV over HDMI: 1080p@60 is all the current cable carries.
+// With an HDMI 2.0+ cable: mode "3840x2160@60", scale 2.
+output "HDMI-A-1" {
+    mode "1920x1080@60"
+    scale 1
+    position x=1600 y=0
+}
+
+// ─── Layout (was lua/layout.lua, decorations.lua, colors.lua) ────────────
+layout {
+    gaps 8
+    // The focused column slides to the middle only when it wouldn't fit;
+    // a lone window sits centred instead of hugging the left edge.
+    center-focused-column "on-overflow"
+    always-center-single-column
+    background-color "transparent"
+
+    // A sliver of the neighbouring columns stays in view at both edges, so
+    // the strip always shows there's more to either side.
+    struts {
+        left 16
+        right 16
+        // The lumen island sits 5px below the top of the screen; this brings
+        // the windows 5px under it too (8 - 3), so the bar has even room
+        // above and below. Hyprland keeps its own spacing.
+        top -3
+    }
+
+    preset-column-widths {
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+        proportion 1.0
+    }
+    preset-window-heights {
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+        proportion 1.0
+    }
+    default-column-width { proportion 0.5; }
+
+    focus-ring {
+        off
+    }
+
+    // Glass rim: the frost of what is behind each window, lit, inside a dark
+    // hairline (theme.kdl, from ../theme/wallpaper-theme.py).
+    border {
+        width 2
+        // active-gradient: theme.kdl (follows the wallpaper)
+        inactive-color "#FFFFFF1F"
+        urgent-color "#FF2A6D"
+    }
+
+    // Soft floating-glass shadow.
+    shadow {
+        on
+        softness 24
+        spread 2
+        offset x=0 y=4
+        color "#0000004D"
+        inactive-color "#00000026"
+    }
+
+    // Where a dragged window will land: the same lilac as the rim.
+    insert-hint {
+        // color: theme.kdl (follows the wallpaper)
+    }
+
+    tab-indicator {
+        hide-when-single-tab
+        place-within-column
+        gap 4
+        width 4
+        corner-radius 2
+        // active-color: theme.kdl (follows the wallpaper)
+        inactive-color "#FFFFFF33"
+    }
+}
+
+// Frost behind anything that asks for it (window/layer rules below, and
+// the lumen island through ext-background-effect). Light, like Hyprland's
+// size 4 / 1 pass: the island blurs as well.
+blur {
+    passes 2
+    offset 3
+    noise 0.015
+    saturation 1.25
+}
+
+// ─── Animations ──────────────────────────────────────────────────────────
+// niri's own springs (interruptible, they follow the trackpad), with Apple's
+// easing kept only for windows appearing and going.
+animations {
+    window-open {
+        duration-ms 220
+        curve "cubic-bezier" 0.32 0.72 0 1
+    }
+    window-close {
+        duration-ms 160
+        curve "cubic-bezier" 0.32 0.72 0 1
+    }
+
+    // Swipes: springs keep the speed your fingers let go at, and settle in
+    // ~0.3s without overshoot, the glide of macOS Spaces (niri's defaults,
+    // 1000 / 800, stop in ~0.15s, abruptly). The patched niri also commits
+    // a swipe once it is 15% of the way (momentum included), like Hyprland.
+    workspace-switch {
+        spring damping-ratio=1.0 stiffness=450 epsilon=0.0001
+    }
+    horizontal-view-movement {
+        spring damping-ratio=1.0 stiffness=500 epsilon=0.0001
+    }
+}
+
+// Mod+Tab, the top-left hot corner, or a 4-finger swipe: every workspace
+// zoomed out over the wallpaper; drag windows between them.
+overview {
+    zoom 0.45
+    // Workspaces are square, so their shadow in the overview showed as a
+    // square ghost panel behind the rounded windows: the windows' own
+    // shadows are enough.
+    workspace-shadow {
+        off
+    }
+}
+
+// ─── Workspaces ──────────────────────────────────────────────────────────
+// A workspace is a task, not an app: a project's terminal, editor, docs and
+// browser sit side by side as columns and you scroll through them. Mod+A
+// opens a project (scripts/project.sh): its own named workspace with its tmux
+// session; Mod+Shift+A closes it. Plain workspaces come and go below.
+// No fixed workspaces: Mod+1-9 are simply the first nine.
+
+// ─── Autostart (was lua/execs.lua) ───────────────────────────────────────
+// The session autologins, so it is unauthenticated until hyprlock covers it.
+// hyprlock.service is PartOf graphical-session.target, which niri.service
+// brings up, so systemd already starts it; this is the second, independent
+// trigger (idempotent). boot-unblank.sh then brings the backlight back that
+// hyprlock-blank.service zeroed, once the lock is up.
+spawn-at-startup "systemctl" "--user" "start" "hyprlock.service"
+spawn-sh-at-startup "~/.config/hypr/scripts/boot-unblank.sh"
+
+spawn-at-startup "awww-daemon"
+spawn-sh-at-startup "~/.local/bin/lumen --scene ~/.config/lumen/shells/island/island.plm --no-hud --stall 0"
+// Hold AltGr to peek at the island, let go to close (scripts/altgr-peek.py).
+spawn-sh-at-startup "~/.config/niri/scripts/altgr-peek.py"
+spawn-at-startup "hypridle"
+// Display corners: continuous like macOS, and small like a MacBook panel's
+// own (about 10pt): there to soften the edge, not to be noticed.
+spawn-sh-at-startup "~/.config/hypr/scripts/screen-corners.py 10"
+spawn-at-startup "xfsettingsd"
+spawn-sh-at-startup "gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'; gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark'"
+// The apps with windows: a terminal, and after a compositor switch whatever
+// was open, put back where it was (scripts/startup.sh).
+spawn-sh-at-startup "~/.config/niri/scripts/startup.sh"
+spawn-sh-at-startup "wlsunset -l 43.6 -L 3.9"
+spawn-at-startup "/home/ritvik/github/config/dotnix/razer/razer-fx.py" "aurora" "reactive" "starlight:BFEFFF"
+
+// ─── Lid (was the switch:on:Lid Switch bind) ─────────────────────────────
+switch-events {
+    lid-close { spawn "sh" "-c" "~/.config/hypr/scripts/sleep-lock.sh lid"; }
+}
+
+// ─── Window rules (was lua/rules.lua) ────────────────────────────────────
+
+// Everything: 24px corners, the radius of the lumen island's open card, and
+// the same curve (the patched niri draws lumen's `corner: r continuous`).
+// An app that asks to start maximized (Zen, Firefox) would fill the screen
+// edge to edge, square and borderless: it opens as a normal column instead
+// (Mod+F still maximizes the column).
+window-rule {
+    geometry-corner-radius 24
+    clip-to-geometry true
+    open-maximized-to-edges false
+}
+
+// Unfocused windows: a hint of translucency, frosted (Hyprland's
+// inactive_opacity 0.90 + xray blur). Ghostty does its own transparency.
+window-rule {
+    match is-active=false
+    exclude app-id=r#"^com\.mitchellh\.ghostty$"#
+    opacity 0.90
+    background-effect {
+        blur true
+        xray true
+    }
+}
+
+// Ghostty: its own translucency over niri's cached wallpaper frost (cheap,
+// unlike ghostty's background-blur), so the terminal is glass like the rest.
+window-rule {
+    match app-id=r#"^com\.mitchellh\.ghostty$"#
+    opacity 1.0
+    background-effect {
+        blur true
+        xray true
+    }
+}
+
+// Opaque Qt/GTK apps given glass by the compositor, frosting the real
+// windows behind (Hyprland's xray = false).
+window-rule {
+    match app-id=r#"^org\.qbittorrent\.qBittorrent$"#
+    opacity 0.90
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+window-rule {
+    match app-id=r#"^Thunar$"#
+    match app-id=r#"^thunar$"#
+    opacity 0.96
+}
+
+// File choosers and portal pickers: compact floating panel, real blur (the
+// patched niri gives xray-false windows a glass rim of the same real backdrop).
+window-rule {
+    match title=r#"^(Open Files?|Save File|Save As|Select a File|Open Folder|File Upload|All Files|Enter name of file to save to|Save Image|Choose wallpaper|Library)"#
+    match app-id=r#"^(xdg-desktop-portal-gtk|xdg-desktop-portal-gnome)$"#
+    match title=r#"(?i)^(save|open|export|import|select|choose|attach|upload)\b.*\b(as|file|files|folder|folders|directory|image|document|location|picture|video|to upload|wallpaper)\b"#
+    match title=r#"^(.*)(wants to (save|open))$"#
+    open-floating true
+    default-column-width { fixed 1024; }
+    default-window-height { fixed 600; }
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+// Settings panels: float, centered, glass.
+window-rule {
+    match app-id=r#"^(org\.twosheds\.iwgtk|iwgtk)$"#
+    match app-id=r#"^\.?blueman-.*$"#
+    open-floating true
+    default-column-width { fixed 1024; }
+    default-window-height { fixed 600; }
+    opacity 0.90
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+window-rule {
+    match app-id=r#"^(pavucontrol|org\.pulseaudio\.pavucontrol)$"#
+    match app-id=r#"^nm-connection-editor$"#
+    match app-id=r#"^Zotero$"#
+    open-floating true
+    default-column-width { proportion 0.45; }
+    default-window-height { proportion 0.45; }
+}
+
+window-rule {
+    match app-id=r#"^(blueberry\.py|guifetch)$"#
+    match app-id=r#".*plasmawindowed.*"#
+    match app-id=r#"^kcm_.*"#
+    match app-id=r#".*bluedevilwizard$"#
+    match title=r#".*Welcome$"#
+    open-floating true
+}
+
+window-rule {
+    match app-id=r#"org\.freedesktop\.impl\.portal\.desktop\.kde"#
+    open-floating true
+    default-column-width { proportion 0.6; }
+    default-window-height { proportion 0.65; }
+}
+
+// Thunar dialogs.
+window-rule {
+    match app-id=r#"^[Tt]hunar$"# title=r#"^(Properties|Preferences|Open With|Choose Application|Replace|Overwrite|Merge|Empty Trash|Confirm|Permissions)"#
+    match app-id=r#"^[Tt]hunar$"# title=r#".*(Bulk\s?Rename|Custom Actions?).*"#
+    match app-id=r#"^catfish$"#
+    open-floating true
+    default-column-width { proportion 0.55; }
+    default-window-height { proportion 0.6; }
+}
+
+// File-operation progress: out of the way, top-left, never takes focus.
+window-rule {
+    match app-id=r#"^[Tt]hunar$"# title=r#"^(File Operation Progress|Copying|Moving|Deleting|Transferring|Replacing|Merging)"#
+    open-floating true
+    open-focused false
+    default-column-width { proportion 0.36; }
+    default-window-height { proportion 0.22; }
+    default-floating-position x=40 y=80 relative-to="top-left"
+}
+
+window-rule {
+    match app-id=r#"^yazi-(picker|fm)$"#
+    match title=r#"^Yazi File Picker$"#
+    open-floating true
+    default-column-width { proportion 0.8; }
+    default-window-height { proportion 0.75; }
+    opacity 0.97
+}
+
+// Clipboard manager scratchpad.
+window-rule {
+    match app-id=r#"^(copyq|CopyQ|com\.github\.hluk\.copyq)$"#
+    open-floating true
+    default-column-width { fixed 900; }
+    default-window-height { fixed 600; }
+}
+
+// Claude Desktop lives beside the terminal: the second column of workspace 2,
+// full width, so Mod+S scrolls over to it and back
+// (custom_scripts/toggle_claude.sh). Never closed to hide it, so it's there at
+// once: Electron takes ~4s to rebuild a closed window.
+window-rule {
+    match app-id=r#"^com\.anthropic\.Claude$"#
+    default-column-width { proportion 1.0; }
+}
+
+// Picture-in-picture: bottom-right corner.
+window-rule {
+    match title=r#"^([Pp]icture[-\s]?[Ii]n[-\s]?[Pp]icture)"#
+    open-floating true
+    default-column-width { proportion 0.25; }
+    default-window-height { proportion 0.25; }
+    default-floating-position x=32 y=32 relative-to="bottom-right"
+}
+
+// Screen-share picker (xdg-desktop-portal-gnome on niri).
+window-rule {
+    match app-id=r#"^xdg-desktop-portal-gnome$"# title=r#"(?i)share"#
+    open-floating true
+    default-column-width { fixed 900; }
+    default-window-height { fixed 620; }
+}
+
+// Default widths that pair up on one screen: browser ⅔ + terminal ⅓, or
+// two halves. The first terminal, at login, takes the whole strip.
+window-rule {
+    match app-id=r#"^com\.mitchellh\.ghostty$"#
+    default-column-width { proportion 0.5; }
+}
+window-rule {
+    match app-id=r#"^com\.mitchellh\.ghostty$"# at-startup=true
+    default-column-width { proportion 1.0; }
+}
+
+window-rule {
+    match app-id=r#"^org\.pwmt\.zathura$"#
+    default-column-width { proportion 0.5; }
+}
+
+window-rule {
+    match app-id=r#"^[Tt]hunar$"#
+    default-column-width { proportion 0.33333; }
+}
+
+// Mod+A's project picker: a floating panel, centred.
+window-rule {
+    match app-id=r#"^dev\.niri\.project-picker$"#
+    open-floating true
+    default-column-width { fixed 1100; }
+    default-window-height { fixed 560; }
+    opacity 0.96
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+// Browser wide enough to read, with a ⅓ column to spare beside it.
+window-rule {
+    match app-id=r#"^(zen|firefox)$"#
+    default-column-width { proportion 0.66667; }
+}
+
+// Floating windows (pickers, popups) lift off the strip.
+window-rule {
+    match is-floating=true
+    shadow {
+        softness 40
+        spread 4
+        offset x=0 y=10
+        color "#00000066"
+    }
+}
+
+// Whatever is being screen-shared gets a red rim, so it's never a surprise.
+window-rule {
+    match is-window-cast-target=true
+    border {
+        active-gradient from="#FF2A6D" to="#FF6A95" angle=120
+        inactive-color "#FF2A6D99"
+    }
+}
+
+// ─── Layer rules ─────────────────────────────────────────────────────────
+
+// The lumen island asks for its own blur, shaped to the pill/card
+// (ext-background-effect): only xray off here, so the expanded card frosts
+// the real windows it drops over, not just the wallpaper.
+layer-rule {
+    match namespace="^lumen$"
+    background-effect {
+        xray false
+    }
+}
+
+// Rounded display corners (scripts/screen-corners.py): plain black masks.
+layer-rule {
+    match namespace="^screen-corners$"
+    background-effect {
+        blur false
+    }
+}
+
+layer-rule {
+    match namespace="^(notifications|vicinae|waybar|launcher|logout_dialog)$"
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+// The wallpaper stays put under the overview's zoomed workspaces.
+layer-rule {
+    match namespace="^awww"
+    place-within-backdrop true
+}
+
+// ─── Keybinds ────────────────────────────────────────────────────────────
+// Mod = Super (the key labelled Alt on this keyboard, via keyd).
+// Mod+Shift+/ shows them all.
+//
+// Vim keys, one job per modifier:
+//   Mod        + h j k l   focus: columns (on to the TV at the ends),
+//                          windows in a column (on to the next workspace)
+//   Mod+Shift  + h j k l   move the column / window the same way
+//   Mod+Ctrl   + h l       column narrower / wider      j k  next / previous workspace
+//   Mod+Alt    + h l       stack into the column left / right (or back out)
+//                          j k  window taller / shorter
+//
+// Widths: Mod+Alt+3 / 2 / 1 jump to ⅓ / ½ / full, Mod+Alt+Shift+3 to ⅔.
+// Getting around a long strip: Mod+Tab is the overview (h j k l move in it,
+// Enter picks), Mod+O jumps back to the window you came from, Mod+Grave to
+// the workspace you came from, Mod+Home/End to the ends of the strip.
+// Mod+drag moves a window, Mod+right-drag resizes it; Alt+Tab is niri's own
+// recent-windows switcher.
+binds {
+    Mod+Shift+Slash { show-hotkey-overlay; }
+
+    // ── Focus ──
+    Mod+H     { focus-column-or-monitor-left; }
+    Mod+J     { focus-window-or-workspace-down; }
+    Mod+K     { focus-window-or-workspace-up; }
+    Mod+L     { focus-column-or-monitor-right; }
+    Mod+Left  { focus-column-or-monitor-left; }
+    Mod+Down  { focus-window-or-workspace-down; }
+    Mod+Up    { focus-window-or-workspace-up; }
+    Mod+Right { focus-column-or-monitor-right; }
+    Mod+Home  { focus-column-first; }
+    Mod+End   { focus-column-last; }
+
+    Mod+Tab repeat=false hotkey-overlay-title="Overview" { toggle-overview; }
+    Mod+O hotkey-overlay-title="Back to the previous window" { focus-window-previous; }
+    Mod+Grave hotkey-overlay-title="Back to the previous workspace" { focus-workspace-previous; }
+    Mod+Ctrl+Space { switch-focus-between-floating-and-tiling; }
+
+    // ── Move (on a floating window these nudge it) ──
+    Mod+Shift+H     { move-column-left-or-to-monitor-left; }
+    Mod+Shift+J     { move-window-down-or-to-workspace-down; }
+    Mod+Shift+K     { move-window-up-or-to-workspace-up; }
+    Mod+Shift+L     { move-column-right-or-to-monitor-right; }
+    Mod+Shift+Left  { move-column-left-or-to-monitor-left; }
+    Mod+Shift+Down  { move-window-down-or-to-workspace-down; }
+    Mod+Shift+Up    { move-window-up-or-to-workspace-up; }
+    Mod+Shift+Right { move-column-right-or-to-monitor-right; }
+    Mod+Shift+Home  { move-column-to-first; }
+    Mod+Shift+End   { move-column-to-last; }
+
+    // ── Width, and workspaces up and down ──
+    Mod+Ctrl+H { set-column-width "-10%"; }
+    Mod+Ctrl+L { set-column-width "+10%"; }
+    Mod+Ctrl+J { focus-workspace-down; }
+    Mod+Ctrl+K { focus-workspace-up; }
+    Mod+Ctrl+Shift+J { move-column-to-workspace-down; }
+    Mod+Ctrl+Shift+K { move-column-to-workspace-up; }
+    Mod+Ctrl+Shift+Up   { move-workspace-up; }
+    Mod+Ctrl+Shift+Down { move-workspace-down; }
+
+    // ── Stacking and height ──
+    // Alt+H/L pull the focused window into the column beside it, or out of
+    // its column; Mod+T shows a column as tabs (J/K flip through them).
+    Mod+Alt+H { consume-or-expel-window-left; }
+    Mod+Alt+L { consume-or-expel-window-right; }
+    Mod+Alt+J { set-window-height "+10%"; }
+    Mod+Alt+K { set-window-height "-10%"; }
+    Mod+T hotkey-overlay-title="Tabbed column" { toggle-column-tabbed-display; }
+
+    // ── Sizing ──
+    // Mod+F fills the screen with the column (bars and gaps stay);
+    // Mod+Shift+F is real fullscreen. Mod+Z steps through ⅓ ½ ⅔ full.
+    // Pressed again it centres the column it gives back: niri would otherwise
+    // leave it where the maximized one began, at the left edge.
+    Mod+F hotkey-overlay-title="Maximize column" { spawn-sh "niri msg action maximize-column && niri msg action center-column"; }
+    Mod+Shift+F { fullscreen-window; }
+    Mod+Ctrl+F { expand-column-to-available-width; }
+    Mod+Alt+F { toggle-windowed-fullscreen; }
+    // Straight to a width: the number is N in 1/N (Shift+3 is ⅔), so a
+    // ⅓ + ⅔ pair is two keys.
+    Mod+Alt+1 hotkey-overlay-title="Width: full" { set-column-width "100%"; }
+    Mod+Alt+2 hotkey-overlay-title="Width: ½" { set-column-width "50%"; }
+    Mod+Alt+3 hotkey-overlay-title="Width: ⅓" { set-column-width "33.333%"; }
+    Mod+Alt+Shift+3 hotkey-overlay-title="Width: ⅔" { set-column-width "66.667%"; }
+    Mod+Z { switch-preset-column-width; }
+    Mod+Alt+Z { switch-preset-column-width-back; }
+    Mod+Shift+Z { switch-preset-window-height; }
+    Mod+Ctrl+R { reset-window-height; }
+    Mod+Minus { set-column-width "-10%"; }
+    Mod+Equal { set-column-width "+10%"; }
+    // M for middle: centre the column, or everything on screen as a group.
+    Mod+M { center-column; }
+    Mod+Shift+M { center-visible-columns; }
+    Mod+Space { toggle-window-floating; }
+
+    // ── Projects and workspaces ──
+    Mod+A hotkey-overlay-title="Open a project" { spawn-sh "~/.config/niri/scripts/project.sh pick"; }
+    Mod+Shift+A hotkey-overlay-title="Close this project" { spawn-sh "~/.config/niri/scripts/project.sh close"; }
+
+    Mod+1 { focus-workspace 1; }
+    Mod+2 { focus-workspace 2; }
+    Mod+3 { focus-workspace 3; }
+    Mod+4 { focus-workspace 4; }
+    Mod+5 { focus-workspace 5; }
+    Mod+6 { focus-workspace 6; }
+    Mod+7 { focus-workspace 7; }
+    Mod+8 { focus-workspace 8; }
+    Mod+9 { focus-workspace 9; }
+    Mod+Shift+1 { move-column-to-workspace 1; }
+    Mod+Shift+2 { move-column-to-workspace 2; }
+    Mod+Shift+3 { move-column-to-workspace 3; }
+    Mod+Shift+4 { move-column-to-workspace 4; }
+    Mod+Shift+5 { move-column-to-workspace 5; }
+    Mod+Shift+6 { move-column-to-workspace 6; }
+    Mod+Shift+7 { move-column-to-workspace 7; }
+    Mod+Shift+8 { move-column-to-workspace 8; }
+    Mod+Shift+9 { move-column-to-workspace 9; }
+
+    // ── Monitors: the TV ──
+    // H/L already run onto it at the ends of the strip.
+    Mod+Comma  { focus-monitor-left; }
+    Mod+Period { focus-monitor-right; }
+    Mod+Shift+Comma  { move-column-to-monitor-left; }
+    Mod+Shift+Period { move-column-to-monitor-right; }
+    Mod+Ctrl+Comma  { move-workspace-to-monitor-left; }
+    Mod+Ctrl+Period { move-workspace-to-monitor-right; }
+    Mod+Ctrl+1 { spawn-sh "~/.config/niri/scripts/tv-ws.sh focus 1"; }
+    Mod+Ctrl+2 { spawn-sh "~/.config/niri/scripts/tv-ws.sh focus 2"; }
+    Mod+Ctrl+3 { spawn-sh "~/.config/niri/scripts/tv-ws.sh focus 3"; }
+    Mod+Ctrl+Shift+1 { spawn-sh "~/.config/niri/scripts/tv-ws.sh move 1"; }
+    Mod+Ctrl+Shift+2 { spawn-sh "~/.config/niri/scripts/tv-ws.sh move 2"; }
+    Mod+Ctrl+Shift+3 { spawn-sh "~/.config/niri/scripts/tv-ws.sh move 3"; }
+
+    // Screen sharing: share "the dynamic target" in the call once, then point
+    // it at whatever you like from here (red rim = being shared).
+    Mod+Ctrl+S hotkey-overlay-title="Share this window" { set-dynamic-cast-window; }
+    Mod+Ctrl+Shift+S hotkey-overlay-title="Share this monitor" { set-dynamic-cast-monitor; }
+    Mod+Ctrl+Alt+S hotkey-overlay-title="Stop sharing" { clear-dynamic-cast-target; }
+
+    // ── Apps; the lumen island does most of it ──
+    // New windows open beside the focused column, in this project.
+    Mod+Return hotkey-overlay-title="Terminal" { spawn "ghostty"; }
+    Mod+G hotkey-overlay-title="Zen (this project's, or jump)" { spawn-sh "~/.config/niri/scripts/focus-or-spawn.sh '^zen$' zen-browser"; }
+    Mod+Shift+G hotkey-overlay-title="New Zen window here" { spawn "zen-browser" "--new-window"; }
+    Mod+R hotkey-overlay-title="Files" { spawn "thunar"; }
+    Mod+S hotkey-overlay-title="Claude (there and back)" { spawn-sh "~/.config/custom_scripts/toggle_claude.sh"; }
+    Mod+C hotkey-overlay-title="Clipboard (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit clip_open'"; }
+    Mod+D hotkey-overlay-title="Launcher (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit launch_open'"; }
+    Mod+P hotkey-overlay-title="Wallpaper (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit wall_open'"; }
+    Mod+Y hotkey-overlay-title="Finder (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit find_open'"; }
+    Mod+Shift+P hotkey-overlay-title="Colour picker (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit pick_color'"; }
+    Mod+E hotkey-overlay-title="Emoji (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit emoji_open'"; }
+    Mod+U hotkey-overlay-title="Mail (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit mail_big'"; }
+    Mod+W hotkey-overlay-title="WhatsApp (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit wa_big'"; }
+
+    // ── Session ──
+    Mod+Q repeat=false { close-window; }
+    Mod+Escape hotkey-overlay-title="Lock" { spawn "systemctl" "--user" "start" "hyprlock.service"; }
+    Mod+Shift+C hotkey-overlay-title="Reload config" { spawn "niri" "msg" "action" "load-config-file"; }
+    Mod+Shift+E { quit; }
+    Mod+Shift+B { power-off-monitors; }
+    Mod+Shift+Space hotkey-overlay-title="Opaque mode" { spawn-sh "~/.config/niri/scripts/mode.sh opaque"; }
+    Mod+F12 hotkey-overlay-title="Performance mode" { spawn-sh "~/.config/niri/scripts/mode.sh perf"; }
+    Mod+Ctrl+I hotkey-overlay-title="Caffeine" { spawn-sh "~/.config/niri/scripts/caffeine.sh"; }
+    Mod+N hotkey-overlay-title="Night light" { spawn-sh "~/.config/custom_scripts/toggle_wlsunset.sh"; }
+    Mod+BackSpace hotkey-overlay-title="Clear notifications (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit notes_clear'"; }
+    Mod+Shift+BackSpace hotkey-overlay-title="Notifications (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit open_notes'"; }
+    // Lock-screen escape hatch and face-unlock rescan: see the notes in
+    // hypr/lua/keybinds/power_notifications.lua.
+    Mod+Ctrl+Alt+L allow-when-locked=true { spawn "systemctl" "--user" "restart" "hyprlock.service"; }
+    Mod+Ctrl+Alt+F allow-when-locked=true { spawn-sh "~/.config/hypr/scripts/face-unlock.sh rearm"; }
+
+    // ── Screenshots ──
+    // Mod+Alt+V is niri's own interactive one.
+    Mod+V { spawn-sh "~/.config/hypr/scripts/screenshot.sh area copy"; }
+    Mod+B { spawn-sh "~/.config/hypr/scripts/screenshot.sh area save"; }
+    Mod+Shift+V { spawn-sh "~/.config/custom_scripts/ocr-sel"; }
+    Mod+Ctrl+V { spawn-sh "~/.config/hypr/scripts/screenshot.sh window copy"; }
+    Mod+Ctrl+B { spawn-sh "~/.config/hypr/scripts/screenshot.sh window save"; }
+    Mod+Alt+V { screenshot; }
+    Print { spawn-sh "~/.config/hypr/scripts/screenshot.sh screen copy"; }
+    Shift+Print { spawn-sh "~/.config/hypr/scripts/screenshot.sh screen save"; }
+
+    // ── Media and brightness ──
+    // F1-F3 / F8-F11: the Razer's bare function row.
+    XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+; ~/.local/bin/lumen --say island 'emit vol_key 1' >/dev/null 2>&1"; }
+    F3 allow-when-locked=true { spawn-sh "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+; ~/.local/bin/lumen --say island 'emit vol_key 1' >/dev/null 2>&1"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-; ~/.local/bin/lumen --say island 'emit vol_key -1' >/dev/null 2>&1"; }
+    F2 allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-; ~/.local/bin/lumen --say island 'emit vol_key -1' >/dev/null 2>&1"; }
+    XF86AudioMute allow-when-locked=true repeat=false { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    F1 allow-when-locked=true repeat=false { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    XF86MonBrightnessUp allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh up"; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh down"; }
+    F9 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh up"; }
+    F8 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh down"; }
+    F10 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/kbd-backlight.sh down"; }
+    F11 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/kbd-backlight.sh up"; }
+
+    // ── Mouse and trackpad ──
+    // Wheel scrolls the strip, Shift+wheel walks workspaces; 3-finger swipes
+    // do the same on the trackpad, 4 fingers up opens the overview.
+    Mod+WheelScrollDown cooldown-ms=150 { focus-column-right; }
+    Mod+WheelScrollUp   cooldown-ms=150 { focus-column-left; }
+    Mod+Shift+WheelScrollDown cooldown-ms=150 { focus-workspace-down; }
+    Mod+Shift+WheelScrollUp   cooldown-ms=150 { focus-workspace-up; }
+    Mod+WheelScrollRight { focus-column-right; }
+    Mod+WheelScrollLeft  { focus-column-left; }
+}
+
+// Also built in: the top-left hot corner opens the overview.
+
+// Live look toggles (scripts/mode.sh). Last, so what it sets wins.
+// The colours that follow the wallpaper, written by ../theme/wallpaper-theme.py.
+include "theme.kdl"
+include "mode.kdl"

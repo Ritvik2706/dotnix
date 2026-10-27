@@ -11,8 +11,13 @@ local notify = require("lua.notify")
 hl.bind(main .. " + RETURN", hl.dsp.exec_cmd(vars.term))
 hl.bind(main .. " + SHIFT + T", hl.dsp.exec_cmd("~/.config/custom_scripts/tmux_popup.sh")) -- moved off SUPER+T (zoom)
 hl.bind(main .. " + Q", hl.dsp.window.close())
-hl.bind(main .. " + C", hl.dsp.exec_cmd("copyq show"))
+hl.bind(main .. " + C", hl.dsp.exec_cmd('~/.local/bin/lumen --say island "emit clip_open"')) -- the island's clipboard (was: copyq show)
 hl.bind(main .. " + SHIFT + C", hl.dsp.exec_cmd("hyprctl reload"))
+-- Holding AltGr (keyd makes it Super_R) peeks at the island's card; letting go
+-- closes it. The key is reserved for this (US layout: AltGr isn't used).
+local PEEK = [[~/.local/bin/lumen --say island "emit peek %d" >/dev/null 2>&1]]
+hl.bind("Super_R", hl.dsp.exec_cmd(string.format(PEEK, 1)), { ignore_mods = true })
+hl.bind("Super_R", hl.dsp.exec_cmd(string.format(PEEK, 0)), { ignore_mods = true, release = true })
 
 -- Exit asks first: SUPER+SHIFT+E arms it, then E (or Y) quits, anything
 -- else in the submap (Esc/Return/N) backs out. Protects against a stray chord

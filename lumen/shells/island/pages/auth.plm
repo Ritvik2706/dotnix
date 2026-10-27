@@ -1,0 +1,68 @@
+// The password prompt (the island is the session's polkit agent): a program
+// wants to do something as root. The card opens on it and holds the keyboard
+// until it is answered or cancelled. The answer goes to polkit's own helper;
+// lumen only carries it.
+part Auth {
+    group {
+        opacity: smooth(0.4, 1, on_auth)
+        move: 28 * (1 - on_auth), 0
+        //  A wrong password: a short, settling shake.
+        prop pk_shake = 0 ~spring(520, 14)
+        on change pk.error while pk.error == wrong { impulse pk_shake 260 }
+
+        group {
+            move: ex0 + 16, 44
+            body {
+                gradient: 0, 2 to 32, 34, soft_l, soft_s
+                glass: 25%; blur: 0%; light: 7%, 2, 16; shadow: 0, 1.2, 4.2, 26%
+                ellipse { at: 16, 18; radius: 16 }
+            }
+            image ic_lock { at: 7, 9; size: 18, 18; tint: pearl_ink }
+            text "Authentication required" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+        }
+        text pk.message {
+            at: ex0 + 20, 100; anchor: left center; width: 344; lines: 2; size: 12; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 72%
+        }
+
+        group {
+            move: ex0 + 16 + pk_shake * 0.02, 128
+            text "{pk.prompt}" { at: 6, 8; anchor: left center; size: 11; weight: 600; family: "SF Pro Display"; color: ink; opacity: 50% }
+            text pk.user { at: 346, 8; anchor: right center; size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink }
+            box { from: 0, 20; size: 352, 36; corner: 18 continuous; color: well; opacity: 30% }
+            body { color: well; opacity: 30%; box { from: 14, 20; size: 324, 2; corner: 1 continuous } }
+            box { from: 0, 20; size: 352, 36; corner: 18 continuous; stroke: 1; color: if(pk.error == wrong, coral, soft_l); opacity: 45% }
+            //  Whoever sits there types it: an agent at the desktop is not let into this field.
+            input answer { at: 16, 29; width: 320; size: 13.5; color: ink; placeholder: ""; secret: true; agent: no; label: "Password" }
+        }
+        text pick(pk.error == wrong, pk.info, "That wasn't it. Try again.") {
+            at: ex0 + 22, 200; anchor: left center; width: 200; lines: 1; size: 11.5; weight: 500; family: "SF Pro Display"
+            color: if(pk.error == wrong, coral, ink); opacity: if(pk.error == wrong, 95%, 55%)
+        }
+        text "Checking…" {
+            at: ex0 + 22, 200; anchor: left center; size: 11.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: if(pk.pending and not pk.asking and pk.error == none, 55%, 0)
+        }
+
+        //  Cancel and Unlock: pills, the one that lets it through in tinted glass.
+        group {
+            move: ex0 + 16, 214
+            body {
+                color: mix(chip, chip_hi, pkc.hover); glass: 25%; blur: 0%; light: 4%, 0, 18; shadow: 0, 1.5, 5, 20%
+                box { from: 172, 0; size: 84, 36; corner: 18 continuous }
+            }
+            text "Cancel" { at: 214, 18; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink }
+            body {
+                gradient: 264, 0 to 352, 36, soft_l, soft_s
+                glass: 25%; blur: 0%; light: 7%, 0, 18; shadow: 0, 1.5 + pko.hover, 5, 24%
+                box { from: 264, 0; size: 88, 36; corner: 18 continuous }
+            }
+            text "Unlock" { at: 308, 18; anchor: center; size: 12.5; weight: 700; family: "SF Pro Display"; color: pearl_ink }
+            zone box pkc { from: 172, 0; size: 84, 36; corner: 18 continuous; cursor: pointer; label: "Cancel"; active: pk.pending }
+            //  Letting a program through is for whoever sits there to do, not for an agent.
+            zone box pko { from: 264, 0; size: 88, 36; corner: 18 continuous; cursor: pointer; label: "Unlock"; agent: no; active: pk.pending }
+        }
+    }
+    on press pkc { emit pk_cancel }
+    on press pko { emit pk_send }
+}

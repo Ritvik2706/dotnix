@@ -1,0 +1,179 @@
+// The clipboard page of the open card: what was copied, newest first, and the
+// chosen one large on the right (a text in full, a picture as big as it fits).
+// Super+C opens it in vim's normal mode: j k move, gg G the ends, Ctrl+d u
+// half a page, Enter y l copy one back, dd x forget it, i searches (insert;
+// Ctrl+j k still move while typing), q Esc close. The logic hands it only the
+// rows in sight.
+part Clipboard {
+    component ClipRow(r: record) {
+        size: 380, 44
+        zone box row { from: 0, 0; size: 380, 44; corner: 22 continuous; cursor: pointer; label: "{r.text}"; selected: r.sel }
+
+        //  Under the pointer it rises; the chosen one is a raised chip.
+        body {
+            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 22
+            box { from: 0, 0; size: 380, 44; corner: 22 continuous }
+        }
+        body {
+            gradient: 0, 0 to 380, 44, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
+            glass: 25%; blur: 0%; light: 4%, 0, 22; shadow: 0, 1.8, 7, 20%; show: r.sel
+            box { from: 0, 0; size: 380, 44; corner: 22 continuous }
+        }
+
+        //  A text: its first line. A picture: a small one of it, and its size.
+        text r.text {
+            at: 20, 22; anchor: left center; width: 260; lines: 1; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 92%; show: r.kind == 0
+        }
+        //  The picture, small; and its size.
+        group {
+            show: r.kind == 1
+            box { from: 10, 6; size: 56, 32; corner: 9 continuous; color: chip_hi }
+            group {
+                clip box { from: 10, 6; size: 56, 32; corner: 9 continuous }
+                image r.thumb { at: 10, 6; size: 57, 32 }
+            }
+            box { from: 10, 6; size: 56, 32; corner: 9 continuous; stroke: 0.6; color: ink; opacity: 14% }
+            text r.dims { at: 78, 22; anchor: left center; size: 12.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 78% }
+        }
+        text r.ago { at: 332, 22; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 42% }
+
+        //  Forget it: a small bead, there while the row is under the pointer or chosen.
+        group {
+            opacity: max(row.hover, max(del.hover, r.sel))
+            body {
+                color: mix(chip_hi, rose, del.hover); light: 4%, 11, 11
+                ellipse { at: 358, 22; radius: 11 - 0.5 * del.pressed }
+            }
+            image ic_x { at: 352, 16; size: 12, 12; tint: mix(ink, rose_ink, del.hover); opacity: 85% }
+        }
+        zone ellipse del { at: 358, 22; radius: 12; cursor: pointer; label: "Forget this one" }
+
+        on press row { emit clip_pick_row(r.index) }
+        //  The panel on the right shows what is under the pointer, then the chosen one again.
+        on enter row { emit clip_hover(r.index) }
+        on press del { emit clip_del_row(r.index) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_clip)
+        move: 28 * (1 - on_clip), 0
+
+        //  The header: back, the title (or the search, once asked for), and Clear (held: it cannot be undone).
+        group {
+            move: clx + 16, 44
+            zone ellipse cb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, cb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * cb.hover - cb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * cb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * cb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+
+            //  Clipboard: the title, and a round search button. `i` (or a click)
+            //  stretches the button leftward into the field as the title slides
+            //  away; with a filter kept, the field stays (unlit) to show it.
+            prop sx = 0 ~300ms
+            follow sx = if(clip_insert or not clip_q_empty, 1, 0)
+            prop insert_in = 0 ~200ms
+            follow insert_in = if(clip_insert, 1, 0)
+            let fl = 268 - 228 * sx
+            group {
+                opacity: 1 - smooth(0, 0.5, sx)
+                move: -10 * sx, 0
+                text "Clipboard" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+                text number(clip_total, 0, "") { at: 260, 18; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: if(clip_total > 0, 100%, 0) }
+            }
+            body {
+                color: mix(chip, chip_hi, csb.hover * (1 - sx)); glass: 25%; blur: 0%; light: 4%, 2, 18
+                shadow: 0, (1.2 + 0.5 * csb.hover - csb.pressed) * (1 - sx), 4.2, 21%; opacity: 1 - sx
+                box { from: fl, 0; size: 304 - fl, 36; corner: 18 continuous }
+            }
+            box { from: fl, 0; size: 304 - fl, 36; corner: 18 continuous; color: well; opacity: 30% * sx }
+            body { color: well; opacity: 30% * sx; box { from: fl + 12, 0; size: max(0, 304 - fl - 24), 2; corner: 1 continuous } }
+            box { from: fl, 0; size: 304 - fl, 36; corner: 18 continuous; stroke: 1; color: soft_l; opacity: 45% * insert_in }
+            image ic_search { at: 279 - 227 * sx, 11; size: 14, 14; tint: ink; opacity: 85% - 25% * sx * (1 - insert_in) }
+            group {
+                opacity: smooth(0.55, 1, sx)
+                input clip_q { at: 74, 9; width: 218; size: 13.5; color: ink; placeholder: ""; label: "Search the clipboard" }
+                text "Search the clipboard" {
+                    at: 74, 18; anchor: left center; size: 13.5; weight: 500; family: "SF Pro Display"
+                    color: ink; opacity: 40%; show: clip_q_empty
+                }
+            }
+            zone box csb { from: fl, 0; size: 304 - fl, 36; corner: 18 continuous; cursor: pointer; label: "Search (i)"; active: not clip_insert }
+
+            prop hold_clear = 0 ~700ms
+            follow hold_clear = clr.pressed
+            body {
+                color: mix(rose, #7c3d4d, clr.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + clr.hover, 4.9, 20%
+                box { from: 312, 2; size: 68, 32; corner: 16 continuous }
+            }
+            body {
+                color: coral; opacity: 30% * hold_clear
+                box { from: 312, 2; size: max(1, 68 * hold_clear), 32; corner: 16 continuous }
+            }
+            image ic_trash { at: 324, 10; size: 15, 15; tint: rose_ink; opacity: 90% }
+            text "Clear" { at: 343, 18; anchor: left center; size: 11.5; weight: 600; family: "SF Pro Display"; color: rose_ink }
+            zone box clr { from: 312, 2; size: 68, 32; corner: 16 continuous; cursor: pointer; label: "Clear the clipboard history (hold)" }
+        }
+
+        //  The rows in sight; the wheel and ↑ ↓ move which ones those are.
+        zone box clip_list { from: clx + 12, 88; size: 380, clip_lh; label: "Clipboard history" }
+        column clist {
+            at: clx + 12, 88; gap: 2
+            for r in clips { ClipRow(r) }
+        }
+        text pick(clip_q_empty, "No matches", "Nothing copied yet") {
+            at: clx + 202, 112; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: clips.count == 0
+        }
+
+        //  The chosen one, large: a pressed-in panel on the right (not in the narrow card beside a view).
+        let cvx = clx + 404
+        let cvy = 44
+        group {
+            show: clip_wide
+            box { from: cvx, cvy; size: 360, 410; corner: 22 continuous; color: well; opacity: 26% }
+            body { color: well; opacity: 26%; box { from: cvx + 16, cvy; size: 328, 2; corner: 1 continuous } }
+            box { from: cvx, cvy; size: 360, 410; corner: 22 continuous; stroke: 0.6; color: ink; opacity: 8% }
+            group {
+                opacity: if(clips.count > 0, 1, 0)
+                text pick(cpv_kind == 2, "Text", "Image") { at: cvx + 18, cvy + 22; anchor: left center; size: 13.5; weight: 600; family: "SF Pro Display"; color: ink }
+                text cpv_meta { at: cvx + 18, cvy + 40; anchor: left center; width: 290; lines: 1; size: 10.5; weight: 500; family: "SF Pro Display"; color: tint_ink }
+                line { from: cvx + 18, cvy + 54.5; to: cvx + 342, cvy + 54.5; width: 0.7; color: ink; opacity: 10% }
+                //  Copy it back (as Enter).
+                zone ellipse ccopy { at: cvx + 330, cvy + 28; radius: 14; cursor: pointer; label: "Copy it again" }
+                body {
+                    color: mix(chip, chip_hi, ccopy.hover); glass: 25%; blur: 0%; light: 4%, cvy + 14, 14; shadow: 0, 1.2, 4, 20%
+                    ellipse { at: cvx + 330, cvy + 28; radius: 14 - 0.5 * ccopy.pressed }
+                }
+                image ic_clip { at: cvx + 323, cvy + 21; size: 14, 14; tint: ink; opacity: 85% }
+                //  A text, all of it that fits.
+                text cpv_text {
+                    at: cvx + 18, cvy + 68; anchor: left top; width: 324; lines: 24
+                    size: 11; family: "JetBrainsMono Nerd Font"; color: ink; opacity: if(cpv_kind == 1, 85%, 0)
+                }
+                //  A picture, fitted and rounded.
+                group {
+                    show: cpv_kind == 2
+                    let cix = cvx + 180 - cpv_iw / 2
+                    let ciy = cvy + 66 + (320 - cpv_ih) / 2
+                    box { from: cix, ciy; size: cpv_iw, cpv_ih; corner: 12 continuous; color: chip_hi }
+                    group {
+                        clip box { from: cix, ciy; size: cpv_iw, cpv_ih; corner: 12 continuous }
+                        image cpv_img { at: cvx + 18, ciy + cpv_ih / 2 - 160; size: 324, 320 }
+                    }
+                    box { from: cix, ciy; size: cpv_iw, cpv_ih; corner: 12 continuous; stroke: 0.6; color: ink; opacity: 16% }
+                }
+            }
+        }
+    }
+
+    on press cb while not side { emit go_home }
+    on press cb while side { side = false }
+    on press csb { clip_insert = true; focus clip_q }
+    on press ccopy { emit clip_pick }
+    on hold clr for 700ms { emit clip_clear }
+    on scroll clip_list { emit clip_scroll(wheel) }
+    on leave clip_list { emit clip_hover(-1) }
+}

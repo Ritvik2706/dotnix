@@ -41,3 +41,25 @@ user_pref("general.smoothScroll.stopDecelerationWeighting", "0.6");
 
 // Distance per wheel notch (100 = default). Higher = less spinning.
 user_pref("mousewheel.default.delta_multiplier_y", 275);
+
+// ─────────────────────────────────────────────────────────────
+// Frame: let the compositor draw it. Zen's own inset (the gap and
+// inner rounded panel around the page) doubles up with niri's 24px
+// continuous corners and border; at 0 the page fills the window and
+// niri's corner clips it. Zen's radius stays (auto) for the compact
+// sidebar's floating panel; it is smaller than niri's, so at the
+// window corners niri's curve hides it.
+// ─────────────────────────────────────────────────────────────
+user_pref("zen.theme.content-element-separation", 0);
+
+// ─────────────────────────────────────────────────────────────
+// Colours stay Zen's own. These two put back the defaults after an
+// earlier lilac accent / transparent frame (Zen keeps a removed
+// user_pref in prefs.js, so it has to be set back once).
+// ─────────────────────────────────────────────────────────────
+user_pref("zen.theme.accent-color", "AccentColor");
+user_pref("zen.widget.linux.transparency", false);
+
+// CSS continuous corners (corner-shape: squircle), so the compact sidebar
+// in userChrome.css can follow niri's window corner exactly.
+user_pref("layout.css.corner-shape.enabled", true);

@@ -1,0 +1,99 @@
+// The timer and the stopwatch. Not running: a slider between the two, then
+// the dial (drag for how long, let go to start; the card goes and it lives on
+// as the bubble beside the island) or Start. Running: a ring that empties as it goes —or
+// sweeps once a minute for the stopwatch— its time in the middle, and Cancel,
+// Pause and one more minute under it.
+part Timer {
+    //  A pill button: plain glass, or lit with the island's soft tint.
+    component TButton(go: number, lit: bool) {
+        size: 112, 40
+        zone box b { from: 0, 0; size: 112, 40; corner: 20 continuous; cursor: pointer; label: "Timer control" }
+        prop lift = 0 ~160ms
+        follow lift = b.hover - b.pressed
+        body {
+            gradient: 0, 0 to 112, 40, mix(mix(chip, chip_hi, max(lift, 0)), soft_l, if(lit, 1, 0)), mix(mix(chip, chip_hi, max(lift, 0)), soft_s, if(lit, 1, 0))
+            glass: 25%; blur: 0%; light: 5%, 0, 20; shadow: 0, 1.8 + 0.5 * lift, 7 + 2 * lift, 22%
+            box { from: 0, 0; size: 112, 40; corner: 20 continuous }
+        }
+        text pick(if(go == 0, if(tmr_mode == watch, 1, 0), if(go == 1, if(tmr_paused, 3, 2), 4)), "Cancel", "Reset", "Pause", "Resume", "+1 min") { at: 56, 20; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: if(lit, pearl_ink, ink) }
+        on press b while go == 0 { emit tmr_cancel }
+        on press b while go == 1 { emit tmr_pause }
+        on press b while go == 2 { emit tmr_add(60) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_timer)
+        move: 28 * (1 - on_timer), 0
+
+        group {
+            move: ex0 + 16, 44
+            zone ellipse tmb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, tmb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * tmb.hover - tmb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * tmb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * tmb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            text pick(tmr_mode == watch, "Timer", "Stopwatch") { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+        }
+
+        //  Not running: the slider between the two, then what starts one.
+        group {
+            show: not tmr_on
+            prop tseg = 0 ~260ms
+            follow tseg = if(tmr_mode == watch, 1, 0)
+            group {
+                move: ex0 + 16, 88
+                box { from: 0, 0; size: 352, 34; corner: 17 continuous; color: well; opacity: 30% }
+                body { color: well; opacity: 30%; box { from: 14, 0; size: 324, 2; corner: 1 continuous } }
+                body {
+                    color: ink; glass: 25%; blur: 0%; light: 6%, 3, 14; shadow: 0, 1, 3, 24%; opacity: 22%
+                    box { at: 89 + 174 * tseg, 17; size: 172, 28; corner: 14 continuous }
+                }
+                text "Timer" { at: 89, 17; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * (1 - tseg) }
+                text "Stopwatch" { at: 263, 17; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * tseg }
+                zone box tseg_a { from: 0, 0; size: 176, 34; corner: 17 continuous; cursor: pointer; label: "Timer" }
+                zone box tseg_b { from: 176, 0; size: 176, 34; corner: 17 continuous; cursor: pointer; label: "Stopwatch" }
+            }
+            group {
+                show: tmr_mode == timer
+                move: ex0 + 16, 136
+                Dial(0)
+            }
+            group {
+                show: tmr_mode == watch
+                zone box ws_go { from: ex0 + 16, 136; size: 352, 44; corner: 22 continuous; cursor: pointer; label: "Start the stopwatch" }
+                body {
+                    gradient: ex0 + 16, 136 to ex0 + 368, 180, soft_l, soft_s
+                    glass: 25%; blur: 0%; light: 7%, 136, 22; shadow: 0, 1.8 + ws_go.hover, 7, 24%
+                    box { from: ex0 + 16, 136 + ws_go.pressed; size: 352, 44; corner: 22 continuous }
+                }
+                text "Start" { at: ex0 + 192, 158 + ws_go.pressed; anchor: center; size: 13.5; weight: 700; family: "SF Pro Display"; color: pearl_ink }
+                text "It counts on beside the island" { at: ex0 + 192, 200; anchor: center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 45% }
+            }
+        }
+
+        //  Running: the ring, the time, the buttons.
+        group {
+            show: tmr_on
+            prop tf = 1 ~900ms
+            follow tf = tmr_frac
+            let rcx = ex0 + 192
+            let rcy = 168
+            ellipse { at: rcx, rcy; radius: 58; stroke: 5; color: ink; opacity: 9% }
+            arc { at: rcx, rcy; radius: 58; span: clamp(tf, 0.004, 1) * 360deg; rotate: clamp(tf, 0.004, 1) * 180deg; width: 5; color: warm; opacity: if(tmr_paused, 50%, 95%) }
+            text tmr_text { at: rcx, rcy - 2; anchor: center; size: 26; weight: 600; family: "SF Pro Display"; color: ink }
+            text pick(tmr_paused, tmr_total, "Paused") { at: rcx, rcy + 24; anchor: center; size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink }
+            row {
+                at: ex0 + 16, 252; gap: 8
+                TButton(0, false)
+                TButton(1, true)
+                group { size: 112, 40; opacity: if(tmr_mode == timer, 1, 0); TButton(2, false) }
+            }
+        }
+    }
+
+    on press tmb { panel = home }
+    on press tseg_a { tmr_mode = timer }
+    on press tseg_b { tmr_mode = watch }
+    on press ws_go { emit watch_start }
+}

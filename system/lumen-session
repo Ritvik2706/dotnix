@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# lumen-session — the login session SDDM autologins into (lumen.desktop).
+#
+# Runs the compositor chosen in ~/.local/state/lumen/compositor (hyprland or
+# niri). When it exits because the island asked to switch (Controls → the
+# switch button, scripts/switch-wm.sh), the other one starts in the same login:
+# no greeter, no relogin, and no second unlock — the session was unlocked
+# when you asked. Any other exit ends the session as before.
+#
+# Installed by system/lock-setup.sh as /usr/share/wayland-sessions/lumen.desktop.
+set -uo pipefail
+
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/lumen/compositor
+RUN=${XDG_RUNTIME_DIR:-/run/user/$UID}
+REQUEST=$RUN/lumen-switch            # "<target>", written by switch-wm.sh
+UNLOCKED=$RUN/lumen-switch-unlocked  # hyprlock(-blank).service skip a start within 15s of it
+
+log() { systemd-cat -t lumen-session -p info echo "$*" 2>/dev/null || true; }
+
+mkdir -p "${STATE%/*}"
+# A fresh login always comes up locked, whatever was left behind.
+rm -f "$UNLOCKED" "$REQUEST"
+
+while :; do
+	wm=$(cat "$STATE" 2>/dev/null || echo hyprland)
+	[[ $wm == niri ]] && ! command -v niri-session >/dev/null && wm=hyprland
+	log "starting $wm"
+	started=$SECONDS
+	case $wm in
+		niri) XDG_CURRENT_DESKTOP=niri niri-session ;;
+		*) uwsm start -e -D Hyprland hyprland.desktop ;;
+	esac
+	ran=$((SECONDS - started))
+
+	# A switch, asked for moments ago (a leftover request doesn't count).
+	if [[ -f $REQUEST ]] && (($(date +%s) - $(stat -c %Y "$REQUEST") < 30)); then
+		next=$(<"$REQUEST")
+		rm -f "$REQUEST"
+		[[ $next == niri || $next == hyprland ]] || next=hyprland
+		echo "$next" >"$STATE"
+		log "switching $wm -> $next"
+		# Let the old graphical session wind all the way down: both launchers
+		# refuse to start over one that is still up.
+		for _ in {1..100}; do
+			systemctl --user -q is-active graphical-session.target || break
+			sleep 0.1
+		done
+		systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD NIRI_SOCKET XDG_CURRENT_DESKTOP 2>/dev/null
+		touch "$UNLOCKED"
+		continue
+	fi
+	rm -f "$REQUEST"
+
+	# niri dying straight away (a broken config, a bad update): the next
+	# login is Hyprland again, so autologin can't keep landing on it.
+	if [[ $wm == niri ]] && ((ran < 10)); then
+		echo hyprland >"$STATE"
+		log "niri exited after ${ran}s; next login is Hyprland"
+	fi
+	exit 0
+done

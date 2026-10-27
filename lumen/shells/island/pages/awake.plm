@@ -1,0 +1,26 @@
+// Keep Awake, for how long: the screen does not dim, lock or sleep until
+// then. Drag the dial (5 min to 8 h, or until turned off), let go to start;
+// the controls' button counts down, and pressing it again ends it early.
+part Awake {
+    group {
+        opacity: smooth(0.4, 1, on_awk)
+        move: 28 * (1 - on_awk), 0
+
+        group {
+            move: ex0 + 16, 44
+            zone ellipse akb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, akb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * akb.hover - akb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * akb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * akb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            text "Keep Awake" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+        }
+        group {
+            move: ex0 + 16, 116
+            Dial(1)
+        }
+    }
+
+    on press akb { panel = ctl }
+}

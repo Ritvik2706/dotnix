@@ -16,7 +16,7 @@ hl.config({
 			special = false,
 			new_optimizations = true,
 			size = 4, -- moderate frost: enough to read text over a busy wallpaper
-			passes = 2,
+			passes = 1, -- lighter: the lumen island blurs at both sizes
 			brightness = 0.98, -- luminous glass rather than dark
 			vibrancy = 0.25, -- push color through so the glass refracts rather than smears
 			vibrancy_darkness = 0.0,

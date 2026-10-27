@@ -1,0 +1,95 @@
+// The mixer: where the sound goes (a pill per output, the one in use lit),
+// then the output's own volume and each application's, as iOS sliders: a
+// pressed-in track filling with white glass. Press or drag to set; the
+// speaker bead mutes.
+part Mixer {
+    component OutPill(r: record) {
+        size: 114, 34
+        zone box o { from: 0, 0; size: 114, 34; corner: 17 continuous; cursor: pointer; label: "{r.name}"; selected: r.on }
+        body {
+            gradient: 0, 0 to 114, 34, mix(mix(chip, chip_hi, o.hover), lilac, 0.16 * r.on), mix(mix(chip, chip_hi, o.hover), sunset, 0.13 * r.on)
+            glass: 25%; blur: 0%; light: 4%, 0, 17; shadow: 0, 1.5, 5, 20%
+            box { from: 0, 0; size: 114, 34; corner: 17 continuous }
+        }
+        ellipse { at: 15, 17; radius: 3; color: tint_ink; opacity: if(r.on, 100%, 0) }
+        text r.name { at: 25, 17; anchor: left center; width: 82; lines: 1; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(r.on, 100%, 70%) }
+        on press o { emit mix_out(r.index) }
+    }
+
+    //  One row: its name and what it plays, the slider, the mute bead.
+    component MixRow(name: text, sub: text, v: number, muted: bool, idx: number, lead: number) {
+        size: 352, 46
+        prop lv = 0 ~200ms
+        follow lv = if(muted, 0, v)
+        text name { at: 4 + lead, 11; anchor: left center; width: 150 - lead; lines: 1; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink }
+        text sub { at: 156, 11; anchor: left center; width: 104; lines: 1; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 50% }
+        text number(v * 100, 0, "%") { at: 304, 11; anchor: right center; size: 11; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(muted, 35%, 70%) }
+        zone box sl { from: 0, 22; size: 304, 22; cursor: pointer; label: "{name} volume" }
+        let th = 8 + 3 * sl.hover + 3 * sl.pressed
+        box { from: 0, 33 - th / 2; size: 304, th; corner: th / 2 continuous; color: well; opacity: 30% }
+        body { color: well; opacity: 30%; box { from: 4, 33 - th / 2; size: 296, 1.5; corner: 0.75 continuous } }
+        body {
+            gradient: 0, 0 to 304, 0, #ffffff, pearl
+            opacity: if(muted, 35%, 92%); light: 6%, 29, 5
+            box { from: 0, 33 - th / 2; size: max(th, 304 * lv), th; corner: th / 2 continuous }
+        }
+        zone ellipse mb { at: 334, 26; radius: 14; cursor: pointer; label: "Mute {name}"; role: toggle; checked: muted }
+        body {
+            gradient: 320, 12 to 348, 40, mix(mix(chip, chip_hi, mb.hover), soft_l, if(muted, 1, 0)), mix(mix(chip, chip_hi, mb.hover), soft_s, if(muted, 1, 0))
+            glass: 25%; blur: 0%; light: 4%, 12, 14; shadow: 0, 1.2, 4, 20%
+            ellipse { at: 334, 26; radius: 13 - 0.5 * mb.pressed }
+        }
+        image ic_speaker_s { at: 327, 19; size: 14, 14; tint: ink; opacity: 85%; show: not muted }
+        image ic_mute_s { at: 327, 19; size: 14, 14; tint: pearl_ink; opacity: 90%; show: muted }
+        let sv = clamp((pointer.x - ex0 - 16) / 304, 0, 1)
+        on press sl while idx < 0 { emit mix_master(sv) }
+        on drag sl while idx < 0 { emit mix_master(sv) }
+        on press sl while idx >= 0 { emit mix_set(idx * 1000 + round(sv * 100)) }
+        on drag sl while idx >= 0 { emit mix_set(idx * 1000 + round(sv * 100)) }
+        on press mb while idx < 0 { emit osd_mute }
+        on press mb while idx >= 0 { emit mix_mute(idx) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_mix)
+        move: 28 * (1 - on_mix), 0
+
+        group {
+            move: ex0 + 16, 44
+            zone ellipse mxb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, mxb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * mxb.hover - mxb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * mxb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * mxb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            text "Sound" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+        }
+
+        row {
+            at: ex0 + 16, 88; gap: 5
+            for r in outs { OutPill(r) }
+        }
+        column {
+            at: ex0 + 16, 136; gap: 0
+            MixRow("Output", "", audio.volume, audio.muted, -1, 0)
+            for r in mixapps { MixRow(r.name, r.title, r.volume, r.muted, r.index, 22) }
+        }
+        //  Each app's icon (WhiteSur, like the rest), beside its name.
+        column {
+            at: ex0 + 16, 182; gap: 0
+            for r in mixapps { group { size: 20, 46; image r.icon { at: 2, 3; size: 16, 16 } } }
+        }
+        zone box mix_list { from: ex0 + 16, 182; size: 352, 46 * mixapps.count; label: "Applications"; active: mixapps.count > 0 }
+        text "{mix_more} more · scroll" {
+            at: ex0 + 192, 182 + 46 * mixapps.count + 4; anchor: center; size: 10.5; weight: 600; family: "SF Pro Display"
+            color: tint_ink; opacity: if(mix_more > 0, 90%, 0)
+        }
+        text "Nothing else is playing" {
+            at: ex0 + 20, 196; anchor: left center; size: 11.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 42%; show: mixapps.count == 0
+        }
+    }
+
+    on press mxb { panel = home }
+    on scroll mix_list { emit mix_scroll(wheel) }
+}

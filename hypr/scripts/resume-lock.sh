@@ -80,7 +80,9 @@ set -uo pipefail
 # being replaced, so this is true across the whole swap and false only once
 # an unlock has actually gone through. If it says unlocked, there is nothing
 # to replace and nothing to do.
-[[ $(hyprctl locked 2>/dev/null) == "true" ]] || exit 0
+# shellcheck source=lock-state.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lock-state.sh"
+session_locked || exit 0
 
 # ── ONLY ONE OF US AT A TIME ─────────────────────────────────────────────
 #
@@ -160,7 +162,7 @@ VERDICT=$(cat "$VERDICT_FILE" 2>/dev/null || true)
 rm -f "$VERDICT_FILE"
 LOCK_PID=$(systemctl --user show -p MainPID --value hyprlock.service 2>/dev/null)
 if [[ -n $VERDICT && $VERDICT == "$LOCK_PID" ]]; then
-    hyprctl dispatch 'hl.dsp.dpms({action="on"})' >/dev/null 2>&1
+    panel_wake
     RAZER_PID_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/razer-fx.pid"
     [[ -r $RAZER_PID_FILE ]] && kill -USR2 "$(cat "$RAZER_PID_FILE")" 2>/dev/null
     "$(dirname "${BASH_SOURCE[0]}")/face-unlock.sh" rearm
@@ -180,7 +182,7 @@ blank
 
 # 2. Panel electrically on — the new hyprlock must find a live output or it
 #    is born with the same defect. Blank again: dpms on can undo step 1.
-hyprctl dispatch 'hl.dsp.dpms({action="on"})' >/dev/null 2>&1
+panel_wake
 #    dpms on restores the panel's own brightness, and it does so ASYNCHRONOUSLY
 #    — the dispatch returns before the backlight has finished coming back. Blank
 #    immediately and the restore lands AFTER it, undoing the blank: the panel

@@ -1,0 +1,33 @@
+// What was just let go, offered back: a capsule of glass floating at the foot
+// of the card for a few seconds after a mail is archived or binned, as iOS's
+// "Undo" does. Its button (or u in the large view) brings the mail back.
+part Undo {
+    prop ut = 0 ~shape
+    follow ut = if(mail_undo and expanded, 1, 0)
+    measure utm
+    let upw = 16 + 16 + 9 + utm.width + 16 + 62 + 6
+    let upx = cx - upw / 2
+    let upy = ph - 58
+    group {
+        show: ut > 0.01
+        opacity: smooth(0, 0.6, ut)
+        move: 0, 14 * (1 - ut)
+        scale: 0.94 + 0.06 * ut
+        pivot: cx, upy + 20
+        body {
+            color: chip_hi; glass: 25%; blur: 0%; light: 4%, upy, 20; shadow: 0, 3, 14, 34%
+            box { from: upx, upy; size: upw, 40; corner: 20 continuous }
+        }
+        image ic_trash_s { at: upx + 16, upy + 13; size: 14, 14; tint: ink; opacity: if(mail_undo_bin, 85%, 0) }
+        image ic_archive_s { at: upx + 17, upy + 14; size: 12, 12; tint: ink; opacity: if(mail_undo_bin, 0, 85%) }
+        text mail_undo_t { at: upx + 41, upy + 20.5; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; measure: utm }
+        zone box undo_z { from: upx + upw - 68, upy + 6; size: 62, 28; corner: 14 continuous; cursor: pointer; label: "Undo (u)"; active: mail_undo }
+        body {
+            gradient: upx + upw - 68, upy + 6 to upx + upw - 6, upy + 34, soft_l, soft_s
+            glass: 25%; blur: 0%; light: 7%, upy + 6, 14; shadow: 0, 1 + 0.5 * undo_z.hover - undo_z.pressed, 3.5, 22%
+            box { from: upx + upw - 68, upy + 6; size: 62, 28; corner: 14 continuous }
+        }
+        text "Undo" { at: upx + upw - 37, upy + 20.5; anchor: center; size: 12; weight: 700; family: "SF Pro Display"; color: pearl_ink }
+    }
+    on press undo_z { emit mail_undo_do }
+}

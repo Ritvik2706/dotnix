@@ -1,0 +1,112 @@
+// The emoji page of the open card: a grid, recent ones first, the categories
+// over it. Super+E opens it in vim's normal mode: h j k l (and the arrows)
+// move, gg G go to the ends, Ctrl+d Ctrl+u half a page, [ ] the categories,
+// Enter or y types the chosen one into the window you were in (and copies
+// it), i searches (insert, as in vim), q Esc close. The logic hands it only the 32 in sight.
+part Emoji {
+    component Emo(r: record) {
+        size: 44, 44
+        zone box c { from: 0, 0; size: 44, 44; corner: 22 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel }
+        box { from: 2, 2; size: 40, 40; corner: 20 continuous; color: chip_hi; opacity: 45% * c.hover }
+        body {
+            gradient: 2, 2 to 42, 42, mix(chip_hi, lilac, 0.22), mix(chip_hi, sunset, 0.18)
+            glass: 25%; blur: 0%; light: 4%, 2, 20; shadow: 0, 1.5, 6, 20%; show: r.sel
+            ellipse { at: 22, 22; radius: 20 }
+        }
+        text r.e { at: 22, 23; anchor: center; size: 24 + 2 * c.hover; family: "Apple Color Emoji" }
+        on press c { emit emo_pick_cell(r.index) }
+    }
+
+    //  A category: one emoji standing for it, lit while its part of the list is in sight.
+    component Cat(k: number, glyph: text, lit: bool) {
+        size: 36, 28
+        zone box z { from: 0, 0; size: 36, 28; corner: 14 continuous; cursor: pointer; label: "Category" }
+        body {
+            color: mix(chip, chip_hi, max(z.hover, 0)); glass: 25%; blur: 0%; light: 3%, 0, 14; show: lit or z.hover
+            box { from: 0, 0; size: 36, 28; corner: 14 continuous }
+        }
+        text glyph { at: 18, 14.5; anchor: center; size: 15; family: "Apple Color Emoji"; opacity: if(lit, 100%, 62%) }
+        on press z { emit emo_cat(k) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_emoji)
+        move: 28 * (1 - on_emoji), 0
+
+        group {
+            move: emx0 + 16, 44
+            zone ellipse eb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, eb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * eb.hover - eb.pressed, 4.2, 21%
+                ellipse { at: 16, 18; radius: 16 - 0.6 * eb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * eb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+
+            //  Emoji: the title, and a round search button at the right. `/` (or a
+            //  click) stretches the button leftward into the field as the title slides
+            //  away, the magnifier gliding to its left edge; with a filter kept, the
+            //  field stays (unlit) so it shows what the list is filtered by.
+            prop esx = 0 ~300ms
+            follow esx = if(emo_insert or not emo_q_empty, 1, 0)
+            prop e_ins = 0 ~200ms
+            follow e_ins = if(emo_insert, 1, 0)
+            let efl = 316 - 276 * esx
+            group {
+                opacity: 1 - smooth(0, 0.5, esx)
+                move: -10 * esx, 0
+                text "Emoji" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+            }
+            body {
+                color: mix(chip, chip_hi, esb.hover * (1 - esx)); glass: 25%; blur: 0%; light: 4%, 2, 18
+                shadow: 0, (1.2 + 0.5 * esb.hover - esb.pressed) * (1 - esx), 4.2, 21%; opacity: 1 - esx
+                box { from: efl, 0; size: 352 - efl, 36; corner: 18 continuous }
+            }
+            box { from: efl, 0; size: 352 - efl, 36; corner: 18 continuous; color: well; opacity: 30% * esx }
+            body { color: well; opacity: 30% * esx; box { from: efl + 12, 0; size: max(0, 352 - efl - 24), 2; corner: 1 continuous } }
+            box { from: efl, 0; size: 352 - efl, 36; corner: 18 continuous; stroke: 1; color: soft_l; opacity: 45% * e_ins }
+            image ic_search { at: 327 - 275 * esx, 11; size: 14, 14; tint: ink; opacity: 85% - 25% * esx * (1 - e_ins) }
+            group {
+                opacity: smooth(0.55, 1, esx)
+                input emo_q { at: 74, 9; width: 266; size: 13.5; color: ink; placeholder: ""; label: "Search emoji" }
+                text "Search emoji" {
+                    at: 74, 18; anchor: left center; size: 13.5; weight: 500; family: "SF Pro Display"
+                    color: ink; opacity: 40%; show: emo_q_empty
+                }
+            }
+            zone box esb { from: efl, 0; size: 352 - efl, 36; corner: 18 continuous; cursor: pointer; label: "Search (i)"; active: not emo_insert }
+        }
+
+        row cats {
+            at: emx0 + 18, 88; gap: 2
+            Cat(-1, "🕘", emo_cat_at == -1)
+            Cat(0, "😀", emo_cat_at == 0)
+            Cat(1, "👋", emo_cat_at == 1)
+            Cat(3, "🐻", emo_cat_at == 3)
+            Cat(4, "🍔", emo_cat_at == 4)
+            Cat(5, "✈️", emo_cat_at == 5)
+            Cat(6, "⚽", emo_cat_at == 6)
+            Cat(7, "💡", emo_cat_at == 7)
+            Cat(8, "❤️", emo_cat_at == 8)
+        }
+
+        zone box emo_grid { from: emx0 + 16, 124; size: 352, 176 + emy; label: "Emoji" }
+        grid {
+            at: emx0 + 16, 124; columns: 8; width: 352; gap: 0; row: 44
+            for r in emo { Emo(r) }
+        }
+        text "No emoji found" {
+            at: emx0 + 192, 160; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: emo.count == 0
+        }
+        //  What the chosen one is called.
+        text emo_name {
+            at: emx0 + 192, 314 + emy; anchor: center; width: 340; lines: 1; align: center
+            size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: 60%
+        }
+    }
+
+    on press eb while not side { emit go_home }
+    on press eb while side { side = false }
+    on press esb { emo_insert = true; focus emo_q }
+    on scroll emo_grid { emit emo_scroll(wheel) }
+}

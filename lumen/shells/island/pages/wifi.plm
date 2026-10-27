@@ -1,0 +1,111 @@
+// The Wi-Fi page of the open card: the networks in range, the one in use on top.
+// A row says which by its position; the logic (island.luau) knows the rest.
+part Wifi {
+    component NetRow(r: record) {
+        prop grow = 0 ~260ms
+        follow grow = if(r.menu, 1, 0)
+        size: 360, 42 + 40 * r.menu
+
+        zone box row { from: 0, 0; size: 360, 42; corner: 21 continuous; cursor: pointer; label: "{r.ssid}"; selected: r.active }
+        //  At rest a row is flat; under the pointer it rises a little, and the
+        //  network in use is a raised chip.
+        body {
+            color: chip_hi; opacity: 38% * row.hover + 30% * r.asking + 22% * grow; light: 4%, 0, 21
+            box { from: 0, 0; size: 360, 42 + 40 * grow; corner: 21 continuous }
+        }
+        body {
+            gradient: 0, 0 to 360, 42, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
+            glass: 25%; blur: 0%; light: 4%, 0, 21; shadow: 0, 1.8, 7, 20%; show: r.active
+            box { from: 0, 0; size: 360, 42; corner: 21 continuous }
+        }
+
+        //  Its signal, as the bars of the tile; connecting, a turning arc instead.
+        group {
+            show: not r.busy
+            ellipse { at: 22, 26; radius: 1.5; color: ink }
+            arc { at: 22, 26; radius: 4.6; span: 90deg; width: 1.6; color: ink; opacity: if(r.sig > 0.2, 100%, 22%) }
+            arc { at: 22, 26; radius: 8.2; span: 90deg; width: 1.6; color: ink; opacity: if(r.sig > 0.45, 100%, 22%) }
+            arc { at: 22, 26; radius: 11.8; span: 90deg; width: 1.6; color: ink; opacity: if(r.sig > 0.7, 100%, 22%) }
+        }
+        arc { at: 22, 21; radius: 8; span: 270deg; width: 1.8; color: tint_ink; rotate: turn * 120deg; show: r.busy }
+
+        text r.ssid { at: 44, 21; anchor: left center; width: 220; lines: 1; size: 13.5; weight: 500; family: "SF Pro Display"; color: ink }
+
+        //  What it is doing, on the right: nothing, wrong password, connecting, connected, asking.
+        let k = if(r.wrong, 1, if(r.busy, 2, if(r.active, 3, if(r.asking, 4, 0))))
+        text pick(k, "", "Wrong password", "Connecting…", "Connected", "Password") {
+            at: 346, 21; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"
+            color: pick(k, ink, coral, ink, tint_ink, ink); opacity: if(k == 2 or k == 4, 60%, if(k == 3, 85%, 100%))
+        }
+        group {
+            show: k == 0 and r.secure
+            opacity: 40%
+            box { from: 335.5, 20.5; size: 9, 7; corner: 1.8 continuous; color: ink }
+            arc { at: 340, 20.5; radius: 2.9; span: 180deg; width: 1.4; color: ink }
+        }
+
+        //  Right-click (or click the one in use): what can be done with it.
+        group {
+            opacity: grow
+            zone box dis { from: 44, 47; size: 104, 28; corner: 10 continuous; cursor: pointer; label: "Disconnect"; active: r.menu and r.active }
+            body {
+                color: mix(chip, chip_hi, dis.hover); glass: 25%; blur: 0%; light: 4%, 47, 14; shadow: 0, 1.2 + dis.hover, 4.9, 20%; show: r.active
+                box { from: 44, 47; size: 104, 28; corner: 14 continuous }
+            }
+            text "Disconnect" { at: 96, 61; anchor: center; size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; show: r.active }
+            zone box fgt { from: 44 + 112 * r.active, 47; size: 84, 28; corner: 10 continuous; cursor: pointer; label: "Forget"; active: r.menu and r.known }
+            body {
+                color: mix(rose, #7c3d4d, fgt.hover); glass: 25%; blur: 0%; light: 4%, 47, 14; shadow: 0, 1.2 + fgt.hover, 4.9, 20%; show: r.known
+                box { from: 44 + 112 * r.active, 47; size: 84, 28; corner: 14 continuous }
+            }
+            text "Forget" { at: 86 + 112 * r.active, 61; anchor: center; size: 11.5; weight: 500; family: "SF Pro Display"; color: rose_ink; show: r.known }
+        }
+
+        on press row { emit wifi_pick(r.index) }
+        on press right row { emit wifi_menu(r.index) }
+        on press dis { emit wifi_disconnect }
+        on press fgt { emit wifi_forget(r.index) }
+    }
+
+    let wpy = 88 + wl_h + 10
+
+    group {
+        opacity: smooth(0.4, 1, on_wifi)
+        move: 28 * (1 - on_wifi), 0
+
+        group {
+            move: ex0 + 16, 44
+            Header("Wi-Fi", wifi_on, scanning, go_home, wifi_power)
+        }
+        line { from: ex0 + 20, 82; to: ex0 + 364, 82; width: 0.7; color: ink; opacity: 10% }
+
+        column wl ~calm {
+            at: ex0 + 12, 88; view: 360, wl_h; gap: 2; step: 44
+            for r in nets { NetRow(r) }
+        }
+        text pick(wifi_on, "Wi-Fi is off", "Looking for networks…") {
+            at: ex0 + 192, 112; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: nets.count == 0
+        }
+
+        //  The password, under the list, for the row that asked for it.
+        group {
+            opacity: pw_in
+            move: shake, 0
+            //  The field is pressed into the card; Join is a raised gem.
+            box { from: ex0 + 16, wpy; size: 268, 36; corner: 18 continuous; color: well; opacity: 30% }
+            body { color: well; opacity: 30%; box { from: ex0 + 30, wpy; size: 240, 2; corner: 1 continuous } }
+            box { from: ex0 + 16, wpy; size: 268, 36; corner: 18 continuous; stroke: 1; color: coral; opacity: 70% * pw_bad }
+            input pass { at: ex0 + 30, wpy + 9; width: 240; size: 13.5; color: ink; placeholder: "Password"; secret: true; agent: no; label: "Wi-Fi password" }
+            zone box join { from: ex0 + 292, wpy; size: 76, 36; corner: 18 continuous; cursor: pointer; label: "Join"; agent: no; active: pw_open }
+            body {
+                gradient: ex0 + 292, wpy to ex0 + 368, wpy + 36, mix(soft_l, ink, 0.25 * join.hover), mix(soft_s, ink, 0.25 * join.hover)
+                glass: 25%; blur: 0%; light: 6%, wpy, 18; shadow: 0, 1.8 + join.hover - join.pressed, 7, 23%
+                box { from: ex0 + 292, wpy; size: 76, 36; corner: 18 continuous }
+            }
+            text "Join" { at: ex0 + 330, wpy + 18; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: pearl_ink }
+        }
+    }
+
+    on press join { emit wifi_join }
+}

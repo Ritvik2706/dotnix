@@ -24,7 +24,7 @@ hl.bind(main .. " + grave", hl.dsp.exec_cmd("~/.config/hypr/scripts/zoom-window.
 
 hl.bind(main .. " + SPACE", hl.dsp.window.float({ action = "toggle" }))
 
-hl.bind(main .. " + U", function()
+hl.bind(main .. " + CTRL + U", function() -- (was Super+U: that opens the island's mail now)
 	hl.dispatch(hl.dsp.window.center())
 	notify.send("Window", "Centered")
 end)

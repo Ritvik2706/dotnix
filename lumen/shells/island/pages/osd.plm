@@ -1,0 +1,132 @@
+// Volume and brightness: the pill itself becomes the gauge. It widens into a
+// capsule of liquid light —lilac into sunset for sound, pearl into warm sun
+// for the screen— that pours to the new level, leaves a fading afterimage of
+// where it was, glows at its edge while it moves, and stretches like rubber
+// when pushed past either end. The icon lives with it: the speaker's waves
+// light one by one, a slash draws itself across on mute, and the sun grows,
+// lengthens its rays and turns as the screen brightens. Hovering holds it;
+// it can be dragged, scrolled, and the speaker pressed to mute.
+part Osd {
+    let o_in = smooth(0.45, 1, os)
+    let is_vol = osd_kind == vol
+    let is_sun = osd_kind == bright
+    let is_kbd = osd_kind == kbd
+    //  Where everything sits follows the pill as it is now, so a rubber-band
+    //  stretch (an impulse on its width) carries the track's ends with it.
+    let ol = cx - pw / 2
+    let orr = cx + pw / 2
+    let bead_x = ol + 19
+    let tl = ol + 42
+    let tr = orr - 56
+    let tlen = max(0, tr - tl)
+    let tcy = ph / 2
+    let trh = 5 + 3 * swell + 2 * grab
+    let fill_x = tl + tlen * lv
+
+    group {
+        clip inset 1 box { from: x0, 0; size: pw, ph; corner: pr continuous }
+    group {
+        opacity: o_in
+        move: 0, 2 * (1 - os)
+
+        //  The icon's bead: a small piece of the controls' glass.
+        body {
+            color: mix(chip, chip_hi, bead_z.hover * is_vol); glass: 25%; blur: 0%; light: 5%, tcy - 13, 12
+            shadow: 0, 1.2 + 0.5 * bead_z.hover - bead_z.pressed, 4.2, 22%
+            ellipse { at: bead_x, tcy; radius: 13 - 0.6 * bead_z.pressed }
+        }
+
+        //  Sound: the speaker thumps on each change; its waves light up one by one.
+        group {
+            opacity: is_vol
+            pivot: bead_x, tcy
+            scale: 1 + 0.9 * thump
+            image ic_spk { at: bead_x - 8.5, tcy - 8; size: 16, 16; tint: mix(ink, idle_c, mu) }
+            image ic_w1 { at: bead_x - 8.5, tcy - 8; size: 16, 16; tint: ink; opacity: smooth(0.0, 0.1, lv) * (1 - mu) }
+            image ic_w2 { at: bead_x - 8.5, tcy - 8; size: 16, 16; tint: ink; opacity: smooth(0.3, 0.42, lv) * (1 - mu) }
+            image ic_w3 { at: bead_x - 8.5, tcy - 8; size: 16, 16; tint: ink; opacity: smooth(0.63, 0.75, lv) * (1 - mu) }
+            //  Muted: a slash that draws itself across, cut out of the speaker.
+            group {
+                pivot: bead_x, tcy
+                rotate: -45deg
+                box { at: bead_x, tcy; size: 4.6, 21 * mu; corner: 2.3 continuous; color: chip; opacity: mu }
+                box { at: bead_x, tcy; size: 2, 19 * mu; corner: 1 continuous; color: rose_ink; opacity: mu }
+            }
+        }
+
+        //  The screen: a sun that grows, lengthens its rays and turns as it brightens.
+        group {
+            opacity: is_sun
+            ellipse { at: bead_x, tcy; radius: 3.6 + 1.6 * lv; color: mix(ink, amber, 0.18 * lv) }
+            repeat k in 0..8 {
+                group {
+                    pivot: bead_x, tcy
+                    rotate: k * 45deg + lv * 40deg
+                    box { at: bead_x, tcy - 7 - 1.3 * lv - (1.4 + 2.2 * lv) / 2; size: 1.9, 1.4 + 2.2 * lv; corner: 0.95 continuous; color: ink; opacity: 55% + 45% * lv }
+                }
+            }
+        }
+
+        //  The keyboard: its keys light up from beneath, the light leaking
+        //  out round them as it brightens.
+        group {
+            opacity: is_kbd
+            box { at: bead_x, tcy; size: 18, 12; corner: 3 continuous; stroke: 1.3; color: ink; opacity: 85% }
+            repeat r in 0..2 {
+                repeat c in 0..4 {
+                    body {
+                        color: mix(idle_c, mix(pearl, cool, 0.35), lv)
+                        shadow: 0, 0, 2.5 + 2 * lv, 70% * lv, mix(pearl, cool, 0.5)
+                        box { at: bead_x - 5.25 + c * 3.5, tcy - 3 + r * 3; size: 2.1, 1.7; corner: 0.6 continuous }
+                    }
+                }
+            }
+            body {
+                color: mix(idle_c, mix(pearl, cool, 0.35), lv)
+                shadow: 0, 0, 2.5 + 2 * lv, 70% * lv, mix(pearl, cool, 0.5)
+                box { at: bead_x, tcy + 3.4; size: 8, 1.7; corner: 0.85 continuous }
+            }
+        }
+
+        //  The track: a groove pressed into the glass that swells while it changes.
+        box { from: tl, tcy - trh / 2; size: tlen, trh; corner: trh / 2 continuous; color: well; opacity: 26% }
+        box { from: tl, tcy - trh / 2; size: tlen, 1; corner: 0.5 continuous; color: well; opacity: 22% }
+        //  The afterimage: where it was, fading as the liquid settles.
+        box {
+            from: tl + tlen * min(lv, trail), tcy - trh / 2; size: tlen * abs(trail - lv), trh; corner: trh / 2 continuous
+            color: mix(if(is_vol, soft_s, if(is_kbd, mix(pearl, cool, 0.62), mix(pearl, sunset, 0.52))), idle_c, mu); opacity: 30% * clamp(abs(trail - lv) * 12, 0, 1)
+        }
+        //  The liquid: lit along its top like the beads.
+        body {
+            //  Its two colours: muted, the liquid goes grey and still.
+            gradient: tl, 0 to tl + tlen, 0, mix(if(is_vol, soft_l, if(is_kbd, mix(pearl, cool, 0.3), mix(pearl, amber, 0.28))), idle_c, mu), mix(if(is_vol, soft_s, if(is_kbd, mix(pearl, cool, 0.62), mix(pearl, sunset, 0.52))), idle_c, mu)
+            light: 8%, tcy - trh / 2, 8
+            opacity: 100% - 30% * mu
+            box { from: tl, tcy - trh / 2; size: max(trh, tlen * lv), trh; corner: trh / 2 continuous }
+        }
+        //  Its edge glows while it moves, in its own colour: the faster, the brighter.
+        body {
+            color: mix(if(is_vol, soft_s, if(is_kbd, mix(pearl, cool, 0.62), mix(pearl, sunset, 0.52))), idle_c, mu)
+            opacity: clamp(abs(vel(lv)) * 0.7, 0, 1) * (1 - mu)
+            shadow: 0, 0, 9, 75%, mix(if(is_vol, soft_s, if(is_kbd, mix(pearl, cool, 0.62), mix(pearl, sunset, 0.52))), idle_c, mu)
+            ellipse { at: max(tl + trh / 2, fill_x - trh / 2), tcy; radius: trh / 2 + 1 }
+        }
+
+        //  How much, counting as it pours; or why there is nothing.
+        text number(lv * 100, 0, "%") {
+            at: orr - 18, tcy; anchor: right center; size: 13; weight: 600; family: "SF Pro Display"
+            color: ink; opacity: 100% * (1 - mu)
+        }
+        text "Muted" {
+            at: orr - 16, tcy; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"
+            color: tint_ink; opacity: mu
+        }
+    }
+    }
+
+    zone box os_z { from: ol, 0; size: pw, ph; corner: pr continuous; label: "Level"; active: os > 0.9 }
+    zone box track_z { from: tl - 6, tcy - 11; size: tlen + 12, 22; corner: 11 continuous; cursor: pointer; label: "Level slider"; active: os > 0.9 }
+    prop grab = 0 ~200ms      // the pointer on the track: it swells a little to be taken
+    follow grab = max(track_z.hover, track_z.pressed)
+    zone ellipse bead_z { at: bead_x, tcy; radius: 14; cursor: pointer; label: "Mute"; active: os > 0.9 and is_vol }
+}

@@ -1,0 +1,46 @@
+// The large mail view (Super+U): the whole inbox down the left, the chosen
+// mail open on the right (pages/mail.plm, the same reader as the card's).
+// j/k or the arrows go through the list, gg/G to its ends; l goes into the
+// mail, where j/k, Ctrl+d/u and gg/G scroll it, and h or Esc come back out.
+// r answers, u marks unread, e archives, dd bins, o opens it in Gmail; v
+// switches between the mail as Gmail shows it and the island's own reader;
+// Space pages the mail; Esc, q or Super+U again close it.
+part MailX {
+    //  Reading (l): the list slides away to the left under the mail as it widens (`mxf`), cut
+    //  at the mail's edge, as an iOS split view folds its sidebar. Not faded: a group fading is
+    //  painted apart, and the island could not tell what changed —it painted all of it, every frame.
+    group {
+        opacity: smooth(0.4, 1, on_mailx)
+        clip box { from: ex0, 40; size: max(0, 384 * (1 - max(mxf, mxs)) + 1), 800 }
+        move: -28 * (1 - on_mailx) - 120 * max(mxf, mxs), 0
+
+        group {
+            move: ex0 + 16, 44
+            body {
+                gradient: 0, 2 to 32, 34, soft_l, soft_s; glass: 25%; blur: 0%; light: 7%, 2, 16; shadow: 0, 1.2, 4.2, 22%
+                ellipse { at: 16, 18; radius: 16 }
+            }
+            image ic_mail { at: 8.5, 10.5; size: 15, 15; tint: pearl_ink }
+            text "Inbox" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+            text "{mail_unread} unread" { at: 352, 18.5; anchor: right center; size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: if(mail_unread > 0, 100%, 0) }
+        }
+        line { from: ex0 + 20, 88; to: ex0 + 372, 88; width: 0.7; color: ink; opacity: 10% }
+        //  Between the list and the mail: a hairline, as iOS's split views keep.
+        line { from: ex0 + 384.5, 56; to: ex0 + 384.5, 820; width: 0.7; color: ink; opacity: 10% }
+
+        column mlx ~spring(900, 60) {
+            at: ex0 + 12, 96; view: 364, 728; gap: 2; step: 54
+            for m in mail { MailRowX(m) }
+        }
+        box {
+            from: ex0 + 378, 98 + 724 * mlx.scroll / max(1, mlx.content); size: 2.5, 724 * min(1, 728 / max(1, mlx.content)); corner: 1.25 continuous
+            color: ink; opacity: if(mlx.content > 732, 22%, 0)
+        }
+        text mail_state {
+            at: ex0 + 194, 400; anchor: center; width: 320; lines: 3; align: center
+            size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(mail.count == 0, 55%, 0)
+        }
+    }
+    //  The chosen one stays in sight as j/k walk past the edge of the list.
+    on change mx_sel { mlx.scroll: clamp(mlx.scroll, mx_sel * 54 + 52 - 728, mx_sel * 54) ~quick }
+}

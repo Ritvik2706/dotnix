@@ -1,0 +1,212 @@
+// The mail reader: who it is from, what about, and all of it —its words, its
+// links (a click opens them), its pictures—, scrolling once it is longer than
+// the card. Across the top, what can be done with it: answer, mark it unread
+// again, archive, bin, open it in Gmail. Answering opens a field under the
+// mail; Enter sends it.
+// It is the right side of the large view (Super+U, or the card's inbox), beside the list.
+part Mail {
+    let mrx = if(panel == mailx, ex0 + 384 * (1 - max(mxf, mxs)), ex0)   // where the reader starts (focused or folded: the card's edge)…
+    let mrw = if(panel == mailx, 656 + 384 * mxf, 560)             // …and how wide it is
+    //  Panned across when wider than the reader; narrower (zoomed out), centred in it.
+    let mpw = 620 * wzz
+    let mpx_t = if(mpw < mrw - 36, -(mrw - 36 - mpw) / 2, clamp(mx_pan, 0, max(0, mpw - (mrw - 36))))
+    let mrr = mrx + mrw
+    //  The render fading in whole when it comes; the quiet page shown meanwhile, slowly.
+    prop cfm = 0 ~shape
+    follow cfm = if(mr_confirm, 1, 0)
+    prop wpage = 0 ~260ms
+    follow wpage = if(mr_has_web, 1, 0)
+    prop wwait = 0 ~700ms
+    follow wwait = if(mr_web_wait and panel == mailx, 1, 0)
+    prop mpx = 0 ~quick
+    follow mpx = mpx_t
+    //  The spinner's head, a spoke at a time, twelve a second; still when it is not seen.
+    prop spn = 0
+    spin spn by if(wwait > 0.05, 12, 0)
+    group {
+        opacity: smooth(0.4, 1, on_mailx)
+        move: 28 * (1 - on_mailx), 0
+
+        group {
+            move: mrx + 16, 44
+            //  What came of the last thing asked: "Sent to …", or why not.
+            text mr_note { at: 4, 18.5; anchor: left center; width: 230; lines: 1; size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink }
+
+            //  The buttons: round glass beads, the bin's turning rose under the pointer. Asked to bin,
+            //  they step aside for the question.
+            group {
+            opacity: 1 - smooth(0, 0.5, cfm)
+            scale: 1 - 0.04 * cfm
+            pivot: mrw - 124, 18
+            repeat j in 0..5 {
+                let bx_ = mrw - 216 + 38 * j
+                zone ellipse mbt.$j { at: bx_ + 16, 18; radius: 16; cursor: pointer; label: pick(j, "Reply (r)", "Mark as unread (u)", "Archive (e)", "Delete (dd)", "Open in Gmail (o)") }
+                //  Unread, archive and bin go back to the narrower inbox: the card keeps the pointer till it is back over it.
+                on press mbt.$j while j != 3 { hold_w = 2 * abs(pointer.x - cx) + 28; emit mail_do(j) }
+                //  The bin asks first.
+                on press mbt.$j while j == 3 { mr_confirm = true }
+                body {
+                    color: mix(mix(chip, chip_hi, mbt.$j.hover), rose, if(j == 3, mbt.$j.hover, 0))
+                    glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * mbt.$j.hover - mbt.$j.pressed, 4.2, 21%
+                    ellipse { at: bx_ + 16, 18; radius: 16 - 0.6 * mbt.$j.pressed }
+                }
+                //  Answering: the reply bead lit, as a toggle is.
+                body {
+                    gradient: bx_, 2 to bx_ + 32, 34, soft_l, soft_s; glass: 25%; blur: 0%; light: 7%, 2, 16
+                    opacity: if(j == 0, rep_in, 0)
+                    ellipse { at: bx_ + 16, 18; radius: 16 - 0.6 * mbt.$j.pressed }
+                }
+            }
+            image ic_reply { at: mrw - 216 + 8.5, 10.5; size: 15, 15; tint: mix(ink, pearl_ink, rep_in); opacity: 90% }
+            image ic_unread { at: mrw - 178 + 8.5, 10.5; size: 15, 15; tint: ink; opacity: 90% }
+            image ic_archive { at: mrw - 140 + 8.5, 10.5; size: 15, 15; tint: ink; opacity: 90% }
+            image ic_trash { at: mrw - 102 + 8.5, 10.5; size: 15, 15; tint: mix(ink, rose_ink, mbt.3.hover); opacity: 90% }
+            image ic_ext { at: mrw - 64 + 8.5, 10.5; size: 15, 15; tint: ink; opacity: 90% }
+            }
+
+            //  "Move this mail to the Bin?": a capsule of glass grown out of the bin's bead, the
+            //  answer that destroys in rose, as iOS marks it. Enter or y, Esc or n, from the keys.
+            group {
+                opacity: smooth(0.2, 1, cfm)
+                scale: 0.9 + 0.1 * cfm
+                pivot: mrw - 86, 18
+                let qx = mrw - 32 - 318
+                body {
+                    color: chip_hi; glass: 25%; blur: 0%; light: 4%, 0, 18; shadow: 0, 1.6, 6, 24%
+                    box { from: qx, 0; size: 318, 36; corner: 18 continuous }
+                }
+                image ic_trash { at: qx + 14, 10.5; size: 15, 15; tint: rose_ink; opacity: 90% }
+                text "Move this mail to the Bin?" { at: qx + 37, 18.5; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink }
+                zone box cf_no { from: qx + 196, 4; size: 60, 28; corner: 14 continuous; cursor: pointer; label: "Keep it (Esc)"; active: mr_confirm }
+                body {
+                    color: mix(chip, chip_hi, cf_no.hover); glass: 25%; blur: 0%; light: 4%, 4, 14; shadow: 0, 1 + 0.5 * cf_no.hover - cf_no.pressed, 3.5, 20%
+                    box { from: qx + 196, 4; size: 60, 28; corner: 14 continuous }
+                }
+                text "Cancel" { at: qx + 226, 18.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink }
+                zone box cf_yes { from: qx + 260, 4; size: 54, 28; corner: 14 continuous; cursor: pointer; label: "Move to Bin (Enter)"; active: mr_confirm }
+                body {
+                    color: mix(rose, #8a3e50, cf_yes.hover); glass: 25%; blur: 0%; light: 4%, 4, 14; shadow: 0, 1 + 0.5 * cf_yes.hover - cf_yes.pressed, 3.5, 24%
+                    box { from: qx + 260, 4; size: 54, 28; corner: 14 continuous }
+                }
+                text "Bin" { at: qx + 287, 18.5; anchor: center; size: 11.5; weight: 700; family: "SF Pro Display"; color: rose_ink }
+                on press cf_no { mr_confirm = false }
+                on press cf_yes { hold_w = 2 * abs(pointer.x - cx) + 28; mr_confirm = false; emit mail_do(3) }
+            }
+        }
+        line { from: mrx + 20, 88; to: mrr - 20, 88; width: 0.7; color: ink; opacity: 10% }
+
+        //  Who: their initial on a bead of the island's light, their name, their address; when, on the right.
+        body {
+            gradient: mrx + 20, 98 to mrx + 58, 136, soft_l, soft_s
+            glass: 25%; blur: 0%; light: 7%, 98, 19; shadow: 0, 1.2, 4.2, 24%
+            ellipse { at: mrx + 39, 117; radius: 19 }
+        }
+        text mr_init { at: mrx + 39, 117.5; anchor: center; size: 15; weight: 700; family: "SF Pro Display"; color: pearl_ink }
+        text mr_from { at: mrx + 68, 109; anchor: left center; width: mrw - 230; lines: 1; size: 13.5; weight: 600; family: "SF Pro Display"; color: ink }
+        text mr_addr { at: mrx + 68, 126; anchor: left center; width: mrw - 230; lines: 1; size: 11; weight: 500; family: "SF Pro Display"; color: tint_ink; selectable: true }
+        text mr_when { at: mrr - 20, 109; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 50% }
+        text mr_subj { at: mrx + 20, 158; anchor: left center; width: mrw - 40; lines: 1; size: 15; weight: 600; family: "SF Pro Display"; color: ink; selectable: true }
+
+        //  All of it: its words (selectable, links in the island's blue) and its pictures, in order.
+        //  The window it scrolls in keeps the page's corners: rounded wherever the page is, so the mail
+        //  scrolls under a rounded edge as in iOS's cards, never a cut straight across it. (The island's
+        //  own reader stays square: its first words sit right in that corner.)
+        group {
+        clip box { from: mrx + 20, 182; size: mrw - 36, mb_h; corner: if(mr_has_web, 22, 0) continuous }
+        column mrl ~spring(900, 60) {
+            //  80 a notch: a swipe on the trackpad (15 px a notch) carries the mail about five times as far.
+            at: mrx + 20, 182; view: mrw - 36, mb_h; gap: 10; step: 80
+            //  As Gmail shows it (the large view): Firefox's render on a page of its own, its corners
+            //  continuous as iOS rounds its cards, a hairline of light at its edge; its links live. It
+            //  fades in whole. Focused, the page grows with the reader (the same render, scaled) and
+            //  its first tiles, photographed finer, come in sharp over it.
+            group {
+                size: mrw - 36, if(mr_has_web, mr_web_h * wzz + if(mr_web_cut, 36, 0), 0)
+                show: mr_has_web
+                opacity: wpage
+                group {
+                    move: -mpx, 0
+                    group {
+                        pivot: 0, 0
+                        scale: wzz
+                        clip box { from: 0, 0; size: 620, mr_web_h; corner: 22 / wzz continuous }
+                        for t in mrt { WebTile(t) }
+                    }
+                    //  (Swapped in once settled, tile by tile —see ZoomTile—, not faded: the same page, only sharper.)
+                    group {
+                        pivot: 0, 0
+                        scale: mxz
+                        clip box { from: 0, 0; size: 620 * mzs, min(mr_web_h, mrtz.count * 600) * mzs; corner: 22 / mxz continuous }
+                        for t in mrtz { ZoomTile(t) }
+                    }
+                    //  Its GIFs, moving where the photograph froze them; its links: the same layout at every
+                    //  size, so the same boxes, scaled.
+                    group {
+                        pivot: 0, 0
+                        scale: wzz
+                        clip box { from: 0, 0; size: 620, mr_web_h; corner: 22 / wzz continuous }
+                        for a in mra { WebAnim(a) }
+                    }
+                    group {
+                        pivot: 0, 0
+                        scale: wzz
+                        for k in mrk { WebLink(k) }
+                    }
+                }
+                text "The rest of this mail is in Gmail (o)" { at: 0, mr_web_h * wzz + 20; anchor: left center; size: 11.5; weight: 600; family: "SF Pro Display"; color: tint_ink; show: mr_web_cut }
+            }
+            for b in mrb { MailBlock(b, mrw - 48) }
+        }
+        }
+        //  Its hairline of light, on the window rather than the page: it stays round as the mail moves under it.
+        box {
+            from: mrx + 20.5 + max(0, -mpx), 182.5; size: min(mpw, mrw - 36) - 1, max(0, min(mb_h, mr_web_h * wzz - mrl.scroll) - 1); corner: 21.5 continuous; stroke: 1
+            color: #ffffff; opacity: 22% * wpage * if(mr_has_web, 1, 0)
+        }
+        text "Loading…" { at: mrx + 20, 196; anchor: left center; size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(mr_loading and not mr_web_wait, 50%, 0) }
+        //  While Firefox draws it: the page it will be on, already there —white, its corners the
+        //  page's— and iOS's activity indicator at its head, twelve spokes turning. It comes in
+        //  slowly, so a quick render never shows it, and turns only while it is seen.
+        group {
+            opacity: smooth(0.35, 1, wwait)
+            move: mrx + 20, 182
+            box { from: 0, 0; size: mrw - 36, mb_h - 6; corner: 22 continuous; color: #ffffff }
+            repeat k in 0..12 {
+                group {
+                    pivot: (mrw - 36) / 2, 46
+                    rotate: k * 0.5236
+                    box { from: (mrw - 36) / 2 - 1.25, 46 - 11.5; size: 2.5, 7; corner: 1.25 continuous; color: #8e8e93; opacity: 0.2 + 0.8 * (1 - mod(floor(spn) - k + 12, 12) / 12) }
+                }
+            }
+        }
+        box {
+            from: mrr - 13, 184 + (mb_h - 4) * mrl.scroll / max(1, mrl.content); size: 2.5, (mb_h - 4) * min(1, mb_h / max(1, mrl.content)); corner: 1.25 continuous
+            color: ink; opacity: if(mrl.content > mb_h + 4, 22%, 0)
+        }
+
+        //  The answer: a well with the field, and a bead that sends it.
+        group {
+            opacity: smooth(0.3, 1, rep_in)
+            move: 0, 10 * (1 - rep_in)
+            let ry = 182 + mb_h + 14
+            body {
+                color: well; opacity: 26%
+                box { from: mrx + 16, ry; size: mrw - 78, 40; corner: 20 continuous }
+            }
+            box { from: mrx + 16.5, ry + 0.5; size: mrw - 79, 39; corner: 19.5 continuous; stroke: 1; color: soft_l; opacity: 40% }
+            input mr_in { at: mrx + 34, ry + 11; width: mrw - 112; size: 13; color: ink; placeholder: "Write a reply…"; label: "Reply" }
+            zone ellipse msend { at: mrr - 36, ry + 20; radius: 20; cursor: pointer; label: "Send"; active: mr_rep and not mr_sending }
+            body {
+                gradient: mrr - 56, ry to mrr - 16, ry + 40, soft_l, soft_s
+                glass: 25%; blur: 0%; light: 7%, ry, 20; shadow: 0, 1.2 + 0.5 * msend.hover - msend.pressed, 4.2, 24%
+                opacity: if(mr_sending, 50%, 100%)
+                ellipse { at: mrr - 36, ry + 20; radius: 20 - 0.6 * msend.pressed }
+            }
+            image ic_send { at: mrr - 43.5, ry + 13; size: 14, 14; tint: pearl_ink }
+            on press msend { emit mail_send }
+        }
+    }
+
+    on change mr_seq { mrl.scroll: 0 ~1ms }
+    follow msc = mrl.scroll      // what is in sight of the page, for the tiles (island.plm, `mvt`/`mvb`)
+}

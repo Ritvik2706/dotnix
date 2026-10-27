@@ -1,0 +1,12 @@
+// Written by theme/wallpaper-theme.py for skyline.jpg (theme: generated).
+// Included by config.kdl.
+// Borders have no colour of their own: each is the frost of what is really
+// behind it (border-glass), lit like a glass edge (border-light) inside a dark
+// hairline at its silhouette (border-shade), faint sheen on the focused one;
+// unfocused windows' glass is quieter and in shade (border-inactive).
+blur { border-glass 1.8; border-light 0.26; border-shade 0.63; border-inactive 0.25; }
+layout {
+    border { active-gradient from="#FFFFFF29" to="#FFFFFF0F" angle=120; inactive-color "#FFFFFF08"; }
+    insert-hint { color "#FFFFFF33"; }
+    tab-indicator { active-color "#FFFFFFB3"; inactive-color "#FFFFFF33"; }
+}

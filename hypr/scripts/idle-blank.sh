@@ -36,7 +36,8 @@ done
 # before the output goes away.
 sleep 0.3
 
-hyprctl dispatch 'hl.dsp.dpms({action="off"})' >/dev/null 2>&1
+if [[ -n ${NIRI_SOCKET:-} ]]; then niri msg action power-off-monitors >/dev/null 2>&1
+else hyprctl dispatch 'hl.dsp.dpms({action="off"})' >/dev/null 2>&1; fi
 
 # Pause razer-fx so the keyboard goes dark and stops rendering (SIGUSR2 in
 # unblank.sh resumes it).

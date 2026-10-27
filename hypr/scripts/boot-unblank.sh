@@ -37,10 +37,21 @@ restore_backlight() {
     brightnessctl -q -r 2>/dev/null || brightnessctl -q set 40% 2>/dev/null
     return 0
 }
+# A compositor switch from the island: hyprlock-blank never ran and no lock
+# follows (switch-grace.sh), so there is nothing to wait for or restore.
+"$(dirname "${BASH_SOURCE[0]}")/switch-grace.sh" || exit 0
+
 trap restore_backlight EXIT
 
+# Is the session locked? Hyprland says so; niri can't be asked, so there a
+# running hyprlock stands in for it (it only stays up once it holds the lock).
+session_locked() {
+    if [[ -n ${NIRI_SOCKET:-} ]]; then pidof -q hyprlock; else [[ $(hyprctl locked 2>/dev/null) == true ]]; fi
+}
+
 while (( SECONDS < DEADLINE )); do
-    if [[ $(hyprctl locked 2>/dev/null) == true ]]; then
+    if session_locked; then
+        [[ -n ${NIRI_SOCKET:-} ]] && sleep 0.4   # let it draw its first frame
         # Log what the blackout actually cost, so the next boot's journal says
         # whether this is still worth it:
         #     journalctl --user -b -t boot-unblank

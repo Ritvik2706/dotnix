@@ -82,12 +82,13 @@ PACMAN_COMMON_NATIVE=(
 )
 
 # Optional desktop groups (native only). Selected via --full or --selective.
-DESKTOP_GROUPS=( terminals desktop hyprland sway theming media pdf launcher )
+DESKTOP_GROUPS=( terminals desktop hyprland niri sway theming media pdf launcher )
 
 declare -A GROUP_DESC=(
   [terminals]="Terminal emulators (kitty, ghostty)"
   [desktop]="Wayland desktop utils (waybar, dunst, eww, screenshots, audio, brightness)"
   [hyprland]="Hyprland compositor"
+  [niri]="niri compositor (config ported from hypr/)"
   [sway]="Sway compositor"
   [theming]="GTK/Qt theming (kvantum, qt5ct, fontconfig)"
   [media]="Media (mpv + streamlink for twitch)"
@@ -98,6 +99,7 @@ declare -A GROUP_PACMAN=(
   [terminals]="kitty ghostty"
   [desktop]="waybar dunst polkit brightnessctl playerctl grim slurp xsettingsd nwg-look volumeicon pavucontrol"
   [hyprland]="hyprland"
+  [niri]="niri xwayland-satellite xdg-desktop-portal-gnome wlsunset"
   [sway]="sway swaybg"
   [theming]="kvantum kvantum-qt5 qt5ct fontconfig"
   [media]="mpv streamlink"

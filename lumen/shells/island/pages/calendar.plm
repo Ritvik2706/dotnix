@@ -1,0 +1,153 @@
+// The calendar: hovering the date, the right capsule grows down into a card
+// of the month (Monday first), today a bead of softly tinted glass. The
+// chevrons and the wheel turn the months; it comes back to this one each time
+// it opens, and closes once the pointer leaves it. Under the month, what is
+// up next, and under that the news from Mauritius.
+part Calendar {
+    component CalDay(c: record) {
+        size: 40, 34
+        body {
+            gradient: 6, 3 to 34, 31, soft_l, soft_s
+            glass: 25%; blur: 0%; light: 7%, 3, 14; shadow: 0, 1.2, 4.2, 26%; show: c.today
+            ellipse { at: 20, 17; radius: 14 }
+        }
+        text c.d {
+            at: 20, 17.5; anchor: center; size: 13; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: if(c.today, 0, if(c.inm, 92%, 28%))
+        }
+        text c.d {
+            at: 20, 17.5; anchor: center; size: 13; weight: 700; family: "SF Pro Display"
+            color: pearl_ink; opacity: if(c.today, 100%, 0)
+        }
+        //  Something on that day: a small dot under it.
+        ellipse { at: 20, 29; radius: 1.6; color: if(c.today, pearl_ink, soft_l); opacity: if(c.ev, 90%, 0) }
+    }
+
+    //  One event coming: a bar of the island's light, its name, when (the first, how soon).
+    component UpRow(u: record) {
+        size: 268, 38
+        body { gradient: 0, 4 to 0, 34, soft_l, soft_s; glass: 25%; blur: 0%; light: 6%, 4, 2; opacity: if(u.first, 100%, 45%); box { from: 0, 4; size: 3.5, 30; corner: 1.75 continuous } }
+        text u.title { at: 12, 12; anchor: left center; width: 190; lines: 1; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink }
+        text u.time { at: 12, 28; anchor: left center; width: 250; lines: 1; size: 10.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 55% }
+        text u.when { at: 268, 12; anchor: right center; size: 9.5; weight: 700; family: "SF Pro Display"; color: tint_ink }
+    }
+
+    //  A round glass chevron, as the pages' back button.
+    component CalArrow(dir: number, go: number, name: text) {
+        size: 26, 26
+        zone ellipse a { at: 13, 13; radius: 13; cursor: pointer; label: "{name}" }
+        body {
+            color: mix(chip, chip_hi, a.hover); glass: 25%; blur: 0%; light: 4%, 0, 13; shadow: 0, 1.2 + 0.5 * a.hover - a.pressed, 4.2, 21%
+            ellipse { at: 13, 13; radius: 13 - 0.5 * a.pressed }
+        }
+        path { at: 13 - 0.6 * dir, 13; stroke: 1.7; color: ink; opacity: 70% + 30% * a.hover; move 1.8 * dir, -4.5; line -2.6 * dir, 0; line 1.8 * dir, 4.5 }
+        on press a { emit cal_step(go) }
+    }
+
+    let cl = cap_r - cal_w
+
+    //  The card's own zone: its whole target shape, so the pointer can go from
+    //  the date down into the month without the spring closing it under it.
+    zone box cal_z { from: cl, cap_y; size: cal_w, cal_th; corner: 22 continuous; label: "Calendar"; active: cal }
+    on press upn_z { emit cal_web }
+    on leave cal_z while cal { cal = false }
+    on scroll cal_z while cal and not cnl_z.hover { emit cal_step(wheel) }
+
+    group {
+        show: co > 0.01 and side_k == 0
+        opacity: smooth(0.45, 1, co)
+        move: 0, 8 * (1 - co)
+        clip box { from: ccl, cap_y; size: ccw, cch; corner: ccr continuous }
+
+        line { from: cl + 16, 39; to: cap_r - 16, 39; width: 0.7; color: ink; opacity: 10% }
+
+        text "{cal_month} {cal_year}" {
+            at: cl + 20, 58; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink
+        }
+        //  Away from this month: a pill back to today.
+        group {
+            show: not cal_here
+            zone box tod { from: cap_r - 140, 46; size: 56, 24; corner: 12 continuous; cursor: pointer; label: "Today" }
+            body {
+                gradient: cap_r - 140, 46 to cap_r - 84, 70, mix(mix(chip, chip_hi, tod.hover), lilac, 0.16), mix(mix(chip, chip_hi, tod.hover), sunset, 0.13)
+                glass: 25%; blur: 0%; light: 4%, 46, 12; shadow: 0, 1.2, 4, 18%
+                box { from: cap_r - 140, 46; size: 56, 24; corner: 12 continuous }
+            }
+            text "Today" { at: cap_r - 112, 58; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink }
+            on press tod { emit cal_step(0) }
+        }
+        row {
+            at: cap_r - 74, 45; gap: 6
+            CalArrow(1, -1, "Previous month")
+            CalArrow(-1, 1, "Next month")
+        }
+
+        repeat i in 0..7 {
+            text pick(i, "M", "T", "W", "T", "F", "S", "S") {
+                at: cl + 10 + 40 * i + 20, 82; anchor: center; size: 10; weight: 600; family: "SF Pro Display"
+                color: ink; opacity: 42%
+            }
+        }
+        grid {
+            at: cl + 10, 92; columns: 7; width: 280; gap: 0; row: 34
+            for c in cdays { CalDay(c) }
+        }
+
+        //  Up next: the next three on the calendar, the first with its countdown.
+        let uy = 92 + cal_weeks * 34 + 8
+        line { from: cl + 16, uy + 0.5; to: cap_r - 16, uy + 0.5; width: 0.7; color: ink; opacity: 10% }
+        zone box upn_z { from: cl + 8, uy + 6; size: cal_w - 16, upn_h - 10; corner: 14 continuous; cursor: pointer; label: "Open Google Calendar"; active: cal }
+        box { from: cl + 8, uy + 6; size: cal_w - 16, upn_h - 10; corner: 14 continuous; color: ink; opacity: 4% * upn_z.hover }
+        text "UP NEXT" { at: cl + 20, uy + 22; anchor: left center; size: 10; weight: 700; family: "SF Pro Display"; color: tint_ink }
+        column {
+            at: cl + 16, uy + 34; gap: 4
+            for u in upn { UpRow(u) }
+        }
+        text upn_empty {
+            at: cl + 20, uy + 36; anchor: left top; width: cal_w - 40; lines: 3
+            size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(upn.count == 0, 55%, 0)
+        }
+
+        //  ── News from Mauritius: a list that scrolls (wheel or drag; the wheel
+        //  turns the months everywhere else), French and English or either;
+        //  a click opens one, ↑ goes back to the newest ──
+        let ny = uy + upn_h
+        line { from: cl + 16, ny + 0.5; to: cap_r - 16, ny + 0.5; width: 0.7; color: ink; opacity: 10% }
+        zone box cnl_z { from: cl + 8, ny + 4; size: cal_w - 16, cnews_h - 6; corner: 14 continuous; label: "News"; active: cal }
+        image ic_news { at: cl + 18, ny + 15; size: 15, 15; tint: tint_ink }
+        text "MAURITIUS" { at: cl + 40, ny + 22.5; anchor: left center; size: 10; weight: 700; family: "SF Pro Display"; color: tint_ink }
+        //  Which language: three small capsules, the chosen one a bead of the island's light.
+        repeat k in 0..3 {
+            let lx = cl + 168 + 40 * k
+            zone box nl_f.$k { from: lx, ny + 12; size: 36, 21; corner: 10.5 continuous; cursor: pointer; label: pick(k, "All news", "French news", "English news"); active: cal }
+            on press nl_f.$k { emit news_filter(k) }
+            body {
+                gradient: lx, ny + 12 to lx + 36, ny + 33, mix(mix(chip, chip_hi, nl_f.$k.hover), soft_l, if(news_lang == k, 1, 0)), mix(mix(chip, chip_hi, nl_f.$k.hover), soft_s, if(news_lang == k, 1, 0))
+                glass: 25%; blur: 0%; light: 4%, ny + 12, 10; shadow: 0, 1, 3.5, 20%
+                box { from: lx, ny + 12; size: 36, 21; corner: 10.5 continuous }
+            }
+            text pick(k, "All", "FR", "EN") { at: lx + 18, ny + 22.5; anchor: center; size: 10; weight: 700; family: "SF Pro Display"; color: if(news_lang == k, pearl_ink, ink) }
+        }
+        //  Scrolled 1:1 with the fingers on a stiff spring with no overshoot.
+        column nl ~spring(900, 60) {
+            at: cl + 8, ny + 40; view: 284, 160; gap: 2; step: 15
+            for n in news { NewsRow(n) }
+        }
+        box {
+            from: cap_r - 7, ny + 42 + 156 * nl.scroll / max(1, nl.content); size: 2.5, 156 * min(1, 160 / max(1, nl.content)); corner: 1.25 continuous
+            color: ink; opacity: if(nl.content > 164, 22%, 0)
+        }
+        //  Back to the newest, once scrolled away from them.
+        group {
+            opacity: smooth(4, 40, nl.scroll)
+            zone ellipse ntop_z { at: cl + 151, ny + 22.5; radius: 11; cursor: pointer; label: "Back to the newest"; active: cal and nl.scroll > 4 }
+            body {
+                color: mix(chip, chip_hi, ntop_z.hover); glass: 25%; blur: 0%; light: 4%, ny + 12, 11; shadow: 0, 1 + 0.5 * ntop_z.hover - ntop_z.pressed, 3.5, 21%
+                ellipse { at: cl + 151, ny + 22.5; radius: 11 - 0.4 * ntop_z.pressed }
+            }
+            path { at: cl + 151, ny + 22.5; stroke: 1.5; color: ink; opacity: 80%; move -3.5, 1.5; line 0, -2; line 3.5, 1.5 }
+            on press ntop_z { nl.scroll: 0 ~quick }
+        }
+        text news_state { at: cl + cal_w / 2, ny + 118; anchor: center; size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(news.count == 0, 50%, 0) }
+    }
+}

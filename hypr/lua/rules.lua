@@ -6,7 +6,7 @@
 ----------------------------------------
 -- APP → WORKSPACE PLACEMENT (ORDER MATTERS)
 ----------------------------------------
--- Claude (Chromium PWA) → floating scratchpad on special:claude (see SCRATCHPADS below).
+-- Claude Desktop → floating popup on special:claude (see the "claude" rule below).
 
 -- Ghostty: workspace 2, no blur
 hl.window_rule({
@@ -394,12 +394,12 @@ hl.window_rule({
 	size = "900 600",
 })
 
--- Claude web app (Chromium PWA) → CopyQ-style floating popup over the current
+-- Claude Desktop (claude-desktop) → CopyQ-style floating popup over the current
 -- workspace. super+S shows it (parking it on special:claude to hide). See
 -- custom_scripts/toggle_claude.sh.
 hl.window_rule({
 	name = "claude",
-	match = { class = [[^(chrome-claude\.ai__-Default)$]] },
+	match = { class = [[^(com\.anthropic\.Claude)$]] },
 	workspace = "special:claude", -- lives on the special ws; shown by toggling it
 	float = true,
 	center = true,
@@ -472,6 +472,15 @@ hl.layer_rule({ name = "gtk-layer-shell", match = { namespace = "gtk-layer-shell
 -- Waybar — frosted "liquid glass" blur behind the translucent pills.
 -- ignore_alpha keeps the transparent gaps clear; only the pills blur.
 hl.layer_rule({ name = "waybar-blur", match = { namespace = "waybar" }, blur = true, xray = false, ignore_alpha = 0.10 })
+
+-- Lumen island ("light liquid") — the scene asks for its own blur region
+-- (ext-background-effect, shaped to the pill/card), so only xray is set here:
+-- the expanded card frosts the real windows it drops over, not just the wallpaper.
+hl.layer_rule({ name = "lumen-real-blur", match = { namespace = "lumen" }, xray = false })
+
+-- Fake rounded display corners (scripts/screen-corners.py): black overlay
+-- masks — must appear instantly and never blur.
+hl.layer_rule({ name = "screen-corners", match = { namespace = "screen-corners" }, no_anim = true, blur = false })
 
 -- Launchers & notifications
 hl.layer_rule({ name = "launcher", match = { namespace = "launcher" }, blur = true, ignore_alpha = 0.5 })

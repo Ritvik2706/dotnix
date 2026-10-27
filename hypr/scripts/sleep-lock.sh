@@ -34,15 +34,19 @@ RUN=${XDG_RUNTIME_DIR:-/run/user/$UID}
 BIRTH_FILE=$RUN/hyprlock-birth     # "<pid> <lit|dark> <epoch_ms>"
 
 now_ms()   { date +%s%3N; }
-panel_on() { [[ $(hyprctl monitors -j 2>/dev/null) == *'"dpmsStatus": true'* ]]; }
-locked()   { [[ $(hyprctl locked 2>/dev/null) == "true" ]]; }
+# panel_on / session_locked: Hyprland or niri (lock-state.sh)
+# shellcheck source=lock-state.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lock-state.sh"
+locked()   { session_locked; }
 lock_pid() { systemctl --user show -p MainPID --value hyprlock.service 2>/dev/null; }
 
 cmd_lid() {
     # Docked — an external monitor is on: closing the lid is "use the big
     # screen", not "I'm leaving". logind does not suspend in that case either
     # (HandleLidSwitchDocked=ignore), so neither do we lock.
-    if hyprctl monitors -j 2>/dev/null | python3 -c '
+    if [[ -n ${NIRI_SOCKET:-} ]]; then
+        niri msg -j outputs 2>/dev/null | jq -e 'any(.[]; (.name | startswith("eDP") | not) and .current_mode != null)' >/dev/null 2>&1 && exit 0
+    elif hyprctl monitors -j 2>/dev/null | python3 -c '
 import json, sys
 mons = json.load(sys.stdin)
 sys.exit(0 if any(not m["name"].startswith("eDP") and not m.get("disabled") for m in mons) else 1)

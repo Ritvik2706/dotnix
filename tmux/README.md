@@ -2,9 +2,9 @@
 
 Originally based on [linkarzu's dotfiles](https://github.com/linkarzu/dotfiles-latest)
 ([video](https://youtu.be/0aD7-EBnULc)), trimmed down and adapted for my
-devices. Prefix is `Ctrl+a`. Status bar look (transparent, rounded pills) is
-from [Yahddyyp's dotfiles](https://github.com/Yahddyyp/MacOS-Dotfiles), using
-upstream `catppuccin/tmux` pinned at v2.1.3.
+devices. Prefix is `Ctrl+a`. Status bar is a plugin-free "glass" look at the
+bottom (soft pills for the session and current window, dim text elsewhere) to
+match niri's frosted windows and the lumen island.
 
 ## Setup
 

@@ -12,9 +12,9 @@ _dotnix_command_finished() {
   [[ -n ${_dotnix_command_start-} ]] && elapsed=$(( EPOCHSECONDS - _dotnix_command_start ))
   unset _dotnix_command_start
   RPROMPT=''
-  (( command_status )) && RPROMPT="%F{red}exit ${command_status}%f"
+  (( command_status )) && RPROMPT="%F{1}exit ${command_status}%f"
   if (( elapsed >= 3 )); then
-    RPROMPT+="${RPROMPT:+ }%F{yellow}${elapsed}s%f"
+    RPROMPT+="${RPROMPT:+ · }%F{8}${elapsed}s%f"
   fi
   return 0
 }
