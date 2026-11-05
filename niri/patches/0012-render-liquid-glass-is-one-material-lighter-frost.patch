@@ -1,0 +1,67 @@
+From 16ef4ac0ebadc144845331709691d948132fb2c1 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 02:02:00 +0400
+Subject: [PATCH 12/38] render: liquid glass is one material; lighter frost
+
+A crisp lensed rim around a frosted middle read as a seam, not as glass.
+The rim now bends the same backdrop the middle shows (frosted or clear),
+so the edge is only a subtle optical shift, as on Apple's glass. Frost uses
+the window blur's passes with its offset scaled 0.5..1 by the glass's
+frost (no extra pass).
+---
+ src/render_helpers/liquid_glass.rs           | 12 +++++-------
+ src/render_helpers/shaders/liquid_glass.frag |  6 ++++--
+ 2 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index e1ea823d..731d824a 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -22,8 +22,6 @@ use crate::render_helpers::RenderCtx;
+ /// growing glass read busy and dark near its own edges). Only the shapes and
+ /// their darkened edge are drawn.
+ const EDGE_PAD: f32 = 28.;
+-/// The most blur passes the glass's frost takes.
+-const MAX_PASSES: u8 = 6;
+ 
+ /// The capture a surface's glass is drawn from, and the state it was last
+ /// drawn with (a change re-renders it).
+@@ -100,14 +98,14 @@ pub fn render_for_surface(
+             })
+             .collect();
+ 
+-        // The backdrop is always captured really frosted (one pass more than
+-        // window blur), whatever the glass asks for: the shader shows it crisp
+-        // (clear glass, calm backdrop) or frosted (frosted glass, busy
+-        // backdrop) — never a sharp image smeared by sparse taps, which ghosts.
++        // Frosted glass uses the window blur's passes, its offset scaled by the
++        // glass's frost (half at the least): a real blur, never a sparse-tap
++        // smear, and light enough that the glass still reads as glass. Clear
++        // glass (frost < ~8%) shows the backdrop crisp from the sharp capture.
+         let frosted = !blur_config.off;
+         let blur = frosted.then(|| {
+             let mut options = BlurOptions::from(blur_config);
+-            options.passes = options.passes.saturating_add(1).min(MAX_PASSES);
++            options.offset *= 0.5 + 0.5 * state.frost.clamp(0., 1.) as f64;
+             options
+         });
+         let noise = if frosted { blur_config.noise as f32 } else { 0. };
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 84e87ef6..22284351 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -220,10 +220,12 @@ void main() {
+         slope = edge_slope(u, bevel, thickness);
+         float dg = displacement(u, bevel, thickness, 1.5);
+         vec2 dir = inv * (-n / geo_size);
+-        // The rim is crisp, easing into the middle.
++        // One material: the rim bends the same (frosted or clear) backdrop the
++        // middle shows. A crisp rim around a frosted middle reads as a seam,
++        // not as glass; Apple's edge is only a subtle optical shift.
+         float e = clamp(1.0 - u / bevel, 0.0, 1.0);
+         rim = e * e * (3.0 - 2.0 * e);
+-        float c = max(clear, rim);
++        float c = clear;
+         vec4 g = backdrop(v_coords + dir * dg, c);
+         if (dispersion > 0.0) {
+             // Red bends less, blue more: a prism's spread of the index.

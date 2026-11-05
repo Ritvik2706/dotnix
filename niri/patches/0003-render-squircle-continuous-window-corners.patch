@@ -1,0 +1,148 @@
+From a0036dacb88c9678f734b81409bce025bf0ff57d Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 27 Oct 2026 21:06:36 +0400
+Subject: [PATCH 03/38] render: squircle (continuous) window corners
+
+rounding_alpha.frag ports lumen's continuous_corner: the corner spreads over
+1.84x the radius (capped at half the side), with the exponent solved so the
+diagonal cut matches a circle's. clipped_surface.rs uses the same extent for
+the opaque-region corners.
+---
+ src/render_helpers/clipped_surface.rs         | 14 ++--
+ src/render_helpers/shaders/mod.rs             |  4 ++
+ .../shaders/rounding_alpha.frag               | 71 ++++++++++++++-----
+ 3 files changed, 68 insertions(+), 21 deletions(-)
+
+diff --git a/src/render_helpers/clipped_surface.rs b/src/render_helpers/clipped_surface.rs
+index e357895e..7f15c23b 100644
+--- a/src/render_helpers/clipped_surface.rs
++++ b/src/render_helpers/clipped_surface.rs
+@@ -10,6 +10,8 @@ use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions}
+ use smithay::utils::user_data::UserDataMap;
+ use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+ 
++use super::shaders::SQUIRCLE_EXTENT;
++
+ use super::damage::ExtraDamage;
+ use super::renderer::{AsGlesFrame as _, NiriRenderer};
+ use super::shaders::{mat3_uniform, Shaders};
+@@ -128,10 +130,14 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
+         geo: Rectangle<f64, Logical>,
+         corner_radius: CornerRadius,
+     ) -> [Rectangle<f64, Logical>; 4] {
+-        let top_left = corner_radius.top_left as f64;
+-        let top_right = corner_radius.top_right as f64;
+-        let bottom_right = corner_radius.bottom_right as f64;
+-        let bottom_left = corner_radius.bottom_left as f64;
++        // Squircle corners spread over SQUIRCLE_EXTENT x the radius (see
++        // rounding_alpha.frag), capped at half the side like the shader does.
++        let max = f64::min(geo.size.w, geo.size.h) / 2.;
++        let extent = |r: f32| f64::min(r as f64 * SQUIRCLE_EXTENT, max).max(r as f64);
++        let top_left = extent(corner_radius.top_left);
++        let top_right = extent(corner_radius.top_right);
++        let bottom_right = extent(corner_radius.bottom_right);
++        let bottom_left = extent(corner_radius.bottom_left);
+ 
+         [
+             Rectangle::new(geo.loc, Size::from((top_left, top_left))),
+diff --git a/src/render_helpers/shaders/mod.rs b/src/render_helpers/shaders/mod.rs
+index 7be9b159..b833fe88 100644
+--- a/src/render_helpers/shaders/mod.rs
++++ b/src/render_helpers/shaders/mod.rs
+@@ -10,6 +10,10 @@ use super::renderer::NiriRenderer;
+ use super::shader_element::ShaderProgram;
+ use crate::render_helpers::blur::BlurProgram;
+ 
++/// How far a squircle corner spreads along each edge, as a multiple of the configured
++/// corner radius (lumen's continuous corners use the same). Must match rounding_alpha.frag.
++pub const SQUIRCLE_EXTENT: f64 = 1.84;
++
+ pub struct Shaders {
+     pub border: Option<ShaderProgram>,
+     pub shadow: Option<ShaderProgram>,
+diff --git a/src/render_helpers/shaders/rounding_alpha.frag b/src/render_helpers/shaders/rounding_alpha.frag
+index e1c9527e..9de1f49c 100644
+--- a/src/render_helpers/shaders/rounding_alpha.frag
++++ b/src/render_helpers/shaders/rounding_alpha.frag
+@@ -1,27 +1,64 @@
++// Continuous (squircle) corners, the iOS shape, instead of circular arcs.
++//
++// The same corner as lumen's `corner: r continuous` (lumen src/shapes.rs,
++// continuous_corner + box_distance), so windows and the shell drawn with lumen
++// share one curve: a quarter superellipse |x|^n + |y|^n = 1 that starts
++// SQUIRCLE_EXTENT x r along each side (capped at half the side), with n chosen
++// so it cuts in at the diagonal exactly as deep as a circle of radius r. A
++// configured radius therefore keeps its visual size; only the curve changes,
++// coming in gradually from the straight sides. Where there is no room to
++// reach further (n would fall to 2), it stays a circle.
++// SQUIRCLE_EXTENT must match the constant of the same name in shaders/mod.rs.
++#define SQUIRCLE_EXTENT 1.84
++
+ float niri_rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius) {
+-    vec2 center;
+-    float radius;
++    // How far each corner reaches along its sides.
++    float half_side = min(size.x, size.y) * 0.5;
++    vec4 ext = max(min(corner_radius * SQUIRCLE_EXTENT, vec4(half_side)), corner_radius);
++
++    vec2 inner;
++    float r;
++    float e;
+ 
+-    if (coords.x < corner_radius.x && coords.y < corner_radius.x) {
+-        radius = corner_radius.x;
+-        center = vec2(radius, radius);
+-    } else if (size.x - corner_radius.y < coords.x && coords.y < corner_radius.y) {
+-        radius = corner_radius.y;
+-        center = vec2(size.x - radius, radius);
+-    } else if (size.x - corner_radius.z < coords.x && size.y - corner_radius.z < coords.y) {
+-        radius = corner_radius.z;
+-        center = vec2(size.x - radius, size.y - radius);
+-    } else if (coords.x < corner_radius.w && size.y - corner_radius.w < coords.y) {
+-        radius = corner_radius.w;
+-        center = vec2(radius, size.y - radius);
++    if (coords.x < ext.x && coords.y < ext.x) {
++        r = corner_radius.x;
++        e = ext.x;
++        inner = vec2(e, e);
++    } else if (size.x - ext.y < coords.x && coords.y < ext.y) {
++        r = corner_radius.y;
++        e = ext.y;
++        inner = vec2(size.x - e, e);
++    } else if (size.x - ext.z < coords.x && size.y - ext.z < coords.y) {
++        r = corner_radius.z;
++        e = ext.z;
++        inner = vec2(size.x - e, size.y - e);
++    } else if (coords.x < ext.w && size.y - ext.w < coords.y) {
++        r = corner_radius.w;
++        e = ext.w;
++        inner = vec2(e, size.y - e);
+     } else {
+         return 1.0;
+     }
+ 
+-    float dist = distance(coords, center);
++    // At the diagonal a circle cuts in r(sqrt2 - 1); the superellipse,
++    // sqrt2 e (1 - 2^(-1/n)). Equal when:
++    float n = -0.6931472 / log(1.0 - 0.2928932 * r / e);
++
++    float dist;
++    if (n < 2.01) {
++        // No room to reach further (e is r, or all but): a plain circle.
++        dist = distance(coords, inner) - e;
++    } else {
++        vec2 u = max(abs(coords - inner) / e, vec2(1e-4));
++        float l = pow(pow(u.x, n) + pow(u.y, n), 1.0 / n);
++        // The superellipse's own measure over how steep it is there, so the
++        // edge is as sharp along the diagonal as along the sides.
++        float steep = max(length(pow(u / l, vec2(n - 1.0))), 0.5);
++        dist = (l - 1.0) * e / steep;
++    }
+ 
+-    // Manual smoothstep() between radius - half_px and radius + half_px
++    // Manual smoothstep() between -half_px and +half_px around the curve
+     // to avoid a division in clamp().
+-    float t = clamp((dist - radius) * niri_scale + 0.5, 0.0, 1.0);
++    float t = clamp(dist * niri_scale + 0.5, 0.0, 1.0);
+     return 1.0 - t * t * (3.0 - 2.0 * t);
+ }

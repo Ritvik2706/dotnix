@@ -1,0 +1,58 @@
+From 7372cac6b108f66833604877ffc82bbf1099f7f2 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 02:07:19 +0400
+Subject: [PATCH 13/38] render: liquid glass frost is a real blur dial
+
+Frost scales the blur's passes (0.5..1x) and offset (0.25..1x), so light
+frost keeps what is behind recognisable and the lensing visible; any frost
+above 2% uses a real blur of that strength (no crisp/frosted half-mix).
+---
+ src/render_helpers/liquid_glass.rs           | 14 ++++++++------
+ src/render_helpers/shaders/liquid_glass.frag |  7 +++----
+ 2 files changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 731d824a..6ed50406 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -98,14 +98,16 @@ pub fn render_for_surface(
+             })
+             .collect();
+ 
+-        // Frosted glass uses the window blur's passes, its offset scaled by the
+-        // glass's frost (half at the least): a real blur, never a sparse-tap
+-        // smear, and light enough that the glass still reads as glass. Clear
+-        // glass (frost < ~8%) shows the backdrop crisp from the sharp capture.
+-        let frosted = !blur_config.off;
++        // Frost is a dial, not a switch: it scales the blur's passes and offset
++        // down to a light soften (the shapes behind stay recognisable, so the
++        // lensing shows) and up to the window blur. Always a real blur of that
++        // strength — never a half-mix of crisp and frosted, which ghosts.
++        let frosted = !blur_config.off && state.frost > 0.02;
+         let blur = frosted.then(|| {
++            let f = state.frost.clamp(0., 1.);
+             let mut options = BlurOptions::from(blur_config);
+-            options.offset *= 0.5 + 0.5 * state.frost.clamp(0., 1.) as f64;
++            options.passes = ((options.passes as f32 * (0.5 + 0.5 * f)).round() as u8).max(1);
++            options.offset *= 0.25 + 0.75 * f as f64;
+             options
+         });
+         let noise = if frosted { blur_config.noise as f32 } else { 0. };
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 22284351..2865cd3d 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -203,10 +203,9 @@ void main() {
+     float u = -d;   // px in from the edge
+     float slope = 0.0;
+ 
+-    // Where the glass is clear and where it is frosted, as asked: low frost
+-    // shows the backdrop crisp, higher frost the frosted capture (never a
+-    // half-mix of the two, which ghosts).
+-    float clear = 1.0 - smoothstep(0.08, 0.25, frost);
++    // The capture is already blurred to the glass's frost (liquid_glass.rs);
++    // only glass with no frost at all reads the crisp capture.
++    float clear = 1.0 - smoothstep(0.0, 0.02, frost);
+ 
+     // (No busy-content measure here yet: sampling the crisp/frosted difference
+     // at a few points paints shifted copies of every edge behind the glass. It

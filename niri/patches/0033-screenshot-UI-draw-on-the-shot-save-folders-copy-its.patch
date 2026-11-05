@@ -1,0 +1,2893 @@
+From 5a937bb49caf2bd7b95f9c500dd91dfe4c04c0ee Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Thu, 29 Oct 2026 01:44:51 +0400
+Subject: [PATCH 33/38] screenshot UI: draw on the shot, save folders, copy its
+ text or a colour
+
+d draws on the selection (area, window or screen): pen, line, arrow, box,
+oval, highlighter, text and redaction (p s a r o m i x), colours 1-8, sizes
+[ ], by mouse or by keys (hjkl move a cursor, v starts and ends a shape, i
+types), u/Ctrl+r undo/redo; y/Enter take it with the drawing. f picks the
+folder Enter saves to (screenshot-path's, then ~/.config/niri/
+screenshot-folders or Desktop/Downloads/Pictures). o copies the selection's
+text (tesseract | wl-copy), c the colour under the pointer.
+---
+ niri-config/src/appearance.rs            |   11 +-
+ niri-config/src/binds.rs                 |    9 +
+ src/input/mod.rs                         |   49 +-
+ src/layout/tile.rs                       |    8 +-
+ src/niri.rs                              |   78 +-
+ src/protocols/foreign_toplevel.rs        |   10 +-
+ src/protocols/lumen_glass.rs             |   13 +-
+ src/render_helpers/framebuffer_effect.rs |   86 +-
+ src/render_helpers/liquid_glass.rs       |  288 +++---
+ src/render_helpers/xray.rs               |    4 +-
+ src/ui/mod.rs                            |    1 +
+ src/ui/screenshot_draw.rs                |  648 ++++++++++++++
+ src/ui/screenshot_ui.rs                  | 1036 ++++++++++++++++++----
+ 13 files changed, 1865 insertions(+), 376 deletions(-)
+ create mode 100644 src/ui/screenshot_draw.rs
+
+diff --git a/niri-config/src/appearance.rs b/niri-config/src/appearance.rs
+index f87a6d9b..dfdbd092 100644
+--- a/niri-config/src/appearance.rs
++++ b/niri-config/src/appearance.rs
+@@ -1075,7 +1075,16 @@ impl MergeWith<BlurPart> for Blur {
+         }
+ 
+         merge_clone!((self, part), passes);
+-        merge!((self, part), offset, noise, saturation, border_glass, border_light, border_shade, border_inactive);
++        merge!(
++            (self, part),
++            offset,
++            noise,
++            saturation,
++            border_glass,
++            border_light,
++            border_shade,
++            border_inactive
++        );
+     }
+ }
+ 
+diff --git a/niri-config/src/binds.rs b/niri-config/src/binds.rs
+index 55f0c9d4..4d7a21d1 100644
+--- a/niri-config/src/binds.rs
++++ b/niri-config/src/binds.rs
+@@ -130,6 +130,15 @@ pub enum Action {
+     /// Grow (or with negative steps, shrink) the selection by (dw, dh) steps.
+     #[knuffel(skip)]
+     ScreenshotGrow(i8, i8),
++    /// A key the screenshot UI keeps (drawing, typing, d/f/o/c): its raw
++    /// keysym, the character it types, and Shift and Ctrl.
++    #[knuffel(skip)]
++    ScreenshotKey {
++        raw: u32,
++        ch: Option<char>,
++        shift: bool,
++        ctrl: bool,
++    },
+     Screenshot(
+         #[knuffel(property(name = "show-pointer"), default = true)] bool,
+         // Path; not settable from knuffel
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index 76822904..d88da771 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -51,7 +51,7 @@ use crate::layout::scrolling::ScrollDirection;
+ use crate::layout::{ActivateWindow, LayoutElement as _};
+ use crate::niri::{CastTarget, PointerVisibility, State};
+ use crate::ui::mru::{WindowMru, WindowMruUi};
+-use crate::ui::screenshot_ui::ScreenshotUi;
++use crate::ui::screenshot_ui::{KeyResult, ScreenshotUi};
+ use crate::utils::spawning::{spawn, spawn_sh};
+ use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
+ 
+@@ -752,6 +752,19 @@ impl State {
+                 self.niri.screenshot_ui.grow(dw, dh);
+                 self.niri.queue_redraw_all();
+             }
++            Action::ScreenshotKey {
++                raw,
++                ch,
++                shift,
++                ctrl,
++            } => {
++                match self.niri.screenshot_ui.key(raw, ch, shift, ctrl) {
++                    KeyResult::None => (),
++                    KeyResult::Ocr => self.screenshot_ocr(),
++                    KeyResult::PickColor => self.screenshot_pick_color(),
++                }
++                self.niri.queue_redraw_all();
++            }
+             Action::Screenshot(show_cursor, path) => {
+                 self.open_screenshot_ui(show_cursor, path);
+                 self.niri.cancel_mru();
+@@ -4364,22 +4377,24 @@ fn should_intercept_key<'a>(
+ 
+         if use_screenshot_ui_action {
+             if let Some(raw) = raw {
+-                final_bind = screenshot_ui.action(raw, mods).map(|action| Bind {
+-                    key: Key {
+-                        trigger: Trigger::Keysym(raw),
+-                        // Not entirely correct but it doesn't matter in how we currently use it.
+-                        modifiers: Modifiers::empty(),
+-                    },
+-                    action,
+-                    repeat: true,
+-                    cooldown: None,
+-                    allow_when_locked: false,
+-                    // The screenshot UI owns the focus anyway, so this doesn't really matter.
+-                    // But logically, nothing can inhibit its actions. Only opening it can be
+-                    // inhibited.
+-                    allow_inhibiting: false,
+-                    hotkey_overlay_title: None,
+-                });
++                final_bind = screenshot_ui
++                    .action(raw, modified, mods)
++                    .map(|action| Bind {
++                        key: Key {
++                            trigger: Trigger::Keysym(raw),
++                            // Not entirely correct but it doesn't matter in how we currently use it.
++                            modifiers: Modifiers::empty(),
++                        },
++                        action,
++                        repeat: true,
++                        cooldown: None,
++                        allow_when_locked: false,
++                        // The screenshot UI owns the focus anyway, so this doesn't really matter.
++                        // But logically, nothing can inhibit its actions. Only opening it can be
++                        // inhibited.
++                        allow_inhibiting: false,
++                        hotkey_overlay_title: None,
++                    });
+             }
+         }
+     }
+diff --git a/src/layout/tile.rs b/src/layout/tile.rs
+index 7cafb157..73088d81 100644
+--- a/src/layout/tile.rs
++++ b/src/layout/tile.rs
+@@ -19,9 +19,9 @@ use crate::animation::{Animation, Clock};
+ use crate::layout::SizingMode;
+ use crate::niri_render_elements;
+ use crate::render_helpers::background_effect::{BackgroundEffectElement, RenderParams};
++use crate::render_helpers::blur::BlurOptions;
+ use crate::render_helpers::border::BorderRenderElement;
+ use crate::render_helpers::clipped_surface::{ClippedSurfaceRenderElement, RoundedCornerDamage};
+-use crate::render_helpers::blur::BlurOptions;
+ use crate::render_helpers::damage::ExtraDamage;
+ use crate::render_helpers::framebuffer_effect::FramebufferEffect;
+ use crate::render_helpers::offscreen::{OffscreenBuffer, OffscreenRenderElement};
+@@ -1318,7 +1318,11 @@ impl<W: LayoutElement> Tile<W> {
+                     // Only the focused window's glass is lit and vivid; the others are
+                     // quieter frost, so focus reads at a glance.
+                     let blur = &self.options.blur;
+-                    let k = if self.border.is_active() { 1. } else { blur.border_inactive };
++                    let k = if self.border.is_active() {
++                        1.
++                    } else {
++                        blur.border_inactive
++                    };
+                     // Unfocused: as much less light as it is quieter, and below that, shade
+                     // (unlit frost of a bright sky is still bright).
+                     let light = blur.border_light * k - (1. - k) * 0.4;
+diff --git a/src/niri.rs b/src/niri.rs
+index deaa7c1f..6fc98d35 100644
+--- a/src/niri.rs
++++ b/src/niri.rs
+@@ -2000,9 +2000,7 @@ impl State {
+                 let mon = self.niri.layout.monitor_for_output(output)?;
+                 let scale = output.current_scale().fractional_scale();
+                 let visible = mon.visible_windows();
+-                let focused = visible
+-                    .iter()
+-                    .position(|(w, _)| Some(w.id()) == focus);
++                let focused = visible.iter().position(|(w, _)| Some(w.id()) == focus);
+                 let rects = visible
+                     .into_iter()
+                     .map(|(_, r)| r.to_physical_precise_round(scale))
+@@ -2045,10 +2043,11 @@ impl State {
+     }
+ 
+     pub fn confirm_screenshot(&mut self, write_to_disk: bool) {
+-        let ScreenshotUi::Open { path, .. } = &mut self.niri.screenshot_ui else {
++        if !self.niri.screenshot_ui.is_open() {
+             return;
+-        };
+-        let path = path.take();
++        }
++        // The folder chosen on the panel (`f`), unless a path was asked for.
++        let path = self.niri.screenshot_ui.take_save_path();
+ 
+         self.backend.with_primary_renderer(|renderer| {
+             match self.niri.screenshot_ui.capture(renderer) {
+@@ -2070,6 +2069,68 @@ impl State {
+         self.niri.queue_redraw_all();
+     }
+ 
++    /// The screenshot UI's `o`: the selection's text to the clipboard
++    /// (tesseract, then wl-copy), and the UI closes.
++    pub fn screenshot_ocr(&mut self) {
++        let shot = self
++            .backend
++            .with_primary_renderer(|renderer| self.niri.screenshot_ui.capture(renderer));
++        self.close_screenshot_ui();
++        let Some(Ok((size, pixels))) = shot else {
++            warn!("error capturing the screenshot for its text");
++            return;
++        };
++        thread::spawn(move || {
++            let dir = std::env::var_os("XDG_RUNTIME_DIR")
++                .map(PathBuf::from)
++                .unwrap_or_else(std::env::temp_dir);
++            let path = dir.join(format!("niri-ocr-{}.png", std::process::id()));
++            let written = std::fs::File::create(&path)
++                .map_err(anyhow::Error::from)
++                .and_then(|f| {
++                    crate::utils::write_png_rgba8(f, size.w as u32, size.h as u32, &pixels)
++                        .map_err(anyhow::Error::from)
++                });
++            if let Err(err) = written {
++                warn!("error writing the screenshot for its text: {err:?}");
++                return;
++            }
++            let res = std::process::Command::new("sh")
++                .arg("-c")
++                .arg(r#"tesseract "$0" - --psm 6 2>/dev/null | sed -e 's/[[:space:]]*$//' | wl-copy; rm -f "$0""#)
++                .arg(&path)
++                .status();
++            if let Err(err) = res {
++                warn!("error running tesseract: {err:?}");
++            }
++        });
++    }
++
++    /// The screenshot UI's `c`: the colour under the pointer (or the drawing
++    /// cursor) to the clipboard as #rrggbb, and the UI closes.
++    pub fn screenshot_pick_color(&mut self) {
++        let color = self
++            .backend
++            .with_primary_renderer(|renderer| self.niri.screenshot_ui.pick_color(renderer))
++            .flatten();
++        self.close_screenshot_ui();
++        if let Some(color) = color {
++            thread::spawn(move || {
++                if let Err(err) = std::process::Command::new("wl-copy").arg(&color).status() {
++                    warn!("error copying the colour: {err:?}");
++                }
++            });
++        }
++    }
++
++    fn close_screenshot_ui(&mut self) {
++        self.niri.screenshot_ui.close();
++        self.niri
++            .cursor_manager
++            .set_cursor_image(CursorImageStatus::default_named());
++        self.niri.queue_redraw_all();
++    }
++
+     pub fn store_unmap_snapshot(&mut self, window: &Window, output: Option<&Output>) {
+         // The unmapping tile may have an xray background, in which case we will render xray
+         // elements, so they need to be updated.
+@@ -4299,8 +4360,11 @@ impl Niri {
+ 
+         // If the screenshot UI is open, draw it.
+         if self.screenshot_ui.is_open() {
++            let target = ctx.target;
+             self.screenshot_ui
+-                .render_output(output, ctx.target, &mut |elem| push(elem.into()));
++                .render_output(ctx.as_gles().renderer, output, target, &mut |elem| {
++                    push(elem.into())
++                });
+ 
+             // Add the backdrop for outputs that were connected while the screenshot UI was open.
+             push(backdrop);
+diff --git a/src/protocols/foreign_toplevel.rs b/src/protocols/foreign_toplevel.rs
+index 11379169..a8eb248d 100644
+--- a/src/protocols/foreign_toplevel.rs
++++ b/src/protocols/foreign_toplevel.rs
+@@ -5,11 +5,13 @@ use std::sync::Arc;
+ use arrayvec::ArrayVec;
+ use smithay::output::Output;
+ use smithay::reexports::wayland_protocols::ext::foreign_toplevel_list::v1::server::{
+-    ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1}, ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
++    ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
++    ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
+ };
+ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
+ use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::{
+-    zwlr_foreign_toplevel_handle_v1::{self, ZwlrForeignToplevelHandleV1}, zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
++    zwlr_foreign_toplevel_handle_v1::{self, ZwlrForeignToplevelHandleV1},
++    zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
+ };
+ use smithay::reexports::wayland_server::backend::ClientId;
+ use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
+@@ -18,12 +20,12 @@ use smithay::reexports::wayland_server::{
+     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+ };
+ use smithay::wayland::shell::xdg::{
+-    ToplevelState, ToplevelStateSet, XdgToplevelSurfaceRoleAttributes
++    ToplevelState, ToplevelStateSet, XdgToplevelSurfaceRoleAttributes,
+ };
+ 
+ use crate::niri::State;
+-use crate::window::mapped::MappedId;
+ use crate::utils::with_toplevel_role_and_current;
++use crate::window::mapped::MappedId;
+ 
+ const EXT_LIST_VERSION: u32 = 1;
+ const WLR_MANAGEMENT_VERSION: u32 = 3;
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index f002211f..0ce68c48 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -94,8 +94,13 @@ struct HasGlass(std::sync::Mutex<bool>);
+ struct GlassObject(std::sync::Mutex<Option<LumenGlassSurfaceV1>>);
+ 
+ /// The glass object of a surface, if it has one (inside `with_states`).
+-pub fn glass_object(states: &smithay::wayland::compositor::SurfaceData) -> Option<LumenGlassSurfaceV1> {
+-    states.data_map.get::<GlassObject>().and_then(|g| g.0.lock().unwrap().clone())
++pub fn glass_object(
++    states: &smithay::wayland::compositor::SurfaceData,
++) -> Option<LumenGlassSurfaceV1> {
++    states
++        .data_map
++        .get::<GlassObject>()
++        .and_then(|g| g.0.lock().unwrap().clone())
+ }
+ 
+ pub struct LumenGlassManagerState;
+@@ -176,7 +181,9 @@ where
+                 }
+                 let glass = data_init.init(id, surface.downgrade());
+                 with_states(&surface, |states| {
+-                    let obj = states.data_map.get_or_insert_threadsafe(GlassObject::default);
++                    let obj = states
++                        .data_map
++                        .get_or_insert_threadsafe(GlassObject::default);
+                     *obj.0.lock().unwrap() = Some(glass);
+                 });
+             }
+diff --git a/src/render_helpers/framebuffer_effect.rs b/src/render_helpers/framebuffer_effect.rs
+index 4c5e4851..b9d4096e 100644
+--- a/src/render_helpers/framebuffer_effect.rs
++++ b/src/render_helpers/framebuffer_effect.rs
+@@ -185,7 +185,10 @@ impl FramebufferEffectElement {
+         let scale = self.scale as f64;
+         let area = out_size.to_f64();
+         let to_tex = |x: f64, y: f64| -> (i32, i32) {
+-            let phys = Point::<f64, Physical>::from(((self.geometry.loc.x + x) * scale, (self.geometry.loc.y + y) * scale));
++            let phys = Point::<f64, Physical>::from((
++                (self.geometry.loc.x + x) * scale,
++                (self.geometry.loc.y + y) * scale,
++            ));
+             let fb = transform.transform_point_in(phys, &area);
+             let tx = (fb.x - dst_fb.loc.x as f64) / dst_fb.size.w as f64 * tex_size.w as f64;
+             let ty = (fb.y - dst_fb.loc.y as f64) / dst_fb.size.h as f64 * tex_size.h as f64;
+@@ -196,8 +199,19 @@ impl FramebufferEffectElement {
+         };
+         let mut points = Vec::new();
+         for s in &glass.shapes {
+-            let (cx, cy, hx, hy) = ((s[0] + s[2] * 0.5) as f64, (s[1] + s[3] * 0.5) as f64, (s[2] * 0.3) as f64, (s[3] * 0.3) as f64);
+-            for (x, y) in [(cx, cy), (cx + hx, cy), (cx - hx, cy), (cx, cy + hy), (cx, cy - hy)] {
++            let (cx, cy, hx, hy) = (
++                (s[0] + s[2] * 0.5) as f64,
++                (s[1] + s[3] * 0.5) as f64,
++                (s[2] * 0.3) as f64,
++                (s[3] * 0.3) as f64,
++            );
++            for (x, y) in [
++                (cx, cy),
++                (cx + hx, cy),
++                (cx - hx, cy),
++                (cx, cy + hy),
++                (cx, cy - hy),
++            ] {
+                 points.push(to_tex(x, y));
+             }
+         }
+@@ -217,11 +231,25 @@ impl FramebufferEffectElement {
+             let mut fbo = 0;
+             gl.GenFramebuffers(1, &mut fbo as *mut _);
+             gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, fbo);
+-            gl.FramebufferTexture2D(ffi::READ_FRAMEBUFFER, ffi::COLOR_ATTACHMENT0, ffi::TEXTURE_2D, tex.tex_id(), 0);
++            gl.FramebufferTexture2D(
++                ffi::READ_FRAMEBUFFER,
++                ffi::COLOR_ATTACHMENT0,
++                ffi::TEXTURE_2D,
++                tex.tex_id(),
++                0,
++            );
+             let mut out = Vec::with_capacity(points.len());
+             for (x, y) in points {
+                 let mut px = [0u8; 4];
+-                gl.ReadPixels(*x, *y, 1, 1, ffi::RGBA, ffi::UNSIGNED_BYTE, px.as_mut_ptr().cast());
++                gl.ReadPixels(
++                    *x,
++                    *y,
++                    1,
++                    1,
++                    ffi::RGBA,
++                    ffi::UNSIGNED_BYTE,
++                    px.as_mut_ptr().cast(),
++                );
+                 out.extend_from_slice(&px);
+             }
+             gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, prev as u32);
+@@ -247,19 +275,42 @@ impl FramebufferEffectElement {
+             let mut fbo = 0;
+             gl.GenFramebuffers(1, &mut fbo as *mut _);
+             gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, fbo);
+-            gl.FramebufferTexture2D(ffi::READ_FRAMEBUFFER, ffi::COLOR_ATTACHMENT0, ffi::TEXTURE_2D, tex.tex_id(), 0);
++            gl.FramebufferTexture2D(
++                ffi::READ_FRAMEBUFFER,
++                ffi::COLOR_ATTACHMENT0,
++                ffi::TEXTURE_2D,
++                tex.tex_id(),
++                0,
++            );
+             let mut pbo = 0;
+             gl.GenBuffers(1, &mut pbo as *mut _);
+             gl.BindBuffer(ffi::PIXEL_PACK_BUFFER, pbo);
+-            gl.BufferData(ffi::PIXEL_PACK_BUFFER, (points.len() * 4) as isize, std::ptr::null(), ffi::STREAM_READ);
++            gl.BufferData(
++                ffi::PIXEL_PACK_BUFFER,
++                (points.len() * 4) as isize,
++                std::ptr::null(),
++                ffi::STREAM_READ,
++            );
+             for (i, (x, y)) in points.iter().enumerate() {
+-                gl.ReadPixels(*x, *y, 1, 1, ffi::RGBA, ffi::UNSIGNED_BYTE, (i * 4) as *mut _);
++                gl.ReadPixels(
++                    *x,
++                    *y,
++                    1,
++                    1,
++                    ffi::RGBA,
++                    ffi::UNSIGNED_BYTE,
++                    (i * 4) as *mut _,
++                );
+             }
+             gl.BindBuffer(ffi::PIXEL_PACK_BUFFER, 0);
+             gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, prev as u32);
+             gl.DeleteFramebuffers(1, &mut fbo as *mut _);
+             let fence = gl.FenceSync(ffi::SYNC_GPU_COMMANDS_COMPLETE, 0);
+-            Some(Readback { pbo, fence: fence as usize, points: points.len() })
++            Some(Readback {
++                pbo,
++                fence: fence as usize,
++                points: points.len(),
++            })
+         })
+     }
+ 
+@@ -545,7 +596,10 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+ 
+             inner.dst_fb = dst;
+             if let Some(share) = self.glass.as_ref().and_then(|g| g.publish.as_ref()) {
+-                *share.lock().unwrap() = Some(SharpBackdrop { tex: framebuffer.clone(), dst });
++                *share.lock().unwrap() = Some(SharpBackdrop {
++                    tex: framebuffer.clone(),
++                    dst,
++                });
+             }
+ 
+             // If blur is off, use the unblurred texture.
+@@ -729,8 +783,16 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+                 gl.BindTexture(ffi::TEXTURE_2D, id);
+                 gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+                 gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+-                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as i32);
+-                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as i32);
++                gl.TexParameteri(
++                    ffi::TEXTURE_2D,
++                    ffi::TEXTURE_WRAP_S,
++                    ffi::CLAMP_TO_EDGE as i32,
++                );
++                gl.TexParameteri(
++                    ffi::TEXTURE_2D,
++                    ffi::TEXTURE_WRAP_T,
++                    ffi::CLAMP_TO_EDGE as i32,
++                );
+                 gl.ActiveTexture(ffi::TEXTURE0);
+             })?;
+         }
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 187323f1..1747bb2a 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -258,165 +258,165 @@ impl Glass {
+         object: Option<LumenGlassSurfaceV1>,
+         push: &mut dyn FnMut(BackgroundEffectElement),
+     ) {
+-            // Frost is a dial, not a switch: it scales the blur's passes and offset
+-            // down to a light soften (the shapes behind stay recognisable, so the
+-            // lensing shows) and up to the window blur. Always a real blur of that
+-            // strength — never a half-mix of crisp and frosted, which ghosts.
+-            let frosted = !blur_config.off && state.frost > 0.02;
+-            let blur = frosted.then(|| {
+-                let f = state.frost.clamp(0., 1.);
+-                let mut options = BlurOptions::from(blur_config);
+-                options.passes = ((options.passes as f32 * (0.5 + 0.5 * f)).round() as u8).max(1);
+-                options.offset *= 0.25 + 0.75 * f as f64;
+-                options
+-            });
+-            let noise = if frosted {
+-                blur_config.noise as f32
+-            } else {
+-                0.
+-            };
++        // Frost is a dial, not a switch: it scales the blur's passes and offset
++        // down to a light soften (the shapes behind stay recognisable, so the
++        // lensing shows) and up to the window blur. Always a real blur of that
++        // strength — never a half-mix of crisp and frosted, which ghosts.
++        let frosted = !blur_config.off && state.frost > 0.02;
++        let blur = frosted.then(|| {
++            let f = state.frost.clamp(0., 1.);
++            let mut options = BlurOptions::from(blur_config);
++            options.passes = ((options.passes as f32 * (0.5 + 0.5 * f)).round() as u8).max(1);
++            options.offset *= 0.25 + 0.75 * f as f64;
++            options
++        });
++        let noise = if frosted {
++            blur_config.noise as f32
++        } else {
++            0.
++        };
+ 
+-            let mut glass = self.0.lock().unwrap();
+-            let glass = &mut *glass;
+-            if glass.last.as_ref() != Some(state) {
+-                for l in &mut glass.layers {
+-                    l.effect.damage();
+-                }
+-                let old = glass.last.as_ref().map_or(&[][..], |l| &l.shapes[..]);
+-                glass.lights = carry_lights(old, &glass.lights, &state.shapes);
+-                glass.last = Some(state.clone());
++        let mut glass = self.0.lock().unwrap();
++        let glass = &mut *glass;
++        if glass.last.as_ref() != Some(state) {
++            for l in &mut glass.layers {
++                l.effect.damage();
+             }
++            let old = glass.last.as_ref().map_or(&[][..], |l| &l.shapes[..]);
++            glass.lights = carry_lights(old, &glass.lights, &state.shapes);
++            glass.last = Some(state.clone());
++        }
++
++        if glass.lights.len() != state.shapes.len() {
++            glass.lights = vec![ShapeLight::new(); state.shapes.len()];
++        }
++        let now = Instant::now();
+ 
+-            if glass.lights.len() != state.shapes.len() {
+-                glass.lights = vec![ShapeLight::new(); state.shapes.len()];
++        // Layer 1 first: pushed first, it is drawn on top (and captures layer 0).
++        for layer in [1u8, 0] {
++            // At most the shader's 32 per layer.
++            let idx: Vec<usize> = (0..state.shapes.len())
++                .filter(|&i| state.shapes[i].layer == layer)
++                .take(32)
++                .collect();
++            if idx.is_empty() {
++                continue;
+             }
+-            let now = Instant::now();
++            let lay = &mut glass.layers[layer as usize];
+ 
+-            // Layer 1 first: pushed first, it is drawn on top (and captures layer 0).
+-            for layer in [1u8, 0] {
+-                // At most the shader's 32 per layer.
+-                let idx: Vec<usize> = (0..state.shapes.len())
+-                    .filter(|&i| state.shapes[i].layer == layer)
+-                    .take(32)
+-                    .collect();
+-                if idx.is_empty() {
+-                    continue;
+-                }
+-                let lay = &mut glass.layers[layer as usize];
++            // The layer's shapes' bounding box, captured wider (see EDGE_PAD).
++            let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
++            for &i in &idx {
++                let s = &state.shapes[i];
++                x0 = x0.min(s.x);
++                y0 = y0.min(s.y);
++                x1 = x1.max(s.x + s.w);
++                y1 = y1.max(s.y + s.h);
++            }
++            let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
++            let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
++            let geometry = Rectangle::new(
++                location + Point::from((x0 as f64, y0 as f64)),
++                Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
++            );
+ 
+-                // The layer's shapes' bounding box, captured wider (see EDGE_PAD).
+-                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+-                for &i in &idx {
+-                    let s = &state.shapes[i];
+-                    x0 = x0.min(s.x);
+-                    y0 = y0.min(s.y);
+-                    x1 = x1.max(s.x + s.w);
+-                    y1 = y1.max(s.y + s.h);
++            // Light or dark, per shape, from this layer's latest reading.
++            let (lum, reading) = {
++                let m = lay.measure.lock().unwrap();
++                (m.lum.clone(), m.last)
++            };
++            // Decide only on a new reading (not once per frame).
++            let fresh = reading.is_some() && reading != lay.seen && lum.len() == idx.len();
++            lay.seen = reading;
++            let mut animating = false;
++            let mut shapes: Vec<[f32; 16]> = Vec::with_capacity(idx.len());
++            for (k, &i) in idx.iter().enumerate() {
++                let s = &state.shapes[i];
++                // Glass on glass is light or dark as the glass it sits on: no
++                // reading or decision of its own, so a row of controls never
++                // splits into light and dark ones, nor flickers by itself.
++                if layer >= 1 {
++                    let parent = under(&state.shapes, s);
++                    let (v, moving) = parent.map_or((0., false), |p| {
++                        let l = &glass.lights[p];
++                        let v = l.value(now);
++                        (v, v != if l.light { 1. } else { 0. })
++                    });
++                    animating |= moving;
++                    let v = if object.is_some() { v } else { v * 0.8 };
++                    shapes.push(packed(s, x0, y0, v, layer));
++                    continue;
+                 }
+-                let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
+-                let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
+-                let geometry = Rectangle::new(
+-                    location + Point::from((x0 as f64, y0 as f64)),
+-                    Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
+-                );
+-
+-                // Light or dark, per shape, from this layer's latest reading.
+-                let (lum, reading) = {
+-                    let m = lay.measure.lock().unwrap();
+-                    (m.lum.clone(), m.last)
+-                };
+-                // Decide only on a new reading (not once per frame).
+-                let fresh = reading.is_some() && reading != lay.seen && lum.len() == idx.len();
+-                lay.seen = reading;
+-                let mut animating = false;
+-                let mut shapes: Vec<[f32; 16]> = Vec::with_capacity(idx.len());
+-                for (k, &i) in idx.iter().enumerate() {
+-                    let s = &state.shapes[i];
+-                    // Glass on glass is light or dark as the glass it sits on: no
+-                    // reading or decision of its own, so a row of controls never
+-                    // splits into light and dark ones, nor flickers by itself.
+-                    if layer >= 1 {
+-                        let parent = under(&state.shapes, s);
+-                        let (v, moving) = parent.map_or((0., false), |p| {
+-                            let l = &glass.lights[p];
+-                            let v = l.value(now);
+-                            (v, v != if l.light { 1. } else { 0. })
+-                        });
+-                        animating |= moving;
+-                        let v = if object.is_some() { v } else { v * 0.8 };
+-                        shapes.push(packed(s, x0, y0, v, layer));
+-                        continue;
+-                    }
+-                    let l = &mut glass.lights[i];
+-                    if fresh {
+-                        let b = lum[k];
+-                        let want = if l.light { b > LIGHT_OFF } else { b > LIGHT_ON };
+-                        if !l.known {
+-                            // The first reading: as it is, no fade on appearing.
+-                            l.known = true;
++                let l = &mut glass.lights[i];
++                if fresh {
++                    let b = lum[k];
++                    let want = if l.light { b > LIGHT_OFF } else { b > LIGHT_ON };
++                    if !l.known {
++                        // The first reading: as it is, no fade on appearing.
++                        l.known = true;
++                        l.light = want;
++                        l.from = if want { 1. } else { 0. };
++                        if let Some(o) = &object {
++                            o.appearance(i as u32, want as u32);
++                        }
++                    } else if want != l.light {
++                        l.against += 1;
++                        if l.against >= SETTLE {
++                            l.against = 0;
++                            l.from = l.value(now);
+                             l.light = want;
+-                            l.from = if want { 1. } else { 0. };
++                            l.start = now;
+                             if let Some(o) = &object {
+                                 o.appearance(i as u32, want as u32);
+                             }
+-                        } else if want != l.light {
+-                            l.against += 1;
+-                            if l.against >= SETTLE {
+-                                l.against = 0;
+-                                l.from = l.value(now);
+-                                l.light = want;
+-                                l.start = now;
+-                                if let Some(o) = &object {
+-                                    o.appearance(i as u32, want as u32);
+-                                }
+-                            }
+-                        } else {
+-                            l.against = 0;
+                         }
++                    } else {
++                        l.against = 0;
+                     }
+-                    let v = l.value(now);
+-                    animating |= v != if l.light { 1. } else { 0. };
+-                    // A client that can't switch its text keeps light glass at 80%,
+-                    // so white text on it still reads.
+-                    let v = if object.is_some() { v } else { v * 0.8 };
+-                    shapes.push(packed(s, x0, y0, v, layer));
+-                }
+-                if animating {
+-                    lay.effect.damage();
+                 }
+-
+-                let params = RenderParams {
+-                    geometry,
+-                    subregion: None,
+-                    clip: Some((geometry, CornerRadius::default())),
+-                    scale,
+-                };
+-                // Layer 1 captures layer 0's glass, already frosted: not blurred a
+-                // second time (one light pass only made it blocky).
+-                let blur = if layer >= 1 { None } else { blur };
+-                let elem = lay
+-                    .effect
+-                    .render(
+-                        ns,
+-                        params,
+-                        blur,
+-                        if layer >= 1 { 0. } else { noise },
+-                        state.saturation,
+-                    )
+-                    .with_glass(GlassDraw {
+-                        shapes,
+-                        // Controls side by side stay apart: only the panels melt.
+-                        merge: if layer >= 1 { 0. } else { state.merge },
+-                        frost: state.frost,
+-                        // Layer 1 follows layer 0: nothing to read back.
+-                        measure: (layer == 0).then(|| lay.measure.clone()),
+-                        publish: (layer == 0).then(|| glass.sharp.clone()),
+-                        // Only when one of them asks: otherwise as before.
+-                        under: (layer >= 1 && idx.iter().any(|&i| state.shapes[i].sharp))
+-                            .then(|| glass.sharp.clone()),
+-                    });
+-                push(elem.into());
++                let v = l.value(now);
++                animating |= v != if l.light { 1. } else { 0. };
++                // A client that can't switch its text keeps light glass at 80%,
++                // so white text on it still reads.
++                let v = if object.is_some() { v } else { v * 0.8 };
++                shapes.push(packed(s, x0, y0, v, layer));
++            }
++            if animating {
++                lay.effect.damage();
+             }
++
++            let params = RenderParams {
++                geometry,
++                subregion: None,
++                clip: Some((geometry, CornerRadius::default())),
++                scale,
++            };
++            // Layer 1 captures layer 0's glass, already frosted: not blurred a
++            // second time (one light pass only made it blocky).
++            let blur = if layer >= 1 { None } else { blur };
++            let elem = lay
++                .effect
++                .render(
++                    ns,
++                    params,
++                    blur,
++                    if layer >= 1 { 0. } else { noise },
++                    state.saturation,
++                )
++                .with_glass(GlassDraw {
++                    shapes,
++                    // Controls side by side stay apart: only the panels melt.
++                    merge: if layer >= 1 { 0. } else { state.merge },
++                    frost: state.frost,
++                    // Layer 1 follows layer 0: nothing to read back.
++                    measure: (layer == 0).then(|| lay.measure.clone()),
++                    publish: (layer == 0).then(|| glass.sharp.clone()),
++                    // Only when one of them asks: otherwise as before.
++                    under: (layer >= 1 && idx.iter().any(|&i| state.shapes[i].sharp))
++                        .then(|| glass.sharp.clone()),
++                });
++            push(elem.into());
++        }
+     }
+ }
+ 
+diff --git a/src/render_helpers/xray.rs b/src/render_helpers/xray.rs
+index 3de13e33..f6b4badd 100644
+--- a/src/render_helpers/xray.rs
++++ b/src/render_helpers/xray.rs
+@@ -110,7 +110,9 @@ impl Xray {
+         saturation: f32,
+         push: &mut dyn FnMut(XrayElement),
+     ) {
+-        self.render_ring(ctx, params, xray_pos, blur, noise, saturation, 0., 0., 0., push);
++        self.render_ring(
++            ctx, params, xray_pos, blur, noise, saturation, 0., 0., 0., push,
++        );
+     }
+ 
+     /// Like `render`, but only a ring `ring_width` wide along the clip's edge: the backdrop
+diff --git a/src/ui/mod.rs b/src/ui/mod.rs
+index c194a247..5947b12a 100644
+--- a/src/ui/mod.rs
++++ b/src/ui/mod.rs
+@@ -3,4 +3,5 @@ pub mod exit_confirm_dialog;
+ pub mod hotkey_overlay;
+ pub mod mru;
+ pub mod screen_transition;
++pub mod screenshot_draw;
+ pub mod screenshot_ui;
+diff --git a/src/ui/screenshot_draw.rs b/src/ui/screenshot_draw.rs
+new file mode 100644
+index 00000000..34f7387c
+--- /dev/null
++++ b/src/ui/screenshot_draw.rs
+@@ -0,0 +1,648 @@
++//! Drawing on a screenshot before it is taken: a pen, straight lines, arrows,
++//! boxes, ovals, a highlighter, text and redaction boxes, by mouse or by vim
++//! keys (hjkl move a cursor, `v` starts and ends a shape, `i` types).
++//!
++//! Marks are kept from the selection's corner in logical px, so they go with
++//! the selection, and are drawn with cairo over the frozen screen.
++
++use std::f64::consts::{FRAC_PI_2, PI, TAU};
++
++use pango::FontDescription;
++use pangocairo::cairo;
++use smithay::input::keyboard::Keysym;
++use smithay::utils::{Logical, Point, Size};
++
++/// White, black, red, orange, yellow, green, blue, purple: keys 1–8.
++pub const COLORS: [(f64, f64, f64); 8] = [
++    (0.97, 0.97, 0.98),
++    (0.07, 0.07, 0.08),
++    (1.0, 0.27, 0.29),
++    (1.0, 0.58, 0.16),
++    (1.0, 0.84, 0.20),
++    (0.24, 0.82, 0.44),
++    (0.27, 0.56, 1.0),
++    (0.70, 0.46, 1.0),
++];
++/// Stroke widths, logical px: `[` and `]` step through them.
++pub const WIDTHS: [f64; 5] = [2., 4., 6., 10., 16.];
++const TEXT_SIZES: [f64; 5] = [14., 18., 24., 32., 44.];
++const TEXT_FONT: &str = "SF Pro Display Semibold";
++
++/// Cursor steps: hjkl, with Shift, with Ctrl.
++const STEP: f64 = 10.;
++const STEP_BIG: f64 = 50.;
++const STEP_FINE: f64 = 1.;
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Tool {
++    Pen,
++    Line,
++    Arrow,
++    Rect,
++    Oval,
++    Marker,
++    Text,
++    Redact,
++}
++
++impl Tool {
++    pub const ALL: [Tool; 8] = [
++        Tool::Pen,
++        Tool::Line,
++        Tool::Arrow,
++        Tool::Rect,
++        Tool::Oval,
++        Tool::Marker,
++        Tool::Text,
++        Tool::Redact,
++    ];
++
++    pub fn key(self) -> &'static str {
++        match self {
++            Tool::Pen => "p",
++            Tool::Line => "s",
++            Tool::Arrow => "a",
++            Tool::Rect => "r",
++            Tool::Oval => "o",
++            Tool::Marker => "m",
++            Tool::Text => "i",
++            Tool::Redact => "x",
++        }
++    }
++
++    pub fn index(self) -> usize {
++        Self::ALL.iter().position(|t| *t == self).unwrap()
++    }
++}
++
++#[derive(Debug, Clone)]
++pub struct Mark {
++    pub tool: Tool,
++    pub color: usize,
++    pub width: usize,
++    /// The pen's and highlighter's path; for the rest, from and to.
++    pub points: Vec<Point<f64, Logical>>,
++    pub text: String,
++}
++
++/// What a key did, for the screenshot UI to act on.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Outcome {
++    /// Nothing changed.
++    None,
++    /// Something to draw again.
++    Changed,
++    /// Back to selecting (marks are kept).
++    Leave,
++}
++
++pub struct Draw {
++    /// Drawing (keys and the mouse draw) rather than selecting.
++    pub active: bool,
++    pub marks: Vec<Mark>,
++    redo: Vec<Mark>,
++    pub tool: Tool,
++    pub color: usize,
++    pub width: usize,
++    /// The keyboard's cursor, from the selection's corner.
++    pub cursor: Point<f64, Logical>,
++    /// A shape on its way: from where `v` started it, or a mouse drag.
++    pub pending: Option<Mark>,
++    /// The pending shape follows the mouse (not the cursor).
++    pub mouse: bool,
++    /// Text being typed (insert mode).
++    pub typing: Option<Mark>,
++    /// One more for every change: the drawing is made again when it moves on.
++    pub version: u64,
++}
++
++impl Draw {
++    pub fn new() -> Self {
++        Self {
++            active: false,
++            marks: Vec::new(),
++            redo: Vec::new(),
++            tool: Tool::Arrow,
++            color: 2,
++            width: 2,
++            cursor: Point::from((0., 0.)),
++            pending: None,
++            mouse: false,
++            typing: None,
++            version: 0,
++        }
++    }
++
++    fn changed(&mut self) -> Outcome {
++        self.version += 1;
++        Outcome::Changed
++    }
++
++    pub fn has_marks(&self) -> bool {
++        !self.marks.is_empty() || self.typing.as_ref().is_some_and(|t| !t.text.is_empty())
++    }
++
++    fn mark(&self, at: Point<f64, Logical>) -> Mark {
++        Mark {
++            tool: self.tool,
++            color: self.color,
++            width: self.width,
++            points: vec![at, at],
++            text: String::new(),
++        }
++    }
++
++    fn push(&mut self, mark: Mark) {
++        self.marks.push(mark);
++        self.redo.clear();
++    }
++
++    fn commit_typing(&mut self) {
++        if let Some(t) = self.typing.take() {
++            if !t.text.is_empty() {
++                self.push(t);
++            }
++        }
++    }
++
++    fn commit_pending(&mut self) {
++        if let Some(p) = self.pending.take() {
++            let a = p.points[0];
++            let b = *p.points.last().unwrap();
++            // A click without a drag draws nothing (but a pen's dot).
++            if p.tool == Tool::Pen
++                || p.tool == Tool::Marker
++                || (a - b).x.abs() + (a - b).y.abs() > 2.
++            {
++                self.push(p);
++            }
++        }
++        self.mouse = false;
++    }
++
++    /// Starts typing at `at` (the text tool's `v`, `i`, or a click).
++    fn start_typing(&mut self, at: Point<f64, Logical>) {
++        self.commit_typing();
++        self.pending = None;
++        self.tool = Tool::Text;
++        let mut mark = self.mark(at);
++        mark.points.truncate(1);
++        self.typing = Some(mark);
++    }
++
++    /// Whether the screenshot UI should hand this key to the drawing (rather
++    /// than take it as save, copy or cancel).
++    pub fn wants(&self, raw: Keysym, ctrl: bool) -> bool {
++        if !self.active {
++            return false;
++        }
++        if self.typing.is_some() {
++            return true;
++        }
++        !matches!(
++            raw,
++            Keysym::Return | Keysym::KP_Enter | Keysym::space | Keysym::y | Keysym::q
++        ) && !(ctrl && raw == Keysym::c)
++    }
++
++    pub fn key(
++        &mut self,
++        raw: Keysym,
++        ch: Option<char>,
++        shift: bool,
++        ctrl: bool,
++        bounds: Size<f64, Logical>,
++    ) -> Outcome {
++        // Typing: everything is text, but Enter and Esc finish it.
++        if let Some(t) = &mut self.typing {
++            match raw {
++                Keysym::Escape | Keysym::Return | Keysym::KP_Enter => self.commit_typing(),
++                Keysym::BackSpace => {
++                    t.text.pop();
++                }
++                _ => match ch.filter(|c| !c.is_control()) {
++                    Some(c) if !ctrl => t.text.push(c),
++                    _ => return Outcome::None,
++                },
++            }
++            return self.changed();
++        }
++
++        let step = if ctrl {
++            STEP_FINE
++        } else if shift {
++            STEP_BIG
++        } else {
++            STEP
++        };
++        let mv = |dx: f64, dy: f64| Point::<f64, Logical>::from((dx * step, dy * step));
++        let delta = match raw {
++            Keysym::h | Keysym::H => Some(mv(-1., 0.)),
++            Keysym::l | Keysym::L => Some(mv(1., 0.)),
++            Keysym::k | Keysym::K => Some(mv(0., -1.)),
++            Keysym::j | Keysym::J => Some(mv(0., 1.)),
++            _ => None,
++        };
++        if let Some(d) = delta {
++            let c = self.cursor + d;
++            self.cursor = Point::from((c.x.clamp(0., bounds.w), c.y.clamp(0., bounds.h)));
++            if let Some(p) = &mut self.pending {
++                if matches!(p.tool, Tool::Pen | Tool::Marker) {
++                    p.points.push(self.cursor);
++                } else {
++                    *p.points.last_mut().unwrap() = self.cursor;
++                }
++            }
++            return self.changed();
++        }
++
++        if ctrl {
++            return match raw {
++                Keysym::r => self.redo(),
++                _ => Outcome::None,
++            };
++        }
++
++        match raw {
++            Keysym::Escape => {
++                if self.pending.take().is_some() {
++                    self.mouse = false;
++                    return self.changed();
++                }
++                self.active = false;
++                self.version += 1;
++                Outcome::Leave
++            }
++            Keysym::d => {
++                self.commit_pending();
++                self.active = false;
++                self.version += 1;
++                Outcome::Leave
++            }
++            // Start a shape at the cursor; again, finish it there.
++            Keysym::v => {
++                if self.pending.is_some() {
++                    self.commit_pending();
++                } else if self.tool == Tool::Text {
++                    self.start_typing(self.cursor);
++                } else {
++                    self.pending = Some(self.mark(self.cursor));
++                    self.mouse = false;
++                }
++                self.changed()
++            }
++            Keysym::i | Keysym::t => {
++                self.start_typing(self.cursor);
++                self.changed()
++            }
++            Keysym::u => self.undo(),
++            Keysym::bracketleft | Keysym::minus => {
++                self.width = self.width.saturating_sub(1);
++                self.restyle()
++            }
++            Keysym::bracketright | Keysym::equal | Keysym::plus => {
++                self.width = (self.width + 1).min(WIDTHS.len() - 1);
++                self.restyle()
++            }
++            _ => {
++                if let Some(tool) = Tool::ALL.into_iter().find(|t| ch == t.key().chars().next()) {
++                    self.set_tool(tool);
++                    return self.changed();
++                }
++                if let Some(n) = ch.and_then(|c| c.to_digit(10)) {
++                    if (1..=COLORS.len() as u32).contains(&n) {
++                        self.color = n as usize - 1;
++                        return self.restyle();
++                    }
++                }
++                Outcome::None
++            }
++        }
++    }
++
++    pub fn set_tool(&mut self, tool: Tool) {
++        self.commit_pending();
++        self.commit_typing();
++        self.tool = tool;
++        self.version += 1;
++    }
++
++    pub fn set_color(&mut self, color: usize) {
++        self.color = color;
++        self.restyle();
++    }
++
++    pub fn cycle_width(&mut self) {
++        self.width = (self.width + 1) % WIDTHS.len();
++        self.restyle();
++    }
++
++    /// A new colour or width also goes to what is being drawn or typed.
++    fn restyle(&mut self) -> Outcome {
++        let (color, width) = (self.color, self.width);
++        for m in self.pending.iter_mut().chain(self.typing.iter_mut()) {
++            m.color = color;
++            m.width = width;
++        }
++        self.changed()
++    }
++
++    fn undo(&mut self) -> Outcome {
++        if self.pending.take().is_some() {
++            self.mouse = false;
++            return self.changed();
++        }
++        match self.marks.pop() {
++            Some(m) => {
++                self.redo.push(m);
++                self.changed()
++            }
++            None => Outcome::None,
++        }
++    }
++
++    fn redo(&mut self) -> Outcome {
++        match self.redo.pop() {
++            Some(m) => {
++                self.marks.push(m);
++                self.changed()
++            }
++            None => Outcome::None,
++        }
++    }
++
++    /// The mouse went down at `at` inside the selection.
++    pub fn press(&mut self, at: Point<f64, Logical>) {
++        self.cursor = at;
++        if self.tool == Tool::Text {
++            self.start_typing(at);
++        } else {
++            self.commit_typing();
++            self.pending = Some(self.mark(at));
++            self.mouse = true;
++        }
++        self.version += 1;
++    }
++
++    pub fn motion(&mut self, at: Point<f64, Logical>) {
++        if !self.mouse {
++            return;
++        }
++        self.cursor = at;
++        if let Some(p) = &mut self.pending {
++            if matches!(p.tool, Tool::Pen | Tool::Marker) {
++                p.points.push(at);
++            } else {
++                *p.points.last_mut().unwrap() = at;
++            }
++            self.version += 1;
++        }
++    }
++
++    pub fn release(&mut self) {
++        if self.mouse {
++            self.commit_pending();
++            self.version += 1;
++        }
++    }
++
++    /// Draws the marks (and what is on its way) from the selection's corner,
++    /// in logical px; with `live`, the cursor and the text caret too.
++    pub fn render(&self, cr: &cairo::Context, live: bool) -> Result<(), cairo::Error> {
++        for m in &self.marks {
++            render_mark(cr, m, false)?;
++        }
++        if live {
++            if let Some(p) = &self.pending {
++                render_mark(cr, p, false)?;
++            }
++        }
++        if let Some(t) = &self.typing {
++            render_mark(cr, t, live)?;
++        }
++        if live && self.active && self.typing.is_none() && !self.mouse {
++            render_cursor(cr, self.cursor, COLORS[self.color])?;
++        }
++        Ok(())
++    }
++}
++
++impl Default for Draw {
++    fn default() -> Self {
++        Self::new()
++    }
++}
++
++fn render_mark(cr: &cairo::Context, m: &Mark, caret: bool) -> Result<(), cairo::Error> {
++    let (r, g, b) = COLORS[m.color];
++    let w = WIDTHS[m.width];
++    cr.save()?;
++    cr.set_line_cap(cairo::LineCap::Round);
++    cr.set_line_join(cairo::LineJoin::Round);
++    cr.set_source_rgb(r, g, b);
++    cr.set_line_width(w);
++    let a = m.points[0];
++    let z = *m.points.last().unwrap();
++    let (x0, y0, x1, y1) = (a.x.min(z.x), a.y.min(z.y), a.x.max(z.x), a.y.max(z.y));
++    match m.tool {
++        Tool::Pen => {
++            path(cr, &m.points);
++            cr.stroke()?;
++        }
++        Tool::Marker => {
++            // See-through, and even where the stroke crosses itself.
++            cr.push_group();
++            cr.set_line_width(w * 3. + 6.);
++            cr.set_line_cap(cairo::LineCap::Square);
++            path(cr, &m.points);
++            cr.stroke()?;
++            cr.pop_group_to_source()?;
++            cr.paint_with_alpha(0.4)?;
++        }
++        Tool::Line => {
++            cr.move_to(a.x, a.y);
++            cr.line_to(z.x, z.y);
++            cr.stroke()?;
++        }
++        Tool::Arrow => {
++            let angle = (z.y - a.y).atan2(z.x - a.x);
++            let head = (w * 3. + 8.).min(((z - a).x.hypot((z - a).y)) * 0.6);
++            // The shaft stops inside the head, so its round end doesn't poke out.
++            let back = Point::<f64, Logical>::from((
++                z.x - angle.cos() * head * 0.6,
++                z.y - angle.sin() * head * 0.6,
++            ));
++            cr.move_to(a.x, a.y);
++            cr.line_to(back.x, back.y);
++            cr.stroke()?;
++            let spread = 0.45;
++            cr.move_to(z.x, z.y);
++            cr.line_to(
++                z.x - head * (angle - spread).cos(),
++                z.y - head * (angle - spread).sin(),
++            );
++            cr.line_to(
++                z.x - head * (angle + spread).cos(),
++                z.y - head * (angle + spread).sin(),
++            );
++            cr.close_path();
++            cr.fill_preserve()?;
++            cr.set_line_width(w.min(4.));
++            cr.stroke()?;
++        }
++        Tool::Rect => {
++            cr.rectangle(x0, y0, x1 - x0, y1 - y0);
++            cr.stroke()?;
++        }
++        Tool::Oval => {
++            let (cx, cy) = ((x0 + x1) / 2., (y0 + y1) / 2.);
++            let (rx, ry) = (((x1 - x0) / 2.).max(0.5), ((y1 - y0) / 2.).max(0.5));
++            cr.save()?;
++            cr.translate(cx, cy);
++            cr.scale(rx, ry);
++            cr.arc(0., 0., 1., 0., TAU);
++            cr.restore()?;
++            cr.stroke()?;
++        }
++        Tool::Redact => {
++            cr.rectangle(x0, y0, x1 - x0, y1 - y0);
++            cr.fill()?;
++        }
++        Tool::Text => {
++            let layout = pangocairo::functions::create_layout(cr);
++            let mut font = FontDescription::from_string(TEXT_FONT);
++            font.set_absolute_size(TEXT_SIZES[m.width] * f64::from(pango::SCALE));
++            layout.set_font_description(Some(&font));
++            layout.set_text(&m.text);
++            // A soft dark (or light, for dark ink) halo keeps it readable on anything.
++            let halo = if r + g + b < 0.9 { 1. } else { 0. };
++            cr.move_to(a.x, a.y);
++            pangocairo::functions::layout_path(cr, &layout);
++            cr.set_source_rgba(halo, halo, halo, 0.45);
++            cr.set_line_width(3.);
++            cr.stroke()?;
++            cr.move_to(a.x, a.y);
++            cr.set_source_rgb(r, g, b);
++            pangocairo::functions::show_layout(cr, &layout);
++            if caret {
++                let (_, logical) = layout.pixel_extents();
++                let h = TEXT_SIZES[m.width] * 1.2;
++                let line = m.text.rsplit('\n').next().unwrap_or("");
++                let x = if line.is_empty() && !m.text.is_empty() {
++                    0.
++                } else {
++                    f64::from(logical.width())
++                };
++                cr.rectangle(
++                    a.x + x + 1.,
++                    a.y + f64::from(logical.height()).max(h) - h,
++                    2.,
++                    h,
++                );
++                cr.fill()?;
++            }
++        }
++    }
++    cr.restore()
++}
++
++fn path(cr: &cairo::Context, points: &[Point<f64, Logical>]) {
++    let p = points[0];
++    cr.move_to(p.x, p.y);
++    if points.len() == 1 || points.iter().all(|q| *q == p) {
++        // A dot.
++        cr.line_to(p.x + 0.01, p.y);
++    }
++    for q in &points[1..] {
++        cr.line_to(q.x, q.y);
++    }
++}
++
++/// The keyboard's cursor: a crosshair in the colour it draws with.
++fn render_cursor(
++    cr: &cairo::Context,
++    at: Point<f64, Logical>,
++    (r, g, b): (f64, f64, f64),
++) -> Result<(), cairo::Error> {
++    cr.save()?;
++    for (width, alpha, shade) in [(3.5, 0.55, 0.), (1.5, 1., 1.)] {
++        cr.set_line_width(width);
++        if shade == 0. {
++            cr.set_source_rgba(0., 0., 0., alpha);
++        } else {
++            cr.set_source_rgb(r, g, b);
++        }
++        for k in 0..4 {
++            let a = f64::from(k) * FRAC_PI_2;
++            cr.move_to(at.x + 5. * a.cos(), at.y + 5. * a.sin());
++            cr.line_to(at.x + 12. * a.cos(), at.y + 12. * a.sin());
++        }
++        cr.stroke()?;
++    }
++    cr.arc(at.x, at.y, 2., 0., 2. * PI);
++    cr.set_source_rgb(r, g, b);
++    cr.fill()?;
++    cr.restore()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn bounds() -> Size<f64, Logical> {
++        Size::from((400., 300.))
++    }
++
++    #[test]
++    fn keyboard_arrow() {
++        let mut d = Draw::new();
++        d.active = true;
++        d.set_tool(Tool::Arrow);
++        d.key(Keysym::v, Some('v'), false, false, bounds());
++        d.key(Keysym::L, Some('L'), true, false, bounds());
++        d.key(Keysym::j, Some('j'), false, false, bounds());
++        d.key(Keysym::v, Some('v'), false, false, bounds());
++        assert_eq!(d.marks.len(), 1);
++        assert_eq!(*d.marks[0].points.last().unwrap(), Point::from((50., 10.)));
++        d.key(Keysym::u, Some('u'), false, false, bounds());
++        assert!(d.marks.is_empty());
++        d.key(Keysym::r, Some('r'), false, true, bounds());
++        assert_eq!(d.marks.len(), 1);
++    }
++
++    #[test]
++    fn typing_takes_every_key() {
++        let mut d = Draw::new();
++        d.active = true;
++        d.key(Keysym::i, Some('i'), false, false, bounds());
++        assert!(d.wants(Keysym::y, false));
++        for c in "Hi y!".chars() {
++            d.key(Keysym::a, Some(c), false, false, bounds());
++        }
++        d.key(Keysym::BackSpace, None, false, false, bounds());
++        d.key(Keysym::Return, None, false, false, bounds());
++        assert_eq!(d.marks[0].text, "Hi y");
++        assert!(!d.wants(Keysym::y, false));
++        assert_eq!(
++            d.key(Keysym::Escape, None, false, false, bounds()),
++            Outcome::Leave
++        );
++    }
++
++    #[test]
++    fn tools_colours_widths() {
++        let mut d = Draw::new();
++        d.active = true;
++        d.key(Keysym::x, Some('x'), false, false, bounds());
++        assert_eq!(d.tool, Tool::Redact);
++        d.key(Keysym::_7, Some('7'), false, false, bounds());
++        assert_eq!(d.color, 6);
++        d.key(Keysym::bracketright, Some(']'), false, false, bounds());
++        assert_eq!(d.width, 3);
++        // The cursor stays on the selection.
++        for _ in 0..20 {
++            d.key(Keysym::H, Some('H'), true, false, bounds());
++        }
++        assert_eq!(d.cursor.x, 0.);
++    }
++}
+diff --git a/src/ui/screenshot_ui.rs b/src/ui/screenshot_ui.rs
+index f1082fde..3e31347d 100644
+--- a/src/ui/screenshot_ui.rs
++++ b/src/ui/screenshot_ui.rs
+@@ -3,6 +3,7 @@ use std::cmp::{max, min};
+ use std::collections::HashMap;
+ use std::f64::consts::TAU;
+ use std::iter::zip;
++use std::path::{Path, PathBuf};
+ use std::rc::Rc;
+ 
+ use anyhow::Context;
+@@ -31,7 +32,8 @@ use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
+ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
+ use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
+ use crate::render_helpers::{render_to_texture, RenderTarget};
+-use crate::utils::to_physical_precise_round;
++use crate::ui::screenshot_draw::{Draw, Tool, COLORS, WIDTHS};
++use crate::utils::{make_screenshot_path, to_physical_precise_round};
+ 
+ const SELECTION_BORDER: i32 = 2;
+ 
+@@ -88,6 +90,8 @@ impl Mode {
+ pub enum ScreenshotUi {
+     Closed {
+         last_selection: Option<(WeakOutput, Rectangle<i32, Physical>)>,
++        /// The folder last saved to, kept for the next time.
++        last_folder: usize,
+         clock: Clock,
+         config: Rc<RefCell<Config>>,
+     },
+@@ -100,6 +104,13 @@ pub enum ScreenshotUi {
+         /// The area selection, kept while the window or screen is selected.
+         area: Option<(Output, Point<i32, Physical>, Point<i32, Physical>)>,
+         style: GlassStyle,
++        /// Drawing on the selection.
++        draw: Draw,
++        /// Where Enter saves (`f` steps through them; the first is screenshot-path's).
++        folders: Vec<PathBuf>,
++        folder: usize,
++        /// Where the pointer is, on the selection's screen (colour picking).
++        hover: Option<Point<i32, Physical>>,
+         open_anim: Animation,
+         clock: Clock,
+         config: Rc<RefCell<Config>>,
+@@ -134,8 +145,10 @@ pub struct OutputData {
+     screenshot: [OutputScreenshot; 3],
+     buffers: [SolidColorBuffer; 8],
+     locations: [Point<i32, Physical>; 8],
+-    /// The panel's drawing (fills, labels), per mode and pointer shown.
+-    panel: Option<[[TextureBuffer<GlesTexture>; 2]; 3]>,
++    /// The panel's drawing (fills, labels), made again when what it shows changes.
++    panel: RefCell<Option<(PanelState, TextureBuffer<GlesTexture>)>>,
++    /// The drawing on the selection, as of a version of it and a selection.
++    marks: RefCell<Option<((u64, Rectangle<i32, Physical>), TextureBuffer<GlesTexture>)>>,
+     /// The windows on screen (topmost first) and the focused one.
+     windows: Vec<Rectangle<i32, Physical>>,
+     focused: Option<usize>,
+@@ -177,6 +190,7 @@ impl ScreenshotUi {
+     pub fn new(clock: Clock, config: Rc<RefCell<Config>>) -> Self {
+         Self::Closed {
+             last_selection: None,
++            last_folder: 0,
+             clock,
+             config,
+         }
+@@ -184,7 +198,7 @@ impl ScreenshotUi {
+ 
+     pub fn open(
+         &mut self,
+-        renderer: &mut GlesRenderer,
++        _renderer: &mut GlesRenderer,
+         // Output, screencast, screen capture.
+         screenshots: HashMap<Output, [OutputScreenshot; 3]>,
+         default_output: Output,
+@@ -198,6 +212,7 @@ impl ScreenshotUi {
+ 
+         let Self::Closed {
+             last_selection,
++            last_folder,
+             clock,
+             config,
+         } = self
+@@ -232,6 +247,9 @@ impl ScreenshotUi {
+         );
+ 
+         let style = GlassStyle::load();
++        let folders = save_folders(&config.borrow());
++        let folders_len = folders.len();
++        let last_folder = *last_folder;
+         let output_data = screenshots
+             .into_iter()
+             .map(|(output, screenshot)| {
+@@ -251,21 +269,6 @@ impl ScreenshotUi {
+                 ];
+                 let locations = [Default::default(); 8];
+ 
+-                let mut panels = Vec::new();
+-                for mode in [Mode::Area, Mode::Window, Mode::Screen] {
+-                    for pointer in [false, true] {
+-                        match render_panel(renderer, scale, mode, pointer, &style) {
+-                            Ok(panel) => panels.push(panel),
+-                            Err(err) => warn!("error rendering the screenshot panel: {err:?}"),
+-                        }
+-                    }
+-                }
+-                let panel = (panels.len() == 6).then(|| {
+-                    let mut it = panels.into_iter();
+-                    let mut next = || [it.next().unwrap(), it.next().unwrap()];
+-                    [next(), next(), next()]
+-                });
+-
+                 let (windows, focused) = windows.remove(&output).unwrap_or_default();
+                 let data = OutputData {
+                     size,
+@@ -274,7 +277,8 @@ impl ScreenshotUi {
+                     screenshot,
+                     buffers,
+                     locations,
+-                    panel,
++                    panel: RefCell::new(None),
++                    marks: RefCell::new(None),
+                     windows,
+                     focused,
+                     glass: Glass::new(),
+@@ -296,6 +300,10 @@ impl ScreenshotUi {
+             mode: Mode::Area,
+             area: None,
+             style,
++            draw: Draw::new(),
++            folders,
++            folder: last_folder.min(folders_len - 1),
++            hover: None,
+             open_anim,
+             clock: clock.clone(),
+             config: config.clone(),
+@@ -311,6 +319,7 @@ impl ScreenshotUi {
+         let Self::Open {
+             selection,
+             area,
++            folder,
+             clock,
+             config,
+             ..
+@@ -328,6 +337,7 @@ impl ScreenshotUi {
+ 
+         *self = Self::Closed {
+             last_selection,
++            last_folder: *folder,
+             clock: clock.clone(),
+             config: config.clone(),
+         };
+@@ -402,10 +412,18 @@ impl ScreenshotUi {
+         match *mode {
+             Mode::Area => {
+                 for _ in 0..dx.unsigned_abs() {
+-                    if dx < 0 { self.move_left() } else { self.move_right() }
++                    if dx < 0 {
++                        self.move_left()
++                    } else {
++                        self.move_right()
++                    }
+                 }
+                 for _ in 0..dy.unsigned_abs() {
+-                    if dy < 0 { self.move_up() } else { self.move_down() }
++                    if dy < 0 {
++                        self.move_up()
++                    } else {
++                        self.move_down()
++                    }
+                 }
+             }
+             Mode::Window => {
+@@ -437,13 +455,155 @@ impl ScreenshotUi {
+             return;
+         }
+         if dw != 0 {
+-            self.set_width(SizeChange::AdjustFixed(i32::from(dw) * DIRECTIONAL_MOVE_PX as i32));
++            self.set_width(SizeChange::AdjustFixed(
++                i32::from(dw) * DIRECTIONAL_MOVE_PX as i32,
++            ));
+         }
+         if dh != 0 {
+-            self.set_height(SizeChange::AdjustFixed(i32::from(dh) * DIRECTIONAL_MOVE_PX as i32));
++            self.set_height(SizeChange::AdjustFixed(
++                i32::from(dh) * DIRECTIONAL_MOVE_PX as i32,
++            ));
++        }
++    }
++
++    /// What the panel shows now.
++    fn panel_state(&self) -> PanelState {
++        let Self::Open {
++            show_pointer,
++            mode,
++            draw,
++            folders,
++            folder,
++            ..
++        } = self
++        else {
++            unreachable!()
++        };
++        PanelState {
++            kind: if draw.active {
++                PanelKind::Draw
++            } else {
++                PanelKind::Select
++            },
++            mode: *mode,
++            pointer: *show_pointer,
++            folder: short_path(&folders[*folder]),
++            tool: draw.tool,
++            color: draw.color,
++            width: draw.width,
++            typing: draw.typing.is_some(),
++        }
++    }
++
++    /// A key the screenshot UI keeps for itself (see `action`): drawing, and
++    /// d, f, o and c while selecting.
++    pub fn key(&mut self, raw: u32, ch: Option<char>, shift: bool, ctrl: bool) -> KeyResult {
++        let Self::Open {
++            selection,
++            output_data,
++            draw,
++            folders,
++            folder,
++            ..
++        } = self
++        else {
++            return KeyResult::None;
++        };
++        let raw = Keysym::new(raw);
++        let rect = rect_from_corner_points(selection.1, selection.2);
++        let scale = output_data[&selection.0].scale;
++        let bounds = rect.size.to_f64().to_logical(scale);
++
++        if draw.active {
++            draw.key(raw, ch, shift, ctrl, bounds);
++            return KeyResult::None;
++        }
++        match raw {
++            Keysym::d => {
++                draw.active = true;
++                // The cursor starts in the middle the first time, and is kept on the selection.
++                let c = draw.cursor;
++                if draw.version == 0 || c.x > bounds.w || c.y > bounds.h {
++                    draw.cursor = Point::from((bounds.w / 2., bounds.h / 2.));
++                }
++                draw.version += 1;
++                KeyResult::None
++            }
++            Keysym::f => {
++                *folder = (*folder + 1) % folders.len();
++                KeyResult::None
++            }
++            Keysym::o => KeyResult::Ocr,
++            Keysym::c => KeyResult::PickColor,
++            _ => KeyResult::None,
+         }
+     }
+ 
++    /// Where Enter saves: an explicit path if one was asked for, else the
++    /// chosen folder with screenshot-path's file name (None: screenshot-path).
++    pub fn take_save_path(&mut self) -> Option<String> {
++        let Self::Open {
++            path,
++            folders,
++            folder,
++            config,
++            ..
++        } = self
++        else {
++            return None;
++        };
++        if let Some(path) = path.take() {
++            return Some(path);
++        }
++        if *folder == 0 {
++            return None;
++        }
++        let dir = &folders[*folder];
++        let name = make_screenshot_path(&config.borrow())
++            .ok()
++            .flatten()
++            .and_then(|p| p.file_name().map(|n| n.to_owned()))
++            .unwrap_or_else(|| "screenshot.png".into());
++        if let Err(err) = std::fs::create_dir_all(dir) {
++            warn!("error creating {dir:?}: {err:?}");
++        }
++        Some(dir.join(name).to_string_lossy().into_owned())
++    }
++
++    /// The colour under the pointer (or the drawing cursor), as #rrggbb.
++    pub fn pick_color(&self, renderer: &mut GlesRenderer) -> Option<String> {
++        let Self::Open {
++            selection,
++            output_data,
++            draw,
++            hover,
++            ..
++        } = self
++        else {
++            return None;
++        };
++        let data = &output_data[&selection.0];
++        let point = if draw.active {
++            let rect = rect_from_corner_points(selection.1, selection.2);
++            rect.loc + draw.cursor.to_physical_precise_round(data.scale)
++        } else {
++            (*hover)?
++        };
++        let point = Point::from((
++            point.x.clamp(0, data.size.w - 1),
++            point.y.clamp(0, data.size.h - 1),
++        ));
++        let rect: Rectangle<i32, Physical> = Rectangle::new(point, Size::from((1, 1)));
++        let buf_rect = rect
++            .to_logical(1)
++            .to_buffer(1, Transform::Normal, &Size::from((1, 1)));
++        let mapping = renderer
++            .copy_texture(&data.screenshot[0].texture, buf_rect, Fourcc::Abgr8888)
++            .ok()?;
++        let px = renderer.map_texture(&mapping).ok()?;
++        Some(format!("#{:02x}{:02x}{:02x}", px[0], px[1], px[2]))
++    }
++
+     pub fn is_open(&self) -> bool {
+         matches!(self, ScreenshotUi::Open { .. })
+     }
+@@ -789,6 +949,7 @@ impl ScreenshotUi {
+ 
+     pub fn render_output(
+         &self,
++        renderer: &mut GlesRenderer,
+         output: &Output,
+         target: RenderTarget,
+         push: &mut dyn FnMut(ScreenshotUiRenderElement),
+@@ -796,11 +957,12 @@ impl ScreenshotUi {
+         let _span = tracy_client::span!("ScreenshotUi::render_output");
+ 
+         let Self::Open {
++            selection,
+             output_data,
+             show_pointer,
+             button,
+-            mode,
+             style,
++            draw,
+             config,
+             open_anim,
+             ..
+@@ -808,6 +970,7 @@ impl ScreenshotUi {
+         else {
+             panic!("screenshot UI must be open to render it");
+         };
++        let panel_state = self.panel_state();
+ 
+         let Some(output_data) = output_data.get(output) else {
+             return;
+@@ -818,14 +981,22 @@ impl ScreenshotUi {
+ 
+         // The panel goes on top: its fills and labels, then its glass, which
+         // bends what is under it (the frozen screen, dimmed or not).
+-        if let Some(panels) = &output_data.panel {
+-            let buffer = &panels[mode.index()][usize::from(*show_pointer)];
++        let layout = PanelLayout::new(output_data, panel_state.kind);
++        {
++            let mut cache = output_data.panel.borrow_mut();
++            if cache.as_ref().map(|(st, _)| st) != Some(&panel_state) {
++                match render_panel(renderer, scale, &panel_state, style) {
++                    Ok(buffer) => *cache = Some((panel_state.clone(), buffer)),
++                    Err(err) => warn!("error rendering the screenshot panel: {err:?}"),
++                }
++            }
++        }
++        if let Some((_, buffer)) = &*output_data.panel.borrow() {
+             let alpha = if button.is_dragging_selection() {
+                 0.3
+             } else {
+                 1.
+             };
+-            let layout = PanelLayout::new(output_data);
+             let elem = PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
+                 buffer.clone(),
+                 layout.card.loc,
+@@ -848,6 +1019,31 @@ impl ScreenshotUi {
+             );
+         }
+ 
++        // What is drawn on the selection, with the cursor while drawing.
++        if &selection.0 == output && (draw.active || draw.has_marks()) {
++            let rect = rect_from_corner_points(selection.1, selection.2);
++            let key = (draw.version, rect);
++            let mut cache = output_data.marks.borrow_mut();
++            if cache.as_ref().map(|(k, _)| *k) != Some(key) {
++                match render_marks(renderer, scale, rect.size, draw, true) {
++                    Ok(buffer) => *cache = Some((key, buffer)),
++                    Err(err) => warn!("error rendering the screenshot drawing: {err:?}"),
++                }
++            }
++            if let Some((_, buffer)) = &*cache {
++                let elem =
++                    PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
++                        buffer.clone(),
++                        rect.loc.to_f64().to_logical(scale),
++                        progress,
++                        None,
++                        None,
++                        Kind::Unspecified,
++                    ));
++                push(elem.into());
++            }
++        }
++
+         for (buffer, loc) in zip(&output_data.buffers, &output_data.locations) {
+             let elem = SolidColorRenderElement::from_buffer(
+                 buffer,
+@@ -884,6 +1080,7 @@ impl ScreenshotUi {
+             selection,
+             output_data,
+             show_pointer,
++            draw,
+             ..
+         } = self
+         else {
+@@ -895,35 +1092,56 @@ impl ScreenshotUi {
+ 
+         let screenshot = &data.screenshot[0];
+ 
+-        // Composite the pointer on top if needed.
++        // Composite the pointer and the drawing on top if needed.
+         let mut tex_rect = None;
+-        if *show_pointer {
+-            if let Some(pointer) = screenshot.pointer.clone() {
+-                let scale = pointer.0.buffer().texture_scale();
+-                let offset = rect.loc.upscale(-1);
+-
+-                let mut elements = ArrayVec::<_, 2>::new();
+-                elements.push(pointer);
+-                elements.push(screenshot.buffer.clone());
+-                let elements = elements.iter().rev().map(|elem| {
+-                    RelocateRenderElement::from_element(elem, offset, Relocate::Relative)
+-                });
+-
+-                let res = render_to_texture(
+-                    renderer,
+-                    rect.size,
+-                    scale,
+-                    Transform::Normal,
+-                    Fourcc::Abgr8888,
+-                    elements,
+-                );
+-                match res {
+-                    Ok((texture, _)) => {
+-                        tex_rect = Some((texture, Rectangle::from_size(rect.size)));
+-                    }
+-                    Err(err) => {
+-                        warn!("error compositing pointer onto screenshot: {err:?}");
+-                    }
++        let pointer = show_pointer.then(|| screenshot.pointer.clone()).flatten();
++        let marks = if draw.has_marks() {
++            match render_marks(renderer, data.scale, rect.size, draw, false) {
++                Ok(buffer) => Some(PrimaryGpuTextureRenderElement(
++                    TextureRenderElement::from_texture_buffer(
++                        buffer,
++                        rect.loc.to_f64().to_logical(data.scale),
++                        1.,
++                        None,
++                        None,
++                        Kind::Unspecified,
++                    ),
++                )),
++                Err(err) => {
++                    warn!("error rendering the screenshot drawing: {err:?}");
++                    None
++                }
++            }
++        } else {
++            None
++        };
++        if pointer.is_some() || marks.is_some() {
++            let scale = screenshot.buffer.0.buffer().texture_scale();
++            let offset = rect.loc.upscale(-1);
++
++            // From the bottom up.
++            let mut elements = ArrayVec::<_, 3>::new();
++            elements.push(screenshot.buffer.clone());
++            elements.extend(pointer);
++            elements.extend(marks);
++            let elements = elements
++                .iter()
++                .map(|elem| RelocateRenderElement::from_element(elem, offset, Relocate::Relative));
++
++            let res = render_to_texture(
++                renderer,
++                rect.size,
++                scale,
++                Transform::Normal,
++                Fourcc::Abgr8888,
++                elements,
++            );
++            match res {
++                Ok((texture, _)) => {
++                    tex_rect = Some((texture, Rectangle::from_size(rect.size)));
++                }
++                Err(err) => {
++                    warn!("error compositing onto the screenshot: {err:?}");
+                 }
+             }
+         }
+@@ -944,8 +1162,8 @@ impl ScreenshotUi {
+         Ok((rect.size, copy.to_vec()))
+     }
+ 
+-    pub fn action(&self, raw: Keysym, mods: ModifiersState) -> Option<Action> {
+-        let Self::Open { button, .. } = self else {
++    pub fn action(&self, raw: Keysym, modified: Keysym, mods: ModifiersState) -> Option<Action> {
++        let Self::Open { button, draw, .. } = self else {
+             return None;
+         };
+ 
+@@ -954,6 +1172,23 @@ impl ScreenshotUi {
+             return None;
+         }
+ 
++        // Drawing (and typing) takes the keys; so do d (draw), f (folder),
++        // o (copy the text) and c (copy a colour) while selecting.
++        let own = (draw.wants(raw, mods.ctrl) && !mods.alt)
++            || (!draw.active
++                && !mods.ctrl
++                && !mods.alt
++                && !mods.shift
++                && matches!(raw, Keysym::d | Keysym::f | Keysym::o | Keysym::c));
++        if own {
++            return Some(Action::ScreenshotKey {
++                raw: raw.raw(),
++                ch: modified.key_char(),
++                shift: mods.shift,
++                ctrl: mods.ctrl,
++            });
++        }
++
+         action(raw, mods)
+     }
+ 
+@@ -980,6 +1215,23 @@ impl ScreenshotUi {
+ 
+     /// The pointer has moved to `point` relative to the current selection output.
+     pub fn pointer_motion(&mut self, point: Point<i32, Physical>, slot: Option<TouchSlot>) {
++        if let Self::Open {
++            selection,
++            output_data,
++            draw,
++            hover,
++            ..
++        } = self
++        {
++            *hover = Some(point);
++            if draw.mouse {
++                let rect = rect_from_corner_points(selection.1, selection.2);
++                let scale = output_data[&selection.0].scale;
++                draw.motion(selection_point(rect, scale, point));
++                return;
++            }
++        }
++
+         let Self::Open {
+             selection,
+             output_data,
+@@ -1037,6 +1289,9 @@ impl ScreenshotUi {
+             button,
+             mode,
+             area,
++            draw,
++            folder,
++            folders,
+             ..
+         } = self
+         else {
+@@ -1069,7 +1324,32 @@ impl ScreenshotUi {
+             return false;
+         };
+ 
+-        let hit = data.panel.as_ref().and_then(|_| PanelLayout::new(data).hit(point));
++        // Drawing: the panel picks the tool, colour and width; on the
++        // selection the mouse draws.
++        if draw.active {
++            match PanelLayout::new(data, PanelKind::Draw).hit(point) {
++                Some(Hit::Tool(i)) => draw.set_tool(Tool::ALL[i]),
++                Some(Hit::Color(i)) => draw.set_color(i),
++                Some(Hit::Width) => draw.cycle_width(),
++                Some(_) => (),
++                None => {
++                    let rect = rect_from_corner_points(selection.1, selection.2);
++                    if selection.0 != output || !rect.contains(point) {
++                        return false;
++                    }
++                    draw.press(selection_point(rect, data.scale, point));
++                    *button = Button::Down {
++                        touch_slot: slot,
++                        on_capture_button: false,
++                        last_pos: (output, point),
++                        move_state: None,
++                    };
++                }
++            }
++            return true;
++        }
++
++        let hit = PanelLayout::new(data, PanelKind::Select).hit(point);
+         match hit {
+             Some(Hit::Capture) => {
+                 *button = Button::Down {
+@@ -1088,7 +1368,11 @@ impl ScreenshotUi {
+                 self.set_mode(m);
+                 return true;
+             }
+-            Some(Hit::Card) => return false,
++            Some(Hit::Folder) => {
++                *folder = (*folder + 1) % folders.len();
++                return true;
++            }
++            Some(_) => return false,
+             None => (),
+         }
+ 
+@@ -1122,12 +1406,19 @@ impl ScreenshotUi {
+             selection,
+             output_data,
+             button,
++            draw,
+             ..
+         } = self
+         else {
+             return None;
+         };
+ 
++        if draw.mouse {
++            draw.release();
++            *button = Button::Up;
++            return Some(false);
++        }
++
+         let Button::Down {
+             touch_slot,
+             on_capture_button,
+@@ -1163,9 +1454,7 @@ impl ScreenshotUi {
+                 return None;
+             };
+ 
+-            if output_data.panel.is_some()
+-                && PanelLayout::new(output_data).hit(point) == Some(Hit::Capture)
+-            {
++            if PanelLayout::new(output_data, PanelKind::Select).hit(point) == Some(Hit::Capture) {
+                 return Some(true);
+             }
+         }
+@@ -1285,6 +1574,102 @@ fn action(raw: Keysym, mods: ModifiersState) -> Option<Action> {
+     }
+ }
+ 
++/// What a key the screenshot UI keeps did, for the compositor to finish.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum KeyResult {
++    None,
++    /// Copy the selection's text (OCR).
++    Ocr,
++    /// Copy the colour under the pointer.
++    PickColor,
++}
++
++/// Where screenshots can go: screenshot-path's folder first, then the ones
++/// listed in ~/.config/niri/screenshot-folders (one a line), or else
++/// Desktop, Downloads and Pictures (those that exist).
++fn save_folders(config: &Config) -> Vec<PathBuf> {
++    let home = std::env::var_os("HOME")
++        .map(PathBuf::from)
++        .unwrap_or_default();
++    let first = make_screenshot_path(config)
++        .ok()
++        .flatten()
++        .and_then(|p| p.parent().map(|d| d.to_owned()))
++        .unwrap_or_else(|| home.join("Pictures/Screenshots"));
++    let listed = std::fs::read_to_string(home.join(".config/niri/screenshot-folders")).ok();
++    let rest: Vec<PathBuf> = match &listed {
++        Some(text) => text
++            .lines()
++            .map(str::trim)
++            .filter(|l| !l.is_empty() && !l.starts_with('#'))
++            .map(|l| match l.strip_prefix("~/") {
++                Some(rel) => home.join(rel),
++                None => PathBuf::from(l),
++            })
++            .collect(),
++        None => ["Desktop", "Downloads", "Pictures"]
++            .iter()
++            .map(|d| home.join(d))
++            .filter(|d| d.is_dir())
++            .collect(),
++    };
++    let mut folders = vec![first];
++    for f in rest {
++        if !folders.contains(&f) {
++            folders.push(f);
++        }
++    }
++    folders
++}
++
++/// A folder as the panel says it: ~ for home.
++fn short_path(path: &Path) -> String {
++    let home = std::env::var_os("HOME")
++        .map(PathBuf::from)
++        .unwrap_or_default();
++    match path.strip_prefix(&home) {
++        Ok(rel) if !home.as_os_str().is_empty() => format!("~/{}", rel.display()),
++        _ => path.display().to_string(),
++    }
++}
++
++/// A point on the screen as the drawing keeps it: from the selection's corner, logical.
++fn selection_point(
++    rect: Rectangle<i32, Physical>,
++    scale: f64,
++    point: Point<i32, Physical>,
++) -> Point<f64, Logical> {
++    (point - rect.loc).to_f64().to_logical(scale)
++}
++
++/// The drawing as a texture the selection's size; `live` adds the cursor and caret.
++fn render_marks(
++    renderer: &mut GlesRenderer,
++    scale: f64,
++    size: Size<i32, Physical>,
++    draw: &Draw,
++    live: bool,
++) -> anyhow::Result<TextureBuffer<GlesTexture>> {
++    let _span = tracy_client::span!("screenshot_ui::render_marks");
++    let surface = ImageSurface::create(cairo::Format::ARgb32, size.w.max(1), size.h.max(1))?;
++    let cr = cairo::Context::new(&surface)?;
++    cr.scale(scale, scale);
++    draw.render(&cr, live)?;
++    drop(cr);
++    let data = surface.take_data().unwrap();
++    let buffer = TextureBuffer::from_memory(
++        renderer,
++        &data,
++        Fourcc::Argb8888,
++        (size.w.max(1), size.h.max(1)),
++        false,
++        scale,
++        Transform::Normal,
++        Vec::new(),
++    )?;
++    Ok(buffer)
++}
++
+ pub fn rect_from_corner_points(
+     a: Point<i32, Physical>,
+     b: Point<i32, Physical>,
+@@ -1395,61 +1780,124 @@ enum Hit {
+     Mode(u8),
+     Pointer,
+     Capture,
++    Folder,
++    Tool(usize),
++    Color(usize),
++    Width,
+     Card,
+ }
+ 
++/// Which panel: choosing what to shoot, or drawing on it.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum PanelKind {
++    Select,
++    Draw,
++}
++
++/// What the panel shows: its drawing is made again when this changes.
++#[derive(Debug, Clone, PartialEq)]
++struct PanelState {
++    kind: PanelKind,
++    mode: Mode,
++    pointer: bool,
++    folder: String,
++    tool: Tool,
++    color: usize,
++    width: usize,
++    typing: bool,
++}
++
++const SWATCH: f64 = 24.;
++const WIDTH_W: f64 = 52.;
++
+ /// Where the panel's parts are: the card output-local, the rest from its corner.
+ struct PanelLayout {
+     card: Rectangle<f64, Logical>,
+     scale: f64,
++    kind: PanelKind,
+ }
+ 
+ impl PanelLayout {
+-    fn size() -> Size<f64, Logical> {
+-        Size::from((
+-            2. * CARD_PAD + 3. * SEG_W + 2. * GAP + GROUP_GAP + 2. * CTRL_H + GAP,
+-            2. * CARD_PAD + CTRL_H + ROW_GAP + HINT_H,
+-        ))
++    fn size(kind: PanelKind) -> Size<f64, Logical> {
++        let w = match kind {
++            PanelKind::Select => {
++                2. * CARD_PAD + 3. * SEG_W + 2. * GAP + GROUP_GAP + 2. * CTRL_H + GAP
++            }
++            PanelKind::Draw => {
++                let n = Tool::ALL.len() as f64;
++                let c = COLORS.len() as f64;
++                2. * CARD_PAD
++                    + n * CTRL_H
++                    + (n - 1.) * GAP
++                    + GROUP_GAP
++                    + c * SWATCH
++                    + (c - 1.) * GAP
++                    + GROUP_GAP
++                    + WIDTH_W
++            }
++        };
++        Size::from((w, 2. * CARD_PAD + CTRL_H + ROW_GAP + 2. * HINT_H))
++    }
++
++    fn row(x: f64, w: f64) -> Rectangle<f64, Logical> {
++        Rectangle::new(Point::from((x, CARD_PAD)), Size::from((w, CTRL_H)))
+     }
+ 
+     fn segment(i: usize) -> Rectangle<f64, Logical> {
+-        Rectangle::new(
+-            Point::from((CARD_PAD + i as f64 * (SEG_W + GAP), CARD_PAD)),
+-            Size::from((SEG_W, CTRL_H)),
+-        )
++        Self::row(CARD_PAD + i as f64 * (SEG_W + GAP), SEG_W)
+     }
+ 
+     fn pointer() -> Rectangle<f64, Logical> {
++        Self::row(CARD_PAD + 3. * SEG_W + 2. * GAP + GROUP_GAP, CTRL_H)
++    }
++
++    fn capture() -> Rectangle<f64, Logical> {
++        Self::row(Self::pointer().loc.x + CTRL_H + GAP, CTRL_H)
++    }
++
++    fn tool(i: usize) -> Rectangle<f64, Logical> {
++        Self::row(CARD_PAD + i as f64 * (CTRL_H + GAP), CTRL_H)
++    }
++
++    fn swatch(i: usize) -> Rectangle<f64, Logical> {
++        let x0 = Self::tool(Tool::ALL.len() - 1).loc.x + CTRL_H + GROUP_GAP;
+         Rectangle::new(
+-            Point::from((CARD_PAD + 3. * SEG_W + 2. * GAP + GROUP_GAP, CARD_PAD)),
+-            Size::from((CTRL_H, CTRL_H)),
++            Point::from((
++                x0 + i as f64 * (SWATCH + GAP),
++                CARD_PAD + (CTRL_H - SWATCH) / 2.,
++            )),
++            Size::from((SWATCH, SWATCH)),
+         )
+     }
+ 
+-    fn capture() -> Rectangle<f64, Logical> {
+-        let p = Self::pointer();
+-        Rectangle::new(p.loc + Point::from((CTRL_H + GAP, 0.)), p.size)
++    fn width() -> Rectangle<f64, Logical> {
++        let last = Self::swatch(COLORS.len() - 1);
++        Self::row(last.loc.x + SWATCH + GROUP_GAP, WIDTH_W)
+     }
+ 
+-    fn hints() -> Rectangle<f64, Logical> {
++    /// The two lines of what the keys do.
++    fn hints(kind: PanelKind, line: usize) -> Rectangle<f64, Logical> {
+         Rectangle::new(
+-            Point::from((CARD_PAD, CARD_PAD + CTRL_H + ROW_GAP)),
+-            Size::from((Self::size().w - 2. * CARD_PAD, HINT_H)),
++            Point::from((CARD_PAD, CARD_PAD + CTRL_H + ROW_GAP + line as f64 * HINT_H)),
++            Size::from((Self::size(kind).w - 2. * CARD_PAD, HINT_H)),
+         )
+     }
+ 
+-    fn new(data: &OutputData) -> Self {
++    fn new(data: &OutputData, kind: PanelKind) -> Self {
+         let out = data.size.to_f64().to_logical(data.scale);
+-        let size = Self::size();
++        let size = Self::size(kind);
+         let loc = Point::<f64, Logical>::from((
+             ((out.w - size.w) / 2.).max(0.),
+             (out.h - size.h - CARD_BOTTOM).max(0.),
+         ));
+         // On whole physical pixels, as the texture is.
+-        let loc = loc.to_physical_precise_round(data.scale).to_logical(data.scale);
++        let loc = loc
++            .to_physical_precise_round(data.scale)
++            .to_logical(data.scale);
+         Self {
+             card: Rectangle::new(loc, size),
+             scale: data.scale,
++            kind,
+         }
+     }
+ 
+@@ -1458,18 +1906,36 @@ impl PanelLayout {
+         if !Rectangle::from_size(self.card.size).contains(p) {
+             return None;
+         }
+-        if let Some(i) = (0..3).find(|&i| Self::segment(i).contains(p)) {
+-            return Some(Hit::Mode(i as u8));
+-        }
+         let round = |r: Rectangle<f64, Logical>| {
+             let c = r.loc + r.size.downscale(2.).to_point();
+             (p.x - c.x).powi(2) + (p.y - c.y).powi(2) <= (r.size.w / 2.).powi(2)
+         };
+-        if round(Self::pointer()) {
+-            return Some(Hit::Pointer);
+-        }
+-        if round(Self::capture()) {
+-            return Some(Hit::Capture);
++        match self.kind {
++            PanelKind::Select => {
++                if let Some(i) = (0..3).find(|&i| Self::segment(i).contains(p)) {
++                    return Some(Hit::Mode(i as u8));
++                }
++                if round(Self::pointer()) {
++                    return Some(Hit::Pointer);
++                }
++                if round(Self::capture()) {
++                    return Some(Hit::Capture);
++                }
++                if Self::hints(self.kind, 1).contains(p) {
++                    return Some(Hit::Folder);
++                }
++            }
++            PanelKind::Draw => {
++                if let Some(i) = (0..Tool::ALL.len()).find(|&i| round(Self::tool(i))) {
++                    return Some(Hit::Tool(i));
++                }
++                if let Some(i) = (0..COLORS.len()).find(|&i| round(Self::swatch(i))) {
++                    return Some(Hit::Color(i));
++                }
++                if Self::width().contains(p) {
++                    return Some(Hit::Width);
++                }
++            }
+         }
+         Some(Hit::Card)
+     }
+@@ -1514,9 +1980,17 @@ impl PanelLayout {
+             rim_tint: style.rim_tint,
+             alpha,
+         };
+-        shapes.extend((0..3).map(|i| control(Self::segment(i), true)));
+-        shapes.push(control(Self::pointer(), false));
+-        shapes.push(control(Self::capture(), false));
++        match self.kind {
++            PanelKind::Select => {
++                shapes.extend((0..3).map(|i| control(Self::segment(i), true)));
++                shapes.push(control(Self::pointer(), false));
++                shapes.push(control(Self::capture(), false));
++            }
++            PanelKind::Draw => {
++                shapes.extend((0..Tool::ALL.len()).map(|i| control(Self::tool(i), false)));
++                shapes.push(control(Self::width(), true));
++            }
++        }
+         LumenGlassCachedState {
+             shapes,
+             merge: style.merge,
+@@ -1589,28 +2063,113 @@ fn show_centred(cr: &cairo::Context, layout: &pango::Layout, r: Rectangle<f64, L
+     pangocairo::functions::show_layout(cr, layout);
+ }
+ 
++/// A tool's little picture, centred at (x, y).
++fn tool_icon(cr: &cairo::Context, tool: Tool, x: f64, y: f64) -> Result<(), cairo::Error> {
++    cr.save()?;
++    cr.set_line_width(1.8);
++    cr.set_line_cap(cairo::LineCap::Round);
++    cr.set_line_join(cairo::LineJoin::Round);
++    match tool {
++        Tool::Pen => {
++            cr.move_to(x - 7., y + 4.);
++            cr.curve_to(x - 4., y - 6., x - 1., y + 7., x + 2., y - 1.);
++            cr.curve_to(x + 3.5, y - 5., x + 5., y - 4., x + 7., y - 6.);
++            cr.stroke()?;
++        }
++        Tool::Line => {
++            cr.move_to(x - 6., y + 6.);
++            cr.line_to(x + 6., y - 6.);
++            cr.stroke()?;
++        }
++        Tool::Arrow => {
++            cr.move_to(x - 6., y + 6.);
++            cr.line_to(x + 5., y - 5.);
++            cr.stroke()?;
++            cr.move_to(x + 7., y - 7.);
++            cr.line_to(x + 7., y);
++            cr.line_to(x, y - 7.);
++            cr.close_path();
++            cr.fill()?;
++        }
++        Tool::Rect => {
++            cr.rectangle(x - 7., y - 5.5, 14., 11.);
++            cr.stroke()?;
++        }
++        Tool::Oval => {
++            cr.save()?;
++            cr.translate(x, y);
++            cr.scale(7.5, 5.8);
++            cr.arc(0., 0., 1., 0., TAU);
++            cr.restore()?;
++            cr.stroke()?;
++        }
++        Tool::Marker => {
++            cr.set_line_width(6.);
++            cr.set_line_cap(cairo::LineCap::Square);
++            cr.push_group();
++            cr.move_to(x - 6., y + 1.);
++            cr.line_to(x + 6., y - 1.);
++            cr.stroke()?;
++            cr.pop_group_to_source()?;
++            cr.paint_with_alpha(0.55)?;
++        }
++        Tool::Text => {
++            let layout = text_layout(cr, "SF Pro Display Bold 15px", "T");
++            let r = Rectangle::new(Point::from((x - 10., y - 10.)), Size::from((20., 20.)));
++            show_centred(cr, &layout, r);
++        }
++        Tool::Redact => {
++            cr.rectangle(x - 7., y - 4., 14., 8.);
++            cr.fill()?;
++            cr.rectangle(x - 7.5, y - 6.5, 15., 13.);
++            cr.set_line_width(1.2);
++            cr.stroke()?;
++        }
++    }
++    cr.restore()
++}
++
+ /// The panel's own drawing over its glass: the card's tint (as the island's
+ /// open card: a little smoke, milk and the theme's dusk), the buttons' fills
+-/// (lit when on) and the words.
++/// (lit when on), the swatches and the words.
+ fn render_panel(
+     renderer: &mut GlesRenderer,
+     scale: f64,
+-    mode: Mode,
+-    show_pointer: bool,
++    st: &PanelState,
+     style: &GlassStyle,
+ ) -> anyhow::Result<TextureBuffer<GlesTexture>> {
+     let _span = tracy_client::span!("screenshot_ui::render_panel");
+ 
+-    let size = PanelLayout::size();
++    let size = PanelLayout::size(st.kind);
+     let width = (size.w * scale).ceil() as i32;
+     let height = (size.h * scale).ceil() as i32;
+     let surface = ImageSurface::create(cairo::Format::ARgb32, width, height)?;
+     let cr = cairo::Context::new(&surface)?;
+     cr.scale(scale, scale);
++    paint_panel(&cr, st, style)?;
++    drop(cr);
++
++    let data = surface.take_data().unwrap();
++    let buffer = TextureBuffer::from_memory(
++        renderer,
++        &data,
++        Fourcc::Argb8888,
++        (width, height),
++        false,
++        scale,
++        Transform::Normal,
++        Vec::new(),
++    )?;
++    Ok(buffer)
++}
+ 
+-    let (ir, ig, ib) = rgb(&style.ink);
++fn paint_panel(cr: &cairo::Context, st: &PanelState, style: &GlassStyle) -> anyhow::Result<()> {
++    let cr = cr.clone();
++    let size = PanelLayout::size(st.kind);
++    let ink = rgb(&style.ink);
++    let lit_ink = rgb(&style.lit_ink);
+     let (cr_, cg, cb) = rgb(&style.chip);
+-    let (lr, lg, lb) = rgb(&style.lit_ink);
++    let set = |cr: &cairo::Context, (r, g, b): (f64, f64, f64)| cr.set_source_rgb(r, g, b);
+ 
+     // The card.
+     squircle(&cr, 0., 0., size.w, size.h, CARD_RADIUS);
+@@ -1643,90 +2202,160 @@ fn render_panel(
+         Ok(())
+     };
+ 
+-    // The modes.
+-    for i in 0..3 {
+-        let r = PanelLayout::segment(i);
+-        squircle(&cr, r.loc.x, r.loc.y, r.size.w, r.size.h, r.size.h / 2.);
+-        let lit = i == mode.index();
+-        fill(&cr, lit)?;
+-        let markup = format!(
+-            "{}  <span alpha='45%' face='SF Mono'>{}</span>",
+-            MODE_NAMES[i], MODE_KEYS[i]
+-        );
+-        if lit {
+-            cr.set_source_rgb(lr, lg, lb);
+-        } else {
+-            cr.set_source_rgb(ir, ig, ib);
+-        }
+-        show_centred(&cr, &text_layout(&cr, LABEL_FONT, &markup), r);
+-    }
++    let key = |k: &str, what: &str| format!("<span alpha='100%' weight='600'>{k}</span> {what}");
++    let hints: [Vec<String>; 2];
++
++    match st.kind {
++        PanelKind::Select => {
++            for i in 0..3 {
++                let r = PanelLayout::segment(i);
++                squircle(&cr, r.loc.x, r.loc.y, r.size.w, r.size.h, r.size.h / 2.);
++                let lit = i == st.mode.index();
++                fill(&cr, lit)?;
++                let markup = format!(
++                    "{}  <span alpha='45%' face='SF Mono'>{}</span>",
++                    MODE_NAMES[i], MODE_KEYS[i]
++                );
++                set(&cr, if lit { lit_ink } else { ink });
++                show_centred(&cr, &text_layout(&cr, LABEL_FONT, &markup), r);
++            }
+ 
+-    // The pointer button: an arrow, lit when the pointer is in the shot.
+-    let r = PanelLayout::pointer();
+-    circle(&cr, r, 0.);
+-    fill(&cr, show_pointer)?;
+-    let (x0, y0) = (r.loc.x + 13.5, r.loc.y + 9.5);
+-    cr.new_sub_path();
+-    for (x, y) in [
+-        (0., 0.),
+-        (0., 15.),
+-        (3.8, 11.4),
+-        (6.4, 17.),
+-        (8.8, 16.),
+-        (6.3, 10.4),
+-        (11.2, 10.4),
+-    ] {
+-        cr.line_to(x0 + x, y0 + y);
+-    }
+-    cr.close_path();
+-    if show_pointer {
+-        cr.set_source_rgb(lr, lg, lb);
+-    } else {
+-        cr.set_source_rgb(ir, ig, ib);
+-    }
+-    cr.fill()?;
++            // The pointer button: an arrow, lit when the pointer is in the shot.
++            let r = PanelLayout::pointer();
++            circle(&cr, r, 0.);
++            fill(&cr, st.pointer)?;
++            let (x0, y0) = (r.loc.x + 13.5, r.loc.y + 9.5);
++            cr.new_sub_path();
++            for (x, y) in [
++                (0., 0.),
++                (0., 15.),
++                (3.8, 11.4),
++                (6.4, 17.),
++                (8.8, 16.),
++                (6.3, 10.4),
++                (11.2, 10.4),
++            ] {
++                cr.line_to(x0 + x, y0 + y);
++            }
++            cr.close_path();
++            set(&cr, if st.pointer { lit_ink } else { ink });
++            cr.fill()?;
++
++            // The capture button: a shutter.
++            let r = PanelLayout::capture();
++            circle(&cr, r, 0.);
++            fill(&cr, false)?;
++            set(&cr, ink);
++            cr.set_line_width(1.6);
++            circle(&cr, r, 8.);
++            cr.stroke()?;
++            circle(&cr, r, 11.);
++            cr.fill()?;
++
++            let mut first = match st.mode {
++                Mode::Area => vec![key("hjkl", "move"), key("⇧hjkl", "resize")],
++                Mode::Window => vec![key("hjkl", "next window")],
++                Mode::Screen => vec![],
++            };
++            first.extend([
++                key("d", "draw"),
++                key("o", "copy text"),
++                key("c", "pick colour"),
++            ]);
++            hints = [
++                first,
++                vec![
++                    key("y", "copy"),
++                    key(
++                        "⏎",
++                        &format!("save to {}", pango::glib::markup_escape_text(&st.folder)),
++                    ),
++                    key("f", "folder"),
++                    key("esc", "cancel"),
++                ],
++            ];
++        }
++        PanelKind::Draw => {
++            for (i, tool) in Tool::ALL.into_iter().enumerate() {
++                let r = PanelLayout::tool(i);
++                circle(&cr, r, 0.);
++                let lit = tool == st.tool;
++                fill(&cr, lit)?;
++                set(&cr, if lit { lit_ink } else { ink });
++                tool_icon(&cr, tool, r.loc.x + CTRL_H / 2., r.loc.y + CTRL_H / 2.)?;
++            }
+ 
+-    // The capture button: a shutter.
+-    let r = PanelLayout::capture();
+-    circle(&cr, r, 0.);
+-    fill(&cr, false)?;
+-    cr.set_source_rgb(ir, ig, ib);
+-    cr.set_line_width(1.6);
+-    circle(&cr, r, 8.);
+-    cr.stroke()?;
+-    circle(&cr, r, 11.);
+-    cr.fill()?;
++            // The colours: live parts, not glass; the chosen one ringed.
++            for (i, c) in COLORS.into_iter().enumerate() {
++                let r = PanelLayout::swatch(i);
++                circle(&cr, r, 3.);
++                set(&cr, c);
++                cr.fill_preserve()?;
++                cr.set_source_rgba(1., 1., 1., 0.35);
++                cr.set_line_width(1.);
++                cr.stroke()?;
++                if i == st.color {
++                    circle(&cr, r, 0.5);
++                    set(&cr, ink);
++                    cr.set_line_width(1.6);
++                    cr.stroke()?;
++                }
++            }
+ 
+-    // What the keys do, in this mode.
+-    let key = |k: &str, what: &str| format!("<span alpha='100%' weight='600'>{k}</span> {what}");
+-    let mut hints = match mode {
+-        Mode::Area => vec![key("hjkl", "move"), key("⇧hjkl", "resize")],
+-        Mode::Window => vec![key("hjkl", "next window")],
+-        Mode::Screen => vec![],
+-    };
+-    hints.extend([
+-        key("y", "copy"),
+-        key("⏎", "save"),
+-        key("p", if show_pointer { "hide pointer" } else { "pointer" }),
+-        key("esc", "cancel"),
+-    ]);
+-    let markup = format!("<span alpha='60%'>{}</span>", hints.join("    "));
+-    cr.set_source_rgb(ir, ig, ib);
+-    show_centred(&cr, &text_layout(&cr, HINT_FONT, &markup), PanelLayout::hints());
++            // The width: a dot as thick as the line, in its colour.
++            let r = PanelLayout::width();
++            squircle(&cr, r.loc.x, r.loc.y, r.size.w, r.size.h, r.size.h / 2.);
++            fill(&cr, false)?;
++            cr.arc(
++                r.loc.x + r.size.w / 2.,
++                r.loc.y + r.size.h / 2.,
++                (WIDTHS[st.width] / 2.).max(1.5).min(11.),
++                0.,
++                TAU,
++            );
++            set(&cr, COLORS[st.color]);
++            cr.fill()?;
++
++            hints = if st.typing {
++                [
++                    vec![key("type", "your text"), key("⌫", "delete")],
++                    vec![key("⏎", "or"), key("esc", "done")],
++                ]
++            } else {
++                [
++                    vec![
++                        key("hjkl", "move"),
++                        key("v", "draw from here · to here"),
++                        key("p s a r o m i x", "tools"),
++                        key("1–8", "colour"),
++                        key("[ ]", "size"),
++                    ],
++                    vec![
++                        key("u", "undo"),
++                        key("^r", "redo"),
++                        key("esc", "done drawing"),
++                        key("y", "copy"),
++                        key(
++                            "⏎",
++                            &format!("save to {}", pango::glib::markup_escape_text(&st.folder)),
++                        ),
++                    ],
++                ]
++            };
++        }
++    }
+ 
+-    drop(cr);
+-    let data = surface.take_data().unwrap();
+-    let buffer = TextureBuffer::from_memory(
+-        renderer,
+-        &data,
+-        Fourcc::Argb8888,
+-        (width, height),
+-        false,
+-        scale,
+-        Transform::Normal,
+-        Vec::new(),
+-    )?;
+-    Ok(buffer)
++    // What the keys do.
++    for (line, words) in hints.iter().enumerate() {
++        let markup = format!("<span alpha='60%'>{}</span>", words.join("    "));
++        set(&cr, ink);
++        show_centred(
++            &cr,
++            &text_layout(&cr, HINT_FONT, &markup),
++            PanelLayout::hints(st.kind, line),
++        );
++    }
++    Ok(())
+ }
+ 
+ fn set_rect(
+@@ -1784,9 +2413,15 @@ mod tests {
+         };
+         assert_eq!(action(Keysym::w, none), Some(Action::ScreenshotSetMode(1)));
+         assert_eq!(action(Keysym::l, none), Some(Action::ScreenshotNudge(1, 0)));
+-        assert_eq!(action(Keysym::k, none), Some(Action::ScreenshotNudge(0, -1)));
++        assert_eq!(
++            action(Keysym::k, none),
++            Some(Action::ScreenshotNudge(0, -1))
++        );
+         assert_eq!(action(Keysym::L, shift), Some(Action::ScreenshotGrow(1, 0)));
+-        assert_eq!(action(Keysym::h, shift), Some(Action::ScreenshotGrow(-1, 0)));
++        assert_eq!(
++            action(Keysym::h, shift),
++            Some(Action::ScreenshotGrow(-1, 0))
++        );
+         assert_eq!(
+             action(Keysym::y, none),
+             Some(Action::ConfirmScreenshot {
+@@ -1815,17 +2450,48 @@ mod tests {
+     #[test]
+     fn panel_hits() {
+         let layout = PanelLayout {
+-            card: Rectangle::new(Point::from((100., 500.)), PanelLayout::size()),
++            card: Rectangle::new(
++                Point::from((100., 500.)),
++                PanelLayout::size(PanelKind::Select),
++            ),
+             scale: 2.,
++            kind: PanelKind::Select,
+         };
+         let at = |r: Rectangle<f64, Logical>| {
+             let c = layout.card.loc + r.loc + r.size.downscale(2.).to_point();
+-            Point::<f64, Logical>::from((c.x, c.y)).to_physical(2.).to_i32_round()
++            Point::<f64, Logical>::from((c.x, c.y))
++                .to_physical(2.)
++                .to_i32_round()
+         };
+         assert_eq!(layout.hit(at(PanelLayout::segment(2))), Some(Hit::Mode(2)));
+         assert_eq!(layout.hit(at(PanelLayout::capture())), Some(Hit::Capture));
+         assert_eq!(layout.hit(at(PanelLayout::pointer())), Some(Hit::Pointer));
+-        assert_eq!(layout.hit(at(PanelLayout::hints())), Some(Hit::Card));
++        assert_eq!(
++            layout.hit(at(PanelLayout::hints(PanelKind::Select, 1))),
++            Some(Hit::Folder)
++        );
+         assert_eq!(layout.hit(Point::from((0, 0))), None);
+     }
++
++    #[test]
++    fn draw_panel_hits() {
++        let layout = PanelLayout {
++            card: Rectangle::new(Point::from((0., 0.)), PanelLayout::size(PanelKind::Draw)),
++            scale: 1.,
++            kind: PanelKind::Draw,
++        };
++        let at = |r: Rectangle<f64, Logical>| {
++            let c = r.loc + r.size.downscale(2.).to_point();
++            Point::<f64, Logical>::from((c.x, c.y))
++                .to_physical(1.)
++                .to_i32_round()
++        };
++        assert_eq!(layout.hit(at(PanelLayout::tool(7))), Some(Hit::Tool(7)));
++        assert_eq!(layout.hit(at(PanelLayout::swatch(0))), Some(Hit::Color(0)));
++        assert_eq!(layout.hit(at(PanelLayout::swatch(7))), Some(Hit::Color(7)));
++        assert_eq!(layout.hit(at(PanelLayout::width())), Some(Hit::Width));
++        // The width pill ends inside the card.
++        let w = PanelLayout::width();
++        assert!(w.loc.x + w.size.w <= layout.card.size.w - CARD_PAD + 0.01);
++    }
+ }

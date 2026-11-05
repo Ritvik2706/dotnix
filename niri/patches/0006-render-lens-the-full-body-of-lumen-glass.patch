@@ -1,0 +1,53 @@
+From 6f88a13c95ca5cf1234767418a019c259a0d5a4b Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 27 Oct 2026 22:28:01 +0400
+Subject: [PATCH 06/38] render: lens the full body of lumen glass
+
+---
+ src/render_helpers/shaders/liquid_glass.frag | 24 ++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 1030d0c2..6ab5f316 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -146,19 +146,35 @@ void main() {
+     float t = bevel > 0.0 ? clamp(1.0 - depth / bevel, 0.0, 1.0) : 0.0;
+     float bend = 1.0 - sqrt(max(1.0 - t * t, 0.0));
+ 
+-    // A convex edge magnifies: the rim shows what is further in.
+-    vec2 off = -n * refraction * bend;
++    // A shallow lens spans the whole body, rather than a flat pane with
++    // only a refracting border. Its smooth radial mapping avoids the SDF
++    // normal discontinuities along the medial axes of a rounded rectangle.
++    // The exact optical centre stays fixed, but its neighbourhood magnifies.
++    vec2 half_size = max(s[0].zw * 0.5, vec2(1.0));
++    vec2 centre = s[0].xy + half_size;
++    vec2 local = p - centre;
++    vec2 unit = local / half_size;
++    float radius2 = clamp(dot(unit, unit) * 0.5, 0.0, 1.0);
++    float lens_strength = clamp(refraction / max(40.0, min(half_size.x, half_size.y) * 0.4), 0.0, 1.0);
++    float magnification = lens_strength * (0.18 + 0.08 * radius2);
++    vec2 body_off = -local * magnification;
++    // Fade the body mapping into the rim mapping to keep small capsules
++    // from stacking two large displacements at their silhouette.
++    vec2 edge_off = -n * refraction * bend;
++    vec2 off = body_off * (1.0 - bend) + edge_off;
+     // From logical px to texture coordinates (inverse of input_to_geo's linear part).
+     mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
+     float det = a[0][0] * a[1][1] - a[1][0] * a[0][1];
+     mat2 inv = mat2(a[1][1], -a[0][1], -a[1][0], a[0][0]) / det;
+     vec2 dv = inv * (off / geo_size);
++    // Dispersion belongs to the curved rim, not the broad magnified body.
++    vec2 fringe = inv * (edge_off / geo_size) * dispersion;
+ 
+     vec4 color;
+     if (dispersion > 0.0) {
+         vec4 g = texture2D(tex, v_coords + dv);
+-        color = vec4(texture2D(tex, v_coords + dv * (1.0 + dispersion)).r, g.g,
+-                     texture2D(tex, v_coords + dv * (1.0 - dispersion)).b, g.a);
++        color = vec4(texture2D(tex, v_coords + dv + fringe).r, g.g,
++                     texture2D(tex, v_coords + dv - fringe).b, g.a);
+     } else {
+         color = texture2D(tex, v_coords + dv);
+     }

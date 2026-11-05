@@ -1,0 +1,33 @@
+// rules/layers.kdl — layer-shell surfaces: the island, bars, the wallpaper.
+
+// The lumen island asks for its own blur, shaped to the pill/card
+// (ext-background-effect): only xray off here, so the expanded card frosts
+// the real windows it drops over, not just the wallpaper.
+layer-rule {
+    match namespace="^lumen$"
+    background-effect {
+        xray false
+    }
+}
+
+// Rounded display corners (scripts/screen-corners.py): plain black masks.
+layer-rule {
+    match namespace="^screen-corners$"
+    background-effect {
+        blur false
+    }
+}
+
+layer-rule {
+    match namespace="^(notifications|vicinae|waybar|launcher|logout_dialog)$"
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+// The wallpaper stays put under the overview's zoomed workspaces.
+layer-rule {
+    match namespace="^awww"
+    place-within-backdrop true
+}

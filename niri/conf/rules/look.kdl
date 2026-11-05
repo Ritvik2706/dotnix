@@ -1,0 +1,75 @@
+// rules/look.kdl — how windows look: corners, glass, opacity, shadows, the
+// screen-share rim. Where apps open and how wide: apps.kdl. Floating
+// dialogs: floating.kdl (both come after this, so they win where they
+// overlap). ../mode.kdl (Mod+Shift+Space opaque mode) overrides all of it.
+
+// Everything: 24px corners, the radius of the lumen island's open card, and
+// the same curve (the patched niri draws lumen's `corner: r continuous`).
+// An app that asks to start maximized (Zen, Firefox) would fill the screen
+// edge to edge, square and borderless: it opens as a normal column instead
+// (Mod+F still maximizes the column).
+window-rule {
+    geometry-corner-radius 24
+    clip-to-geometry true
+    open-maximized-to-edges false
+}
+
+// Unfocused windows: a hint of translucency, frosted (Hyprland's
+// inactive_opacity 0.90 + xray blur). Ghostty does its own transparency.
+window-rule {
+    match is-active=false
+    exclude app-id=r#"^com\.mitchellh\.ghostty(\.project)?$"#
+    opacity 0.90
+    background-effect {
+        blur true
+        xray true
+    }
+}
+
+// Ghostty: its own translucency over niri's cached wallpaper frost (cheap,
+// unlike ghostty's background-blur), so the terminal is glass like the rest.
+window-rule {
+    match app-id=r#"^com\.mitchellh\.ghostty(\.project)?$"#
+    opacity 1.0
+    background-effect {
+        blur true
+        xray true
+    }
+}
+
+// Opaque Qt/GTK apps given glass by the compositor, frosting the real
+// windows behind (Hyprland's xray = false).
+window-rule {
+    match app-id=r#"^org\.qbittorrent\.qBittorrent$"#
+    opacity 0.90
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+window-rule {
+    match app-id=r#"^Thunar$"#
+    match app-id=r#"^thunar$"#
+    opacity 0.96
+}
+
+// Floating windows (pickers, popups) lift off the strip.
+window-rule {
+    match is-floating=true
+    shadow {
+        softness 40
+        spread 4
+        offset x=0 y=10
+        color "#00000066"
+    }
+}
+
+// Whatever is being screen-shared gets a red rim, so it's never a surprise.
+window-rule {
+    match is-window-cast-target=true
+    border {
+        active-gradient from="#FF2A6D" to="#FF6A95" angle=120
+        inactive-color "#FF2A6D99"
+    }
+}

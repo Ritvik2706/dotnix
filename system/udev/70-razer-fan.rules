@@ -1,0 +1,4 @@
+# Lets the logged-in user reach the Blade's control interface, for razer/razer-fan.py.
+# Install: sudo install -m644 system/udev/70-razer-fan.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="028a", TAG+="uaccess"

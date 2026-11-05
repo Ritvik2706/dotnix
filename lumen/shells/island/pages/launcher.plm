@@ -1,94 +1,167 @@
-// The launcher page of the open card: apps by name; a leading space searches
-// files instead. Super+D opens it on its search. ↑ ↓ (or Ctrl+j/k) choose,
-// Enter launches or opens, Tab goes into a folder and Shift+Tab back out,
+// The launcher (Super+D): a search pill and nothing else, until something is
+// typed. Then the pill grows into its answers:
+//   · apps, and the system's switches (Do Not Disturb, Night Light, Keep Awake,
+//     the keyboard's light, the power mode, mute, brightness/volume with a
+//     number, Wi-Fi, Bluetooth, lock, sleep, and restart, shut down, log out,
+//     firmware setup, switch compositor, which each ask for a second press;
+//     the Trash, and Empty Trash, which asks too);
+//   · a prefix searches a site in the browser: `yt cats`, `g`, `gh`, `w`, `r`,
+//     `aw`, `aur`, `maps`, `tr`, `npm`, `crates`, `amz`, `ddg` (`?` lists them);
+//   · sums (`= 2*(3+4)`, or just `12*7`): Enter copies the answer;
+//   · an address opens it; `> command` runs it; anything else can still be
+//     searched on the web (the last row);
+//   · a leading space searches files instead.
+// ↑ ↓ (or Ctrl+j/k) choose, Enter acts (a switch flips in place and the search
+// stays), Tab goes into a folder (or completes a prefix), Shift+Tab back out,
 // Esc closes. The logic hands it only the rows in sight.
 part Launcher {
     component LaunchRow(r: record) {
-        size: 360, 48
-        zone box row { from: 0, 0; size: 360, 48; corner: 24 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel }
+        size: 576, 52
+        prop onk = 0 ~260ms
+        follow onk = if(r.on, 1, 0)
+        let sw = r.kind == 3 and (r.sk == 1 or r.sk == 2 or r.sk == 3 or r.sk == 8)
+        zone box row { from: 0, 0; size: 576, 52; corner: 26 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel }
 
         body {
-            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 24
-            box { from: 0, 0; size: 360, 48; corner: 24 continuous }
+            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 26
+            box { from: 0, 0; size: 576, 52; corner: 26 continuous }
         }
         body {
-            gradient: 0, 0 to 360, 48, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
-            glass: 25%; blur: 0%; light: 4%, 0, 24; shadow: 0, 1.8, 7, 20%; show: r.sel
-            box { from: 0, 0; size: 360, 48; corner: 24 continuous }
+            gradient: 0, 0 to 576, 52, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
+            glass: 25%; blur: 0%; light: 4%, 0, 26; shadow: 0, 1.8, 7, 20%; show: r.sel
+            box { from: 0, 0; size: 576, 52; corner: 26 continuous }
         }
 
         //  An app: its own icon. A file or a folder: the island's symbols.
-        image r.icon { at: 12, 10; size: 28, 28; show: r.kind == 0 }
-        image ic_doc { at: 14, 12; size: 24, 24; tint: ink; opacity: 80%; show: r.kind == 1 }
-        image ic_folder { at: 14, 12; size: 24, 24; tint: soft_l; opacity: 90%; show: r.kind == 2 }
+        image r.icon { at: 14, 12; size: 28, 28; show: r.kind == 0 }
+        image ic_doc { at: 16, 14; size: 24, 24; tint: ink; opacity: 80%; show: r.kind == 1 }
+        image ic_folder { at: 16, 14; size: 24, 24; tint: soft_l; opacity: 90%; show: r.kind == 2 }
+
+        //  Anything else: its symbol in a bead of glass, lit while it is on.
+        group {
+            show: r.kind == 3
+            body {
+                gradient: 12, 10 to 44, 42, mix(mix(chip, chip_hi, 0.5), soft_l, onk), mix(mix(chip, chip_hi, 0.5), soft_s, onk)
+                material: control; opacity: 60% + 40% * onk
+                ellipse { at: 28, 26; radius: 16 }
+            }
+            group {
+                move: 20, 18
+                image cc_moon { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 1 }
+                image cc_night { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 2 }
+                image cc_awake { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 3 }
+                image dv_keys { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 4 }
+                image cc_leaf { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 5 or r.sk == 28 }
+                image cc_gauge { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 6 or r.sk == 27 or r.sk == 29 }
+                image cc_rocket { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 7 or r.sk == 30 }
+                image ic_mute { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 8 }
+                image ic_sun { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 9 }
+                image ic_spk_s { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 10 }
+                image ic_wifi_s { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 11 }
+                image ic_bt_s { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 12 }
+                image ic_lock_s { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 13 }
+                image ic_off_s { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 14 }
+                image ic_re_s { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 15 or r.sk == 18 }
+                image ic_off_s { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 16 }
+                image ic_out_s { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 17 }
+                image cc_switch { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 19 }
+                image ic_trash_l { at: 0, 0; size: 16, 16; tint: mix(ink, pearl_ink, onk); show: r.sk == 25 or r.sk == 26 }
+                image ic_ext_s { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 20 or r.sk == 23 }
+                image ic_search { at: 1, 1; size: 14, 14; tint: ink; show: r.sk == 24 }
+                image ic_code_s { at: 0, 0; size: 16, 16; tint: ink; show: r.sk == 22 }
+            }
+            //  A sum: an equals sign.
+            text "=" { at: 28, 25; anchor: center; size: 17; weight: 600; family: "SF Pro Display"; color: ink; show: r.sk == 21 }
+        }
 
         text r.name {
-            at: 52, if(r.has_sub, 18, 24); anchor: left center; width: 270; lines: 1
-            size: 13.5; weight: 500; family: "SF Pro Display"; color: ink
+            at: 58, if(r.has_sub, 19, 26); anchor: left center; width: 400; lines: 1
+            size: 14; weight: 500; family: "SF Pro Display"; color: ink; show: not (r.kind == 3 and r.sk == 21)
+        }
+        //  A sum's answer, larger.
+        text r.name {
+            at: 58, 18; anchor: left center; width: 400; lines: 1
+            size: 17; weight: 600; family: "SF Pro Display"; color: ink; show: r.kind == 3 and r.sk == 21
         }
         text r.sub {
-            at: 52, 33; anchor: left center; width: 270; lines: 1
+            at: 58, 35; anchor: left center; width: 400; lines: 1
             size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 45%; show: r.has_sub
         }
-        //  A folder can be gone into (Tab).
-        image ic_chev { at: 330, 17; size: 14, 14; tint: ink; opacity: 35% + 30% * r.sel; show: r.kind == 2 }
+
+        //  At its right: a switch (the knob a capsule of white glass); a value or a hint; the
+        //  current power mode's check; a chevron for what opens somewhere else.
+        group {
+            show: sw
+            body {
+                gradient: 518, 14 to 562, 38, mix(well, soft_l, onk), mix(well, soft_s, onk)
+                opacity: 45% + 55% * onk
+                box { from: 518, 14; size: 44, 24; corner: 12 continuous }
+            }
+            body {
+                gradient: 521, 17 to 541, 35, #ffffff, pearl
+                glass: 25%; blur: 0%; light: 8%, 17, 18; shadow: 0, 1, 4, 30%
+                box { from: 521 + 15 * onk, 17; size: 23, 18; corner: 9 continuous }
+            }
+        }
+        text r.val {
+            at: 560, 26; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"
+            color: ink; opacity: 55% + 20% * if(r.sel, 1, 0); show: r.kind == 3 and not sw
+        }
+        image ic_check { at: 545, 21; size: 10, 10; tint: soft_l; opacity: onk; show: r.kind == 3 and r.sk >= 5 and r.sk <= 7 }
+        image ic_chev { at: 546, 19; size: 14, 14; tint: ink; opacity: 35% + 30% * if(r.sel, 1, 0); show: r.kind == 2 or (r.kind == 3 and (r.sk == 11 or r.sk == 12 or r.sk == 25)) }
 
         on press row { emit launch_pick_row(r.index) }
     }
 
     measure where_m
+    prop lqk = 0 ~220ms           // something typed: the answers come in under the field
+    follow lqk = if(launch_q_empty, 0, 1)
 
     group {
         opacity: smooth(0.4, 1, on_launch)
-        move: 28 * (1 - on_launch), 0
 
-        //  The header is the search: back, and the field, lit while it is typed in.
+        //  The field is the pill itself.
         group {
-            move: ex0 + 16, 44
-            zone ellipse lb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
-            body {
-                color: mix(chip, chip_hi, lb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * lb.hover - lb.pressed, 4.2, 21%
-                ellipse { at: 16, 18; radius: 16 - 0.6 * lb.pressed }
-            }
-            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * lb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
-
-            box { from: 40, 0; size: 312, 36; corner: 18 continuous; color: well; opacity: 30% }
-            body { color: well; opacity: 30%; box { from: 52, 0; size: 288, 2; corner: 1 continuous } }
-            box { from: 40, 0; size: 312, 36; corner: 18 continuous; stroke: 1; color: soft_l; opacity: 40% }
-            image ic_search { at: 52, 11; size: 14, 14; tint: ink; opacity: 75% }
-            input launch_q { at: 74, 9; width: 270 - (where_m.width + 39) * files_mode; size: 13.5; color: ink; placeholder: ""; label: "Search apps, or files after a space" }
-            text "Search apps · space for files" {
-                at: 74, 18; anchor: left center; size: 13.5; weight: 500; family: "SF Pro Display"
-                color: ink; opacity: 40%; show: launch_q_empty
+            move: ex0, 0
+            image ic_search_l { at: 24, 20; size: 20, 20; tint: ink; opacity: 65% + 20% * lqk }
+            input launch_q { at: 58, 19; width: 600 - 58 - 26 - (where_m.width + 39) * files_mode; size: 18; weight: 500; family: "SF Pro Display"; color: ink; placeholder: ""; label: "Search apps, settings and the web, or files after a space" }
+            text "Search" {
+                at: 58, 30; anchor: left center; size: 18; weight: 500; family: "SF Pro Display"
+                color: ink; opacity: 38%; show: launch_q_empty
             }
 
             //  In files mode, where it is looking: a small chip at the end of the field.
             group {
                 show: files_mode
                 body {
-                    color: mix(chip_hi, lilac, 0.14); glass: 25%; blur: 0%; light: 4%, 6, 12
-                    box { from: 344 - where_m.width - 31, 6; size: where_m.width + 31, 24; corner: 12 continuous }
+                    color: mix(chip_hi, lilac, 0.14); material: control
+                    box { from: 578 - where_m.width - 31, 18; size: where_m.width + 31, 24; corner: 12 continuous }
                 }
-                image ic_folder { at: 344 - where_m.width - 25, 11; size: 14, 14; tint: ink; opacity: 85% }
+                image ic_folder { at: 578 - where_m.width - 25, 23; size: 14, 14; tint: ink; opacity: 85% }
                 text launch_where {
-                    at: 338, 18; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"
+                    at: 572, 30; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"
                     color: ink; opacity: 85%; measure: where_m
                 }
             }
         }
 
-        //  Under the rows, so a press reaches them; the wheel works over all of it.
-        zone box launch_list { from: ex0 + 12, 88; size: 360, ll_h; label: "Results" }
-        column llist {
-            at: ex0 + 12, 88; gap: 2
-            for r in hits { LaunchRow(r) }
-        }
-        text pick(launch_state, "", "Nothing found", "Looking…") {
-            at: ex0 + 192, 112; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
-            color: ink; opacity: 50%; show: hits.count == 0
+        //  The answers, once something is typed.
+        group {
+            opacity: lqk
+            move: 0, -6 * (1 - lqk)
+            line { from: ex0 + 22, 60; to: ex0 + 578, 60; width: 0.7; color: ink; opacity: 10% }
+            //  Under the rows, so a press reaches them; the wheel works over all of it.
+            zone box launch_list { from: ex0 + 12, 68; size: 576, ll_h; label: "Results"; active: not launch_q_empty }
+            column llist {
+                at: ex0 + 12, 68; gap: 2
+                for r in hits { LaunchRow(r) }
+            }
+            text pick(launch_state, "", "Nothing found", "Looking…") {
+                at: ex0 + 300, 94; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+                color: ink; opacity: 50%; show: hits.count == 0
+            }
         }
     }
 
-    on press lb { emit go_home }
     on scroll launch_list { emit launch_scroll(wheel) }
 }

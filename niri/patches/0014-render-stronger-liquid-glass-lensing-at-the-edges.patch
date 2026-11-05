@@ -1,0 +1,54 @@
+From 85f982b81502940d0d27f5186a8567323b402dfc Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 02:13:02 +0400
+Subject: [PATCH 14/38] render: stronger liquid glass lensing at the edges
+
+The (1-x)^2 squeeze capped at 0.45x bevel shifted 7 px at most on a 16 px
+card edge, too weak to read as Apple's. Now (1-x)^1.1 capped at 0.85x
+bevel: nearly linear, the whole band strongly stretched toward the rim, and
+still fold-free (steepest slope 0.935 < 1).
+---
+ src/render_helpers/shaders/liquid_glass.frag | 21 ++++++++++----------
+ 1 file changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 2865cd3d..fc04a24c 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -18,8 +18,8 @@
+ // The strict Snell trace folds the backdrop into a mirror image near the rim,
+ // which over sharp content or on small shapes is a mess of jagged copies, so
+ // the shift is a fold-free squeeze instead: strongest at the rim (about
+-// thickness * (ior - 1), capped at FOLD_CAP x bevel), falling off as (1-x)^2
+-// to nothing where the glass turns flat. The middle shows the backdrop
++// thickness * (ior - 1), capped at LENS_CAP x bevel), falling off nearly
++// linearly to nothing where the glass turns flat. The middle shows the backdrop
+ // undistorted; the rim squeezes what is just inside it — the lensed band.
+ // Dispersion spreads that shift per channel; the light uses the true squircle
+ // slope: a top-left glint, a weaker internal reflection opposite, a hairline.
+@@ -146,16 +146,17 @@ float edge_slope(float u, float bevel, float thickness) {
+ }
+ 
+ // How far (px, inward) the backdrop shifts at `u` px in from the edge. A ray
+-// through glass of index `ior` this thick shifts at most about thickness *
+-// (ior - 1) at the rim; the shift falls off as (1 - x)^2 across the bevel.
+-// Capped at FOLD_CAP x bevel, so the backdrop is squeezed toward the rim but
+-// never folds back into a mirror image (the strict Snell trace does, and on a
+-// small shape or over a sharp edge that mirroring is a mess of jagged copies).
+-#define FOLD_CAP 0.45
++// through glass of index `ior` this thick shifts about thickness * (ior - 1)
++// at the rim. The shift falls off as (1 - x)^LENS_POWER across the bevel,
++// nearly linear, so the whole band is strongly squeezed (Apple's edges bend a
++// lot), capped at LENS_CAP x bevel so the squeeze never reverses into a
++// mirror image: its steepest slope, LENS_POWER * LENS_CAP, stays below 1.
++#define LENS_POWER 1.1
++#define LENS_CAP 0.85
+ float displacement(float u, float bevel, float thickness, float ior) {
+     float x = clamp(u / bevel, 0.0, 1.0);
+-    float peak = min(thickness * (ior - 1.0), FOLD_CAP * bevel);
+-    return peak * (1.0 - x) * (1.0 - x);
++    float peak = min(thickness * (ior - 1.0), LENS_CAP * bevel);
++    return peak * pow(1.0 - x, LENS_POWER);
+ }
+ 
+ // The backdrop at c: frosted, or crisp by `clear` (0..1).

@@ -1,0 +1,1080 @@
+From 9aa2d223e9d3fe30c1d26451fd72c6bb53ecb317 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 27 Oct 2026 21:49:44 +0400
+Subject: [PATCH 05/38] render: liquid glass for lumen (lumen-glass-v1)
+
+A private protocol (resources/lumen-glass-v1.xml): a client describes its
+glass as rounded boxes (continuous or circular corners) with refraction,
+dispersion, bevel and specular, plus merge/frost/saturation, double-buffered
+on wl_surface.commit. Layer surfaces with glass get one framebuffer capture
+over the shapes' bounding box (this frame's backdrop, no client capture),
+drawn through liquid_glass.frag: squircle SDF, smooth union, inward lensing
+along a circular bevel profile, per-channel dispersion, rim light.
+---
+ resources/lumen-glass-v1.xml                 | 111 +++++++++
+ src/handlers/mod.rs                          |   1 +
+ src/layer/mapped.rs                          |  16 +-
+ src/niri.rs                                  |   4 +
+ src/protocols/lumen_glass.rs                 | 249 +++++++++++++++++++
+ src/protocols/mod.rs                         |   1 +
+ src/protocols/raw.rs                         |  26 ++
+ src/render_helpers/framebuffer_effect.rs     | 105 ++++++--
+ src/render_helpers/liquid_glass.rs           | 131 ++++++++++
+ src/render_helpers/mod.rs                    |   1 +
+ src/render_helpers/shaders/liquid_glass.frag | 191 ++++++++++++++
+ src/render_helpers/shaders/mod.rs            |  21 ++
+ 12 files changed, 836 insertions(+), 21 deletions(-)
+ create mode 100644 resources/lumen-glass-v1.xml
+ create mode 100644 src/protocols/lumen_glass.rs
+ create mode 100644 src/render_helpers/liquid_glass.rs
+ create mode 100644 src/render_helpers/shaders/liquid_glass.frag
+
+diff --git a/resources/lumen-glass-v1.xml b/resources/lumen-glass-v1.xml
+new file mode 100644
+index 00000000..dcd670ae
+--- /dev/null
++++ b/resources/lumen-glass-v1.xml
+@@ -0,0 +1,111 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<protocol name="lumen_glass_v1">
++  <copyright>
++    Copyright © 2026 Ritvik
++
++    Permission is hereby granted, free of charge, to any person obtaining a
++    copy of this software and associated documentation files (the "Software"),
++    to deal in the Software without restriction, including without limitation
++    the rights to use, copy, modify, merge, publish, distribute, sublicense,
++    and/or sell copies of the Software, and to permit persons to whom the
++    Software is furnished to do so, subject to the following conditions:
++
++    The above copyright notice and this permission notice (including the next
++    paragraph) shall be included in all copies or substantial portions of the
++    Software.
++
++    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++    DEALINGS IN THE SOFTWARE.
++  </copyright>
++
++  <description summary="liquid glass drawn by the compositor">
++    A client describes the glass on its surface as shapes; the compositor
++    draws, under the surface, what is really behind each shape seen through
++    glass: refracted toward the shape's curved edge, split into colour at
++    it, frosted, and lit along its rim. Shapes close to each other melt
++    together. Nothing is captured by the client: the compositor uses the
++    frame it is composing, so the glass is never a frame behind.
++
++    Private to lumen and the patched niri.
++  </description>
++
++  <interface name="lumen_glass_manager_v1" version="1">
++    <description summary="glass for surfaces">
++    </description>
++
++    <request name="destroy" type="destructor">
++      <description summary="destroy the manager">
++        Existing glass objects are not affected.
++      </description>
++    </request>
++
++    <enum name="error">
++      <entry name="glass_exists" value="0"
++             summary="the surface already has a glass object"/>
++    </enum>
++
++    <request name="get_glass">
++      <description summary="the glass of a surface">
++        At most one per surface.
++      </description>
++      <arg name="id" type="new_id" interface="lumen_glass_surface_v1"/>
++      <arg name="surface" type="object" interface="wl_surface"/>
++    </request>
++  </interface>
++
++  <interface name="lumen_glass_surface_v1" version="1">
++    <description summary="the glass of one surface">
++      All state is double-buffered: it applies on the surface's next
++      wl_surface.commit, together with what the client drew for that frame.
++      Initially there are no shapes, so no glass.
++    </description>
++
++    <request name="destroy" type="destructor">
++      <description summary="remove the glass">
++        Takes effect on the next wl_surface.commit.
++      </description>
++    </request>
++
++    <enum name="error">
++      <entry name="invalid_shapes" value="0"
++             summary="the shapes array is not a whole number of shapes"/>
++    </enum>
++
++    <request name="set_shapes">
++      <description summary="the glass shapes">
++        Native-endian 32-bit floats, 13 per shape, at most 8 shapes; an empty
++        array removes all glass. Per shape, in surface-local logical pixels
++        unless noted:
++
++          x, y, width, height
++          radius top-left, top-right, bottom-right, bottom-left
++          corner: 0 circular arcs, 1 continuous (squircle, lumen's
++            `continuous` corners)
++          refraction: how far the backdrop is displaced at the very rim,
++            fading to 0 where the edge's curve ends
++          dispersion: 0..1, how much the colours separate at the rim
++          bevel: how far in from the edge the glass is curved; the middle
++            is flat and shows the backdrop undisplaced
++          specular: 0..1, the light along the rim
++      </description>
++      <arg name="shapes" type="array"/>
++    </request>
++
++    <request name="set_params">
++      <description summary="how the glass behaves as a whole">
++        merge: shapes closer than this (logical px) melt into each other.
++        frost: 0..1, 0 clear glass, 1 the compositor's full blur.
++        saturation: of what is seen through the glass (1 unchanged).
++        Defaults: merge 0, frost 1, saturation 1.
++      </description>
++      <arg name="merge" type="fixed"/>
++      <arg name="frost" type="fixed"/>
++      <arg name="saturation" type="fixed"/>
++    </request>
++  </interface>
++</protocol>
+diff --git a/src/handlers/mod.rs b/src/handlers/mod.rs
+index 3532078b..e3f43671 100644
+--- a/src/handlers/mod.rs
++++ b/src/handlers/mod.rs
+@@ -859,5 +859,6 @@ delegate_output_management!(State);
+ 
+ impl MutterX11InteropHandler for State {}
+ delegate_mutter_x11_interop!(State);
++crate::delegate_lumen_glass!(State);
+ 
+ delegate_single_pixel_buffer!(State);
+diff --git a/src/layer/mapped.rs b/src/layer/mapped.rs
+index fbaa6fc6..891f1de7 100644
+--- a/src/layer/mapped.rs
++++ b/src/layer/mapped.rs
+@@ -17,7 +17,7 @@ use crate::render_helpers::shadow::ShadowRenderElement;
+ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
+ use crate::render_helpers::surface::push_elements_from_surface_tree;
+ use crate::render_helpers::xray::XrayPos;
+-use crate::render_helpers::{background_effect, RenderCtx};
++use crate::render_helpers::{background_effect, liquid_glass, RenderCtx};
+ use crate::utils::{baba_is_float_offset, round_logical_in_physical};
+ 
+ #[derive(Debug)]
+@@ -236,6 +236,20 @@ impl MappedLayer {
+         let geometry = Rectangle::new(location, self.block_out_buffer.size());
+         let surface_off = Point::new(0., 0.); // No geometry on layer surfaces.
+         let surface_anim_scale = Scale::from(1.);
++        // Liquid glass (lumen-glass-v1), for the glass the surface describes as
++        // shapes; any glass it can't (blur region strips) still goes below.
++        if !should_block_out {
++            liquid_glass::render_for_surface(
++                ctx.as_gles(),
++                ns,
++                location,
++                self.scale,
++                surface,
++                self.blur_config,
++                &mut |elem| push(elem.into()),
++            );
++        }
++
+         let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+         background_effect::render_for_tile(
+             ctx.as_gles(),
+diff --git a/src/niri.rs b/src/niri.rs
+index ec40e01c..23d50646 100644
+--- a/src/niri.rs
++++ b/src/niri.rs
+@@ -147,6 +147,7 @@ use crate::niri_render_elements;
+ use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
+ use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
+ use crate::protocols::gamma_control::GammaControlManagerState;
++use crate::protocols::lumen_glass::LumenGlassManagerState;
+ use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
+ use crate::protocols::output_management::OutputManagementManagerState;
+ use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
+@@ -311,6 +312,7 @@ pub struct Niri {
+     pub gamma_control_manager_state: GammaControlManagerState,
+     pub activation_state: XdgActivationState,
+     pub mutter_x11_interop_state: MutterX11InteropManagerState,
++    pub lumen_glass_state: LumenGlassManagerState,
+ 
+     // This will not work as is outside of tests, so it is gated with #[cfg(test)] for now. In
+     // particular, shaders will need to learn about the single pixel buffer. Also, it must be
+@@ -2363,6 +2365,7 @@ impl Niri {
+             )
+             .unwrap();
+ 
++        let lumen_glass_state = LumenGlassManagerState::new::<State, _>(&display_handle, |_| true);
+         let mutter_x11_interop_state =
+             MutterX11InteropManagerState::new::<State, _>(&display_handle, move |_| true);
+ 
+@@ -2559,6 +2562,7 @@ impl Niri {
+             gamma_control_manager_state,
+             activation_state,
+             mutter_x11_interop_state,
++            lumen_glass_state,
+             #[cfg(test)]
+             single_pixel_buffer_state,
+ 
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+new file mode 100644
+index 00000000..185f744e
+--- /dev/null
++++ b/src/protocols/lumen_glass.rs
+@@ -0,0 +1,249 @@
++//! lumen-glass-v1: liquid glass drawn by the compositor for lumen's surfaces.
++//!
++//! The client sends its glass as shapes (resources/lumen-glass-v1.xml); they are
++//! double-buffered in the surface's cached state, so they change in the very
++//! frame the client drew for them. Rendering is render_helpers/liquid_glass.rs.
++
++use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
++use smithay::reexports::wayland_server::{
++    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
++};
++use smithay::wayland::compositor::{with_states, Cacheable};
++
++use super::raw::lumen_glass::v1::server::{lumen_glass_manager_v1, lumen_glass_surface_v1};
++use lumen_glass_manager_v1::LumenGlassManagerV1;
++use lumen_glass_surface_v1::LumenGlassSurfaceV1;
++
++const VERSION: u32 = 1;
++
++/// Floats per shape in set_shapes.
++const SHAPE_FLOATS: usize = 13;
++pub const MAX_SHAPES: usize = 8;
++
++#[derive(Debug, Clone, Copy, PartialEq)]
++pub struct GlassShape {
++    pub x: f32,
++    pub y: f32,
++    pub w: f32,
++    pub h: f32,
++    /// top-left, top-right, bottom-right, bottom-left
++    pub radii: [f32; 4],
++    pub continuous: bool,
++    pub refraction: f32,
++    pub dispersion: f32,
++    pub bevel: f32,
++    pub specular: f32,
++}
++
++/// Double-buffered glass state of a surface.
++#[derive(Debug, Clone, PartialEq)]
++pub struct LumenGlassCachedState {
++    pub shapes: Vec<GlassShape>,
++    pub merge: f32,
++    pub frost: f32,
++    pub saturation: f32,
++}
++
++impl Default for LumenGlassCachedState {
++    fn default() -> Self {
++        Self {
++            shapes: Vec::new(),
++            merge: 0.,
++            frost: 1.,
++            saturation: 1.,
++        }
++    }
++}
++
++impl Cacheable for LumenGlassCachedState {
++    fn commit(&mut self, _dh: &DisplayHandle) -> Self {
++        self.clone()
++    }
++
++    fn merge_into(self, into: &mut Self, _dh: &DisplayHandle) {
++        *into = self;
++    }
++}
++
++/// Whether a surface has a live glass object (one per surface).
++#[derive(Default)]
++struct HasGlass(std::sync::Mutex<bool>);
++
++pub struct LumenGlassManagerState;
++
++pub struct LumenGlassManagerGlobalData {
++    filter: Box<dyn for<'c> Fn(&'c Client) -> bool + Send + Sync>,
++}
++
++impl LumenGlassManagerState {
++    pub fn new<D, F>(display: &DisplayHandle, filter: F) -> Self
++    where
++        D: GlobalDispatch<LumenGlassManagerV1, LumenGlassManagerGlobalData>,
++        D: Dispatch<LumenGlassManagerV1, ()>,
++        D: Dispatch<LumenGlassSurfaceV1, Weak<WlSurface>>,
++        D: 'static,
++        F: for<'c> Fn(&'c Client) -> bool + Send + Sync + 'static,
++    {
++        let global_data = LumenGlassManagerGlobalData {
++            filter: Box::new(filter),
++        };
++        display.create_global::<D, LumenGlassManagerV1, _>(VERSION, global_data);
++        Self
++    }
++}
++
++impl<D> GlobalDispatch<LumenGlassManagerV1, LumenGlassManagerGlobalData, D>
++    for LumenGlassManagerState
++where
++    D: GlobalDispatch<LumenGlassManagerV1, LumenGlassManagerGlobalData>,
++    D: Dispatch<LumenGlassManagerV1, ()>,
++    D: Dispatch<LumenGlassSurfaceV1, Weak<WlSurface>>,
++    D: 'static,
++{
++    fn bind(
++        _state: &mut D,
++        _handle: &DisplayHandle,
++        _client: &Client,
++        manager: New<LumenGlassManagerV1>,
++        _global_data: &LumenGlassManagerGlobalData,
++        data_init: &mut DataInit<'_, D>,
++    ) {
++        data_init.init(manager, ());
++    }
++
++    fn can_view(client: Client, global_data: &LumenGlassManagerGlobalData) -> bool {
++        (global_data.filter)(&client)
++    }
++}
++
++impl<D> Dispatch<LumenGlassManagerV1, (), D> for LumenGlassManagerState
++where
++    D: Dispatch<LumenGlassManagerV1, ()>,
++    D: Dispatch<LumenGlassSurfaceV1, Weak<WlSurface>>,
++    D: 'static,
++{
++    fn request(
++        _state: &mut D,
++        _client: &Client,
++        manager: &LumenGlassManagerV1,
++        request: lumen_glass_manager_v1::Request,
++        _data: &(),
++        _dhandle: &DisplayHandle,
++        data_init: &mut DataInit<'_, D>,
++    ) {
++        match request {
++            lumen_glass_manager_v1::Request::Destroy => (),
++            lumen_glass_manager_v1::Request::GetGlass { id, surface } => {
++                let exists = with_states(&surface, |states| {
++                    let has = states.data_map.get_or_insert_threadsafe(HasGlass::default);
++                    std::mem::replace(&mut *has.0.lock().unwrap(), true)
++                });
++                if exists {
++                    manager.post_error(
++                        lumen_glass_manager_v1::Error::GlassExists,
++                        "the surface already has a glass object",
++                    );
++                    return;
++                }
++                data_init.init(id, surface.downgrade());
++            }
++        }
++    }
++}
++
++fn with_pending(surface: &Weak<WlSurface>, f: impl FnOnce(&mut LumenGlassCachedState)) {
++    if let Ok(surface) = surface.upgrade() {
++        with_states(&surface, |states| {
++            f(states.cached_state.get::<LumenGlassCachedState>().pending());
++        });
++    }
++}
++
++impl<D> Dispatch<LumenGlassSurfaceV1, Weak<WlSurface>, D> for LumenGlassManagerState
++where
++    D: Dispatch<LumenGlassSurfaceV1, Weak<WlSurface>>,
++    D: 'static,
++{
++    fn request(
++        _state: &mut D,
++        _client: &Client,
++        glass: &LumenGlassSurfaceV1,
++        request: lumen_glass_surface_v1::Request,
++        surface: &Weak<WlSurface>,
++        _dhandle: &DisplayHandle,
++        _data_init: &mut DataInit<'_, D>,
++    ) {
++        match request {
++            lumen_glass_surface_v1::Request::Destroy => {
++                with_pending(surface, |p| *p = LumenGlassCachedState::default());
++                if let Ok(s) = surface.upgrade() {
++                    with_states(&s, |states| {
++                        if let Some(has) = states.data_map.get::<HasGlass>() {
++                            *has.0.lock().unwrap() = false;
++                        }
++                    });
++                }
++            }
++            lumen_glass_surface_v1::Request::SetShapes { shapes } => {
++                let floats = shapes.len() / 4;
++                if shapes.len() % 4 != 0 || floats % SHAPE_FLOATS != 0 {
++                    glass.post_error(
++                        lumen_glass_surface_v1::Error::InvalidShapes,
++                        "the shapes array is not a whole number of shapes",
++                    );
++                    return;
++                }
++                let f: Vec<f32> = shapes
++                    .chunks_exact(4)
++                    .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
++                    .collect();
++                let parsed: Vec<GlassShape> = f
++                    .chunks_exact(SHAPE_FLOATS)
++                    .take(MAX_SHAPES)
++                    .filter(|v| v.iter().all(|x| x.is_finite()) && v[2] > 0. && v[3] > 0.)
++                    .map(|v| GlassShape {
++                        x: v[0],
++                        y: v[1],
++                        w: v[2],
++                        h: v[3],
++                        radii: [v[4].max(0.), v[5].max(0.), v[6].max(0.), v[7].max(0.)],
++                        continuous: v[8] >= 0.5,
++                        refraction: v[9].clamp(-200., 200.),
++                        dispersion: v[10].clamp(0., 1.),
++                        bevel: v[11].max(0.),
++                        specular: v[12].clamp(0., 1.),
++                    })
++                    .collect();
++                with_pending(surface, |p| p.shapes = parsed);
++            }
++            lumen_glass_surface_v1::Request::SetParams {
++                merge,
++                frost,
++                saturation,
++            } => {
++                with_pending(surface, |p| {
++                    p.merge = (merge as f32).max(0.);
++                    p.frost = (frost as f32).clamp(0., 1.);
++                    p.saturation = (saturation as f32).clamp(0., 4.);
++                });
++            }
++        }
++    }
++}
++
++#[macro_export]
++macro_rules! delegate_lumen_glass {
++    ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
++        smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
++            $crate::protocols::raw::lumen_glass::v1::server::lumen_glass_manager_v1::LumenGlassManagerV1: $crate::protocols::lumen_glass::LumenGlassManagerGlobalData
++        ] => $crate::protocols::lumen_glass::LumenGlassManagerState);
++
++        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
++            $crate::protocols::raw::lumen_glass::v1::server::lumen_glass_manager_v1::LumenGlassManagerV1: ()
++        ] => $crate::protocols::lumen_glass::LumenGlassManagerState);
++
++        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
++            $crate::protocols::raw::lumen_glass::v1::server::lumen_glass_surface_v1::LumenGlassSurfaceV1: smithay::reexports::wayland_server::Weak<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>
++        ] => $crate::protocols::lumen_glass::LumenGlassManagerState);
++    };
++}
+diff --git a/src/protocols/mod.rs b/src/protocols/mod.rs
+index b150cb7f..ae23a08a 100644
+--- a/src/protocols/mod.rs
++++ b/src/protocols/mod.rs
+@@ -1,6 +1,7 @@
+ pub mod ext_workspace;
+ pub mod foreign_toplevel;
+ pub mod gamma_control;
++pub mod lumen_glass;
+ pub mod mutter_x11_interop;
+ pub mod output_management;
+ pub mod screencopy;
+diff --git a/src/protocols/raw.rs b/src/protocols/raw.rs
+index fac1e4df..3a97c896 100644
+--- a/src/protocols/raw.rs
++++ b/src/protocols/raw.rs
+@@ -23,3 +23,29 @@ pub mod mutter_x11_interop {
+         }
+     }
+ }
++
++pub mod lumen_glass {
++    pub mod v1 {
++        pub use self::generated::server;
++
++        mod generated {
++            pub mod server {
++                #![allow(dead_code, non_camel_case_types, unused_unsafe, unused_variables)]
++                #![allow(non_upper_case_globals, non_snake_case, unused_imports)]
++                #![allow(missing_docs, clippy::all)]
++
++                use smithay::reexports::wayland_server;
++                use wayland_server::protocol::*;
++
++                pub mod __interfaces {
++                    use smithay::reexports::wayland_server;
++                    use wayland_server::protocol::__interfaces::*;
++                    wayland_scanner::generate_interfaces!("resources/lumen-glass-v1.xml");
++                }
++                use self::__interfaces::*;
++
++                wayland_scanner::generate_server_code!("resources/lumen-glass-v1.xml");
++            }
++        }
++    }
++}
+diff --git a/src/render_helpers/framebuffer_effect.rs b/src/render_helpers/framebuffer_effect.rs
+index 92b7114d..889f5d89 100644
+--- a/src/render_helpers/framebuffer_effect.rs
++++ b/src/render_helpers/framebuffer_effect.rs
+@@ -5,7 +5,7 @@ use niri_config::CornerRadius;
+ use smithay::backend::allocator::Fourcc;
+ use smithay::backend::renderer::element::{Element, Id, RenderElement};
+ use smithay::backend::renderer::gles::{
+-    ffi, GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform,
++    ffi, GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform, UniformValue,
+ };
+ use smithay::backend::renderer::utils::CommitCounter;
+ use smithay::backend::renderer::{Frame as _, FrameContext, Offscreen, Texture as _};
+@@ -42,6 +42,17 @@ pub struct FramebufferEffectElement {
+     ring_width: f32,
+     ring_light: f32,
+     ring_shade: f32,
++    /// Liquid glass (lumen-glass-v1) instead of a plain backdrop.
++    glass: Option<GlassDraw>,
++}
++
++/// Liquid glass shapes, packed for the liquid_glass shader: per shape, columns
++/// (x, y, w, h), radii, (corner, refraction, dispersion, bevel), (specular, 0, 0, 0),
++/// in logical px from the effect geometry's top-left.
++#[derive(Debug, Clone)]
++pub struct GlassDraw {
++    pub shapes: Vec<[f32; 16]>,
++    pub merge: f32,
+ }
+ 
+ #[derive(Debug)]
+@@ -96,6 +107,7 @@ impl FramebufferEffect {
+             ring_width: 0.,
+             ring_light: 0.,
+             ring_shade: 0.,
++            glass: None,
+         }
+     }
+ }
+@@ -103,6 +115,12 @@ impl FramebufferEffect {
+ impl FramebufferEffectElement {
+     /// Draw only a ring along the clip's edge: the real backdrop under a window's border, for
+     /// glass borders on windows that see through to other windows (xray off).
++    /// Draw liquid glass shapes over the backdrop instead of the plain effect.
++    pub fn with_glass(mut self, glass: GlassDraw) -> Self {
++        self.glass = Some(glass);
++        self
++    }
++
+     pub fn with_ring(mut self, width: f64, light: f32, shade: f32) -> Self {
+         self.ring_width = width as f32;
+         self.ring_light = light;
+@@ -115,6 +133,52 @@ impl FramebufferEffectElement {
+         crop: Rectangle<f64, Logical>,
+         transform: Transform,
+     ) -> [Uniform<'static>; 10] {
++        let (input_to_clip_geo, clip_geo_size) = self.input_to_clip_geo(crop, transform);
++        [
++            Uniform::new("niri_scale", self.scale),
++            Uniform::new("geo_size", clip_geo_size),
++            Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
++            mat3_uniform("input_to_geo", input_to_clip_geo),
++            Uniform::new("noise", self.noise),
++            Uniform::new("saturation", self.saturation),
++            Uniform::new("bg_color", [0f32, 0., 0., 0.]),
++            // The program is shared with glass border rings: uniforms stick, so always set them.
++            Uniform::new("ring_width", self.ring_width),
++            Uniform::new("ring_light", self.ring_light),
++            Uniform::new("ring_shade", self.ring_shade),
++        ]
++    }
++
++    fn compute_glass_uniforms(
++        &self,
++        glass: &GlassDraw,
++        crop: Rectangle<f64, Logical>,
++        transform: Transform,
++    ) -> [Uniform<'static>; 8] {
++        let (input_to_clip_geo, clip_geo_size) = self.input_to_clip_geo(crop, transform);
++        [
++            Uniform::new("niri_scale", self.scale),
++            Uniform::new("geo_size", clip_geo_size),
++            mat3_uniform("input_to_geo", input_to_clip_geo),
++            Uniform {
++                name: "glass_shapes".into(),
++                value: UniformValue::Matrix4x4 {
++                    matrices: glass.shapes.clone(),
++                    transpose: false,
++                },
++            },
++            Uniform::new("glass_count", glass.shapes.len() as f32),
++            Uniform::new("glass_merge", glass.merge),
++            Uniform::new("saturation", self.saturation),
++            Uniform::new("noise", self.noise),
++        ]
++    }
++
++    fn input_to_clip_geo(
++        &self,
++        crop: Rectangle<f64, Logical>,
++        transform: Transform,
++    ) -> (Mat3, (f32, f32)) {
+         let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
+         let offset = Vec2::new(offset.x as f32, offset.y as f32);
+         let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
+@@ -131,20 +195,7 @@ impl FramebufferEffectElement {
+         let input_to_clip_geo = input_to_clip_geo * transform_mat;
+ 
+         let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
+-
+-        [
+-            Uniform::new("niri_scale", self.scale),
+-            Uniform::new("geo_size", clip_geo_size),
+-            Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+-            mat3_uniform("input_to_geo", input_to_clip_geo),
+-            Uniform::new("noise", self.noise),
+-            Uniform::new("saturation", self.saturation),
+-            Uniform::new("bg_color", [0f32, 0., 0., 0.]),
+-            // The program is shared with glass border rings: uniforms stick, so always set them.
+-            Uniform::new("ring_width", self.ring_width),
+-            Uniform::new("ring_light", self.ring_light),
+-            Uniform::new("ring_shade", self.ring_shade),
+-        ]
++        (input_to_clip_geo, clip_geo_size)
+     }
+ }
+ 
+@@ -408,11 +459,25 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
+         );
+ 
+-        let program = Shaders::get_from_frame(frame).postprocess_and_clip.clone();
+-        let uniforms = program
+-            .is_some()
+-            .then(|| self.compute_uniforms(crop, frame.transformation()));
+-        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..]);
++        let shaders = Shaders::get_from_frame(frame);
++        let (program, uniforms): (_, Vec<Uniform<'static>>) = match &self.glass {
++            Some(glass) => {
++                let program = shaders.liquid_glass.clone();
++                let uniforms = program.is_some().then(|| {
++                    self.compute_glass_uniforms(glass, crop, frame.transformation())
++                        .to_vec()
++                });
++                (program, uniforms.unwrap_or_default())
++            }
++            None => {
++                let program = shaders.postprocess_and_clip.clone();
++                let uniforms = program
++                    .is_some()
++                    .then(|| self.compute_uniforms(crop, frame.transformation()).to_vec());
++                (program, uniforms.unwrap_or_default())
++            }
++        };
++        let uniforms = &uniforms[..];
+ 
+         frame.render_texture_from_to(
+             texture,
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+new file mode 100644
+index 00000000..4db0cdc2
+--- /dev/null
++++ b/src/render_helpers/liquid_glass.rs
+@@ -0,0 +1,131 @@
++//! Liquid glass for surfaces that asked for it with lumen-glass-v1: one
++//! framebuffer capture over the bounding box of the surface's glass shapes (what
++//! is really behind them, this frame), drawn through the liquid_glass shader.
++
++use std::sync::Mutex;
++
++use niri_config::CornerRadius;
++use smithay::backend::renderer::gles::GlesRenderer;
++use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
++use smithay::utils::{Logical, Point, Rectangle, Size};
++use smithay::wayland::compositor::with_states;
++
++use crate::protocols::lumen_glass::LumenGlassCachedState;
++use crate::render_helpers::background_effect::{BackgroundEffectElement, RenderParams};
++use crate::render_helpers::blur::BlurOptions;
++use crate::render_helpers::framebuffer_effect::{FramebufferEffect, GlassDraw};
++use crate::render_helpers::RenderCtx;
++
++/// The capture a surface's glass is drawn from, and the state it was last
++/// drawn with (a change re-renders it).
++struct SurfaceGlass(Mutex<SurfaceGlassInner>);
++
++struct SurfaceGlassInner {
++    effect: FramebufferEffect,
++    last: Option<LumenGlassCachedState>,
++}
++
++/// Renders the surface's liquid glass, if it has any; `location` is the
++/// surface's origin. Returns whether it did (then it replaces the surface's
++/// plain background effect).
++pub fn render_for_surface(
++    _ctx: RenderCtx<GlesRenderer>,
++    ns: Option<usize>,
++    location: Point<f64, Logical>,
++    scale: f64,
++    surface: &WlSurface,
++    blur_config: niri_config::Blur,
++    push: &mut dyn FnMut(BackgroundEffectElement),
++) -> bool {
++    with_states(surface, |states| {
++        if !states.cached_state.has::<LumenGlassCachedState>() {
++            return false;
++        }
++        let state = states
++            .cached_state
++            .get::<LumenGlassCachedState>()
++            .current()
++            .clone();
++        if state.shapes.is_empty() {
++            return false;
++        }
++
++        // The shapes' bounding box, a pixel wider for the antialiased rim.
++        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
++        for s in &state.shapes {
++            x0 = x0.min(s.x);
++            y0 = y0.min(s.y);
++            x1 = x1.max(s.x + s.w);
++            y1 = y1.max(s.y + s.h);
++        }
++        let (x0, y0) = ((x0 - 1.).floor(), (y0 - 1.).floor());
++        let (x1, y1) = ((x1 + 1.).ceil(), (y1 + 1.).ceil());
++        let geometry = Rectangle::new(
++            location + Point::from((x0 as f64, y0 as f64)),
++            Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
++        );
++
++        let shapes = state
++            .shapes
++            .iter()
++            .map(|s| {
++                [
++                    s.x - x0,
++                    s.y - y0,
++                    s.w,
++                    s.h,
++                    s.radii[0],
++                    s.radii[1],
++                    s.radii[2],
++                    s.radii[3],
++                    if s.continuous { 1. } else { 0. },
++                    s.refraction,
++                    s.dispersion,
++                    s.bevel,
++                    s.specular,
++                    0.,
++                    0.,
++                    0.,
++                ]
++            })
++            .collect();
++
++        let frosted = state.frost > 0. && !blur_config.off;
++        let blur = frosted.then(|| {
++            let mut options = BlurOptions::from(blur_config);
++            options.offset *= state.frost as f64;
++            options
++        });
++        let noise = if frosted { blur_config.noise as f32 } else { 0. };
++
++        let glass = states
++            .data_map
++            .get_or_insert_threadsafe(|| {
++                SurfaceGlass(Mutex::new(SurfaceGlassInner {
++                    effect: FramebufferEffect::new(),
++                    last: None,
++                }))
++            });
++        let mut glass = glass.0.lock().unwrap();
++        if glass.last.as_ref() != Some(&state) {
++            glass.effect.damage();
++            glass.last = Some(state.clone());
++        }
++
++        let params = RenderParams {
++            geometry,
++            subregion: None,
++            clip: Some((geometry, CornerRadius::default())),
++            scale,
++        };
++        let elem = glass
++            .effect
++            .render(ns, params, blur, noise, state.saturation)
++            .with_glass(GlassDraw {
++                shapes,
++                merge: state.merge,
++            });
++        push(elem.into());
++        true
++    })
++}
+diff --git a/src/render_helpers/mod.rs b/src/render_helpers/mod.rs
+index 474437af..65815108 100644
+--- a/src/render_helpers/mod.rs
++++ b/src/render_helpers/mod.rs
+@@ -35,6 +35,7 @@ pub mod debug;
+ pub mod effect_buffer;
+ pub mod framebuffer_effect;
+ pub mod gradient_fade_texture;
++pub mod liquid_glass;
+ pub mod memory;
+ pub mod offscreen;
+ pub mod primary_gpu_texture;
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+new file mode 100644
+index 00000000..1030d0c2
+--- /dev/null
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -0,0 +1,191 @@
++#version 100
++
++//_DEFINES_
++
++#if defined(EXTERNAL)
++#extension GL_OES_EGL_image_external : require
++#endif
++
++// Liquid glass (lumen-glass-v1): what is behind a set of glass shapes, seen
++// through them. `tex` is the backdrop under the shapes' bounding box, as
++// composed this frame (frosted or not); each shape bends it toward its curved
++// rim like a convex glass edge, splits it into colour there, and catches light
++// along the rim. Shapes within `glass_merge` of each other melt together.
++
++precision highp float;
++#if defined(EXTERNAL)
++uniform samplerExternalOES tex;
++#else
++uniform sampler2D tex;
++#endif
++
++uniform float alpha;
++varying vec2 v_coords;
++
++#if defined(DEBUG_FLAGS)
++uniform float tint;
++#endif
++
++uniform float niri_scale;
++uniform vec2 geo_size;
++uniform mat3 input_to_geo;
++
++// Per shape, columns: (x, y, w, h), radii (tl, tr, br, bl),
++// (corner, refraction, dispersion, bevel), (specular, -, -, -).
++// Coordinates in logical px from the bounding box's top-left.
++uniform mat4 glass_shapes[8];
++uniform float glass_count;
++uniform float glass_merge;
++uniform float saturation;
++uniform float noise;
++
++#define SQUIRCLE_EXTENT 1.84
++
++// Signed distance to one shape's outline (negative inside), with lumen's
++// continuous corner where asked: the same superellipse as rounding_alpha.frag.
++float shape_sdf(vec2 p, mat4 s) {
++    vec2 size = s[0].zw;
++    vec2 q = p - s[0].xy - size * 0.5;
++    vec4 radii = s[1];
++    float r = q.x < 0.0 ? (q.y < 0.0 ? radii.x : radii.w) : (q.y < 0.0 ? radii.y : radii.z);
++    float half_side = min(size.x, size.y) * 0.5;
++    r = min(r, half_side);
++
++    if (s[2].x < 0.5 || r < 0.5) {
++        vec2 c = abs(q) - (size * 0.5 - vec2(r));
++        return length(max(c, 0.0)) + min(max(c.x, c.y), 0.0) - r;
++    }
++
++    float e = max(min(r * SQUIRCLE_EXTENT, half_side), r);
++    vec2 c = abs(q) - (size * 0.5 - vec2(e));
++    if (c.x > 0.0 && c.y > 0.0) {
++        float n = -0.6931472 / log(1.0 - 0.2928932 * r / e);
++        if (n < 2.01)
++            return length(c) - e;
++        vec2 u = max(c / e, vec2(1e-4));
++        float l = pow(pow(u.x, n) + pow(u.y, n), 1.0 / n);
++        float steep = max(length(pow(u / l, vec2(n - 1.0))), 0.5);
++        return (l - 1.0) * e / steep;
++    }
++    vec2 d = abs(q) - size * 0.5;
++    return max(d.x, d.y);
++}
++
++// The union of all shapes, melting within glass_merge; `nearest` is the index
++// of the shape whose rim this is (its settings apply).
++float glass_sdf(vec2 p, out float nearest) {
++    float d = 1e6;
++    float best = 1e6;
++    nearest = 0.0;
++    for (int i = 0; i < 8; i++) {
++        if (float(i) >= glass_count)
++            break;
++        float di = shape_sdf(p, glass_shapes[i]);
++        if (di < best) {
++            best = di;
++            nearest = float(i);
++        }
++        if (glass_merge > 0.0) {
++            float h = max(glass_merge - abs(d - di), 0.0) / glass_merge;
++            d = min(d, di) - h * h * glass_merge * 0.25;
++        } else {
++            d = min(d, di);
++        }
++    }
++    return d;
++}
++
++mat4 shape_at(float index) {
++    mat4 s = glass_shapes[0];
++    for (int i = 1; i < 8; i++) {
++        if (float(i) == index)
++            s = glass_shapes[i];
++    }
++    return s;
++}
++
++vec3 saturate(vec3 color, float sat) {
++    const vec3 w = vec3(0.2126, 0.7152, 0.0722);
++    return mix(vec3(dot(color, w)), color, sat);
++}
++
++float hash12(vec2 p) {
++    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
++    p3 += dot(p3, p3.yzx + 33.33);
++    return fract((p3.x + p3.y) * p3.z);
++}
++
++void main() {
++    vec2 p = (input_to_geo * vec3(v_coords, 1.0)).xy * geo_size;
++
++    float idx;
++    float d = glass_sdf(p, idx);
++    // Coverage, antialiased over one physical pixel.
++    float cover = clamp(0.5 - d * niri_scale, 0.0, 1.0);
++    if (cover <= 0.0) {
++        gl_FragColor = vec4(0.0);
++        return;
++    }
++
++    mat4 s = shape_at(idx);
++    float refraction = s[2].y;
++    float dispersion = s[2].z;
++    float bevel = s[2].w;
++    float specular = s[3].x;
++
++    // Outward normal of the (merged) outline.
++    float ignore;
++    float h = 0.5;
++    vec2 grad = vec2(glass_sdf(p + vec2(h, 0.0), ignore) - glass_sdf(p - vec2(h, 0.0), ignore),
++                     glass_sdf(p + vec2(0.0, h), ignore) - glass_sdf(p - vec2(0.0, h), ignore));
++    vec2 n = length(grad) > 1e-5 ? normalize(grad) : vec2(0.0);
++
++    // Across the bevel: 0 where the glass turns flat, 1 at the rim. A circular
++    // profile, so it bends gently inside and sharply at the very edge.
++    float depth = -d;
++    float t = bevel > 0.0 ? clamp(1.0 - depth / bevel, 0.0, 1.0) : 0.0;
++    float bend = 1.0 - sqrt(max(1.0 - t * t, 0.0));
++
++    // A convex edge magnifies: the rim shows what is further in.
++    vec2 off = -n * refraction * bend;
++    // From logical px to texture coordinates (inverse of input_to_geo's linear part).
++    mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
++    float det = a[0][0] * a[1][1] - a[1][0] * a[0][1];
++    mat2 inv = mat2(a[1][1], -a[0][1], -a[1][0], a[0][0]) / det;
++    vec2 dv = inv * (off / geo_size);
++
++    vec4 color;
++    if (dispersion > 0.0) {
++        vec4 g = texture2D(tex, v_coords + dv);
++        color = vec4(texture2D(tex, v_coords + dv * (1.0 + dispersion)).r, g.g,
++                     texture2D(tex, v_coords + dv * (1.0 - dispersion)).b, g.a);
++    } else {
++        color = texture2D(tex, v_coords + dv);
++    }
++#if defined(NO_ALPHA)
++    color.a = 1.0;
++#endif
++
++    if (saturation != 1.0)
++        color.rgb = saturate(color.rgb, saturation);
++    if (noise > 0.0)
++        color.rgb += (hash12(gl_FragCoord.xy) - 0.5) * noise;
++
++    // Light: a bright line right at the rim, strongest facing the key light
++    // (top-left), a fainter one opposite, and a soft sheen across the bevel.
++    vec2 key = vec2(-0.5547, -0.8321);
++    float facing = max(dot(n, key), 0.0);
++    float back = max(dot(n, -key), 0.0);
++    float rim = 1.0 - smoothstep(0.0, 1.6, depth);
++    float lit = specular * (rim * (0.35 + 0.65 * facing + 0.45 * back) + 0.3 * bend * bend * facing);
++    color.rgb = mix(color.rgb, vec3(color.a), clamp(lit, 0.0, 1.0));
++
++    color *= cover * alpha;
++
++#if defined(DEBUG_FLAGS)
++    if (tint == 1.0)
++        color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
++#endif
++
++    gl_FragColor = color;
++}
+diff --git a/src/render_helpers/shaders/mod.rs b/src/render_helpers/shaders/mod.rs
+index 3b9400fa..f45332f7 100644
+--- a/src/render_helpers/shaders/mod.rs
++++ b/src/render_helpers/shaders/mod.rs
+@@ -19,6 +19,7 @@ pub struct Shaders {
+     pub shadow: Option<ShaderProgram>,
+     pub clipped_surface: Option<GlesTexProgram>,
+     pub postprocess_and_clip: Option<GlesTexProgram>,
++    pub liquid_glass: Option<GlesTexProgram>,
+     pub resize: Option<ShaderProgram>,
+     pub gradient_fade: Option<GlesTexProgram>,
+     pub blur: Option<BlurProgram>,
+@@ -133,6 +134,25 @@ impl Shaders {
+             })
+             .ok();
+ 
++        let liquid_glass = renderer
++            .compile_custom_texture_shader(
++                include_str!("liquid_glass.frag"),
++                &[
++                    UniformName::new("niri_scale", UniformType::_1f),
++                    UniformName::new("geo_size", UniformType::_2f),
++                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
++                    UniformName::new("glass_shapes", UniformType::Matrix4x4),
++                    UniformName::new("glass_count", UniformType::_1f),
++                    UniformName::new("glass_merge", UniformType::_1f),
++                    UniformName::new("saturation", UniformType::_1f),
++                    UniformName::new("noise", UniformType::_1f),
++                ],
++            )
++            .map_err(|err| {
++                warn!("error compiling liquid_glass shader: {err:?}");
++            })
++            .ok();
++
+         let resize = compile_resize_program(renderer, include_str!("resize.frag"))
+             .map_err(|err| {
+                 warn!("error compiling resize shader: {err:?}");
+@@ -160,6 +180,7 @@ impl Shaders {
+             shadow,
+             clipped_surface,
+             postprocess_and_clip,
++            liquid_glass,
+             resize,
+             gradient_fade,
+             blur,

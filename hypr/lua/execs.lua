@@ -61,6 +61,6 @@ hl.on("hyprland.start", function()
 	-- Replaces Polychromatic autostart. Needs the 'input' group (live after
 	-- relogin) to read keypresses for the reactive layer. Auto-pauses to ~0 CPU
 	-- on lid-close/screen-off; hypridle signals it by PID (see hypridle.conf).
-	hl.exec_cmd("/home/ritvik/github/config/dotnix/razer/razer-fx.py aurora reactive starlight:BFEFFF")
+	hl.exec_cmd("/home/ritvik/github/config/dotnix/razer/razer-fx.py aurora reactive starlight:BFEFFF --battery wallpaper reactive")
 
 end)

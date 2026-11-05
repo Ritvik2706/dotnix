@@ -1,0 +1,445 @@
+From b94e4394e251f086793e0df54d16fbab70487856 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 27 Oct 2026 21:06:36 +0400
+Subject: [PATCH 04/38] render: glass borders
+
+blur { border-glass <saturation>; border-light; border-shade; border-inactive }:
+under each border ring, the frosted backdrop that is really there (xray, or
+for xray-off windows a real-blur framebuffer capture), lit like a glass edge
+inside a dark hairline, quieter for unfocused windows.
+---
+ niri-config/src/appearance.rs                 | 26 ++++++-
+ niri-config/src/lib.rs                        |  4 ++
+ src/layout/focus_ring.rs                      |  8 +++
+ src/layout/tile.rs                            | 68 ++++++++++++++++++-
+ src/render_helpers/framebuffer_effect.rs      | 22 +++++-
+ .../shaders/clipped_surface.frag              | 35 ++++++++++
+ src/render_helpers/shaders/mod.rs             |  3 +
+ src/render_helpers/xray.rs                    | 37 +++++++++-
+ 8 files changed, 199 insertions(+), 4 deletions(-)
+
+diff --git a/niri-config/src/appearance.rs b/niri-config/src/appearance.rs
+index a1c83271..f87a6d9b 100644
+--- a/niri-config/src/appearance.rs
++++ b/niri-config/src/appearance.rs
+@@ -1013,6 +1013,18 @@ pub struct Blur {
+     pub offset: f64,
+     pub noise: f64,
+     pub saturation: f64,
++    /// Glass borders: the frosted backdrop is drawn under every window's border ring (so the
++    /// border tints what is really behind it), with this saturation. 0 is off.
++    pub border_glass: f64,
++    /// How much light the glass border catches: its backdrop lifted toward white, so it reads
++    /// as a lit edge of what is behind it.
++    pub border_light: f64,
++    /// How dark the glass border's outer edge goes (its silhouette), so it reads over a
++    /// backdrop as bright as itself.
++    pub border_shade: f64,
++    /// How lit and how vivid an unfocused window's glass border is, against the focused one's
++    /// (0: plain frost, unlit, only its dark edge).
++    pub border_inactive: f64,
+ }
+ 
+ impl Default for Blur {
+@@ -1023,6 +1035,10 @@ impl Default for Blur {
+             offset: 3.,
+             noise: 0.02,
+             saturation: 1.5,
++            border_glass: 0.,
++            border_light: 0.3,
++            border_shade: 0.35,
++            border_inactive: 0.25,
+         }
+     }
+ }
+@@ -1041,6 +1057,14 @@ pub struct BlurPart {
+     pub noise: Option<FloatOrInt<0, 1000>>,
+     #[knuffel(child, unwrap(argument))]
+     pub saturation: Option<FloatOrInt<0, 1000>>,
++    #[knuffel(child, unwrap(argument))]
++    pub border_glass: Option<FloatOrInt<0, 1000>>,
++    #[knuffel(child, unwrap(argument))]
++    pub border_light: Option<FloatOrInt<0, 1>>,
++    #[knuffel(child, unwrap(argument))]
++    pub border_shade: Option<FloatOrInt<0, 1>>,
++    #[knuffel(child, unwrap(argument))]
++    pub border_inactive: Option<FloatOrInt<0, 1>>,
+ }
+ 
+ impl MergeWith<BlurPart> for Blur {
+@@ -1051,7 +1075,7 @@ impl MergeWith<BlurPart> for Blur {
+         }
+ 
+         merge_clone!((self, part), passes);
+-        merge!((self, part), offset, noise, saturation);
++        merge!((self, part), offset, noise, saturation, border_glass, border_light, border_shade, border_inactive);
+     }
+ }
+ 
+diff --git a/niri-config/src/lib.rs b/niri-config/src/lib.rs
+index 329b7669..0530831e 100644
+--- a/niri-config/src/lib.rs
++++ b/niri-config/src/lib.rs
+@@ -1642,6 +1642,10 @@ mod tests {
+                 offset: 3.0,
+                 noise: 0.02,
+                 saturation: 1.5,
++                border_glass: 0.0,
++                border_light: 0.3,
++                border_shade: 0.35,
++                border_inactive: 0.25,
+             },
+             gestures: Gestures {
+                 dnd_edge_view_scroll: DndEdgeViewScroll {
+diff --git a/src/layout/focus_ring.rs b/src/layout/focus_ring.rs
+index b53a5df8..b4d4403c 100644
+--- a/src/layout/focus_ring.rs
++++ b/src/layout/focus_ring.rs
+@@ -20,6 +20,7 @@ pub struct FocusRing {
+     use_border_shader: bool,
+     config: niri_config::FocusRing,
+     thicken_corners: bool,
++    is_active: bool,
+ }
+ 
+ niri_render_elements! {
+@@ -41,9 +42,15 @@ impl FocusRing {
+             use_border_shader: false,
+             config,
+             thicken_corners: true,
++            is_active: false,
+         }
+     }
+ 
++    /// Whether the window it rings was focused at the last update.
++    pub fn is_active(&self) -> bool {
++        self.is_active
++    }
++
+     pub fn update_config(&mut self, config: niri_config::FocusRing) {
+         self.config = config;
+     }
+@@ -69,6 +76,7 @@ impl FocusRing {
+         let width = self.config.width;
+         self.full_size = win_size + Size::from((width, width)).upscale(2.);
+         self.is_border = is_border;
++        self.is_active = is_active;
+ 
+         let color = if is_urgent {
+             self.config.urgent_color
+diff --git a/src/layout/tile.rs b/src/layout/tile.rs
+index 86c7ebad..7cafb157 100644
+--- a/src/layout/tile.rs
++++ b/src/layout/tile.rs
+@@ -18,10 +18,12 @@ use super::{
+ use crate::animation::{Animation, Clock};
+ use crate::layout::SizingMode;
+ use crate::niri_render_elements;
+-use crate::render_helpers::background_effect::BackgroundEffectElement;
++use crate::render_helpers::background_effect::{BackgroundEffectElement, RenderParams};
+ use crate::render_helpers::border::BorderRenderElement;
+ use crate::render_helpers::clipped_surface::{ClippedSurfaceRenderElement, RoundedCornerDamage};
++use crate::render_helpers::blur::BlurOptions;
+ use crate::render_helpers::damage::ExtraDamage;
++use crate::render_helpers::framebuffer_effect::FramebufferEffect;
+ use crate::render_helpers::offscreen::{OffscreenBuffer, OffscreenRenderElement};
+ use crate::render_helpers::renderer::NiriRenderer;
+ use crate::render_helpers::resize::ResizeRenderElement;
+@@ -50,6 +52,10 @@ pub struct Tile<W: LayoutElement> {
+     /// The shadow around the window.
+     shadow: Shadow,
+ 
++    /// Real-blur backdrop under the border for windows with xray off, so their glass rim frosts
++    /// the same windows their body does, not the wallpaper.
++    border_glass: FramebufferEffect,
++
+     /// This tile's current sizing mode.
+     ///
+     /// This will update only when the `window` actually goes maximized or fullscreen, rather than
+@@ -193,6 +199,7 @@ impl<W: LayoutElement> Tile<W> {
+             border: FocusRing::new(border_config.into()),
+             focus_ring: FocusRing::new(focus_ring_config),
+             shadow: Shadow::new(shadow_config),
++            border_glass: FramebufferEffect::new(),
+             sizing_mode,
+             fullscreen_backdrop: SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.]),
+             restore_to_floating: false,
+@@ -1056,6 +1063,8 @@ impl<W: LayoutElement> Tile<W> {
+         let bob_offset = self.bob_offset();
+         let location = location + bob_offset;
+         xray_pos = xray_pos.offset(bob_offset);
++        // Where the tile itself (its border's outer edge) sits on the backdrop.
++        let tile_xray_pos = xray_pos;
+ 
+         let window_loc = self.window_loc();
+         let window_size = self.window_size();
+@@ -1285,6 +1294,63 @@ impl<W: LayoutElement> Tile<W> {
+                 location + Point::from((width, width)),
+                 &mut |elem| push(elem.into()),
+             );
++
++            // Glass borders: under the border's ring, the frosted backdrop that is really
++            // there, so the border is a tint and a light over it rather than a paint.
++            let glass = self.options.blur.border_glass;
++            // A window that sees through to other windows (xray off) gets a rim of the same.
++            let real = self.window.rules().background_effect.xray == Some(false);
++            if glass > 0. && !self.options.blur.off && expanded_progress < 1. {
++                if real || ctx.xray.is_some() {
++                    let geometry = Rectangle::new(location, self.animated_tile_size());
++                    let radius = self
++                        .window
++                        .geometry_corner_radius()
++                        .expanded_by(width as f32)
++                        .scaled_by(1. - expanded_progress as f32)
++                        .fit_to(geometry.size.w as f32, geometry.size.h as f32);
++                    let params = RenderParams {
++                        geometry,
++                        subregion: None,
++                        clip: Some((geometry, radius)),
++                        scale: self.scale,
++                    };
++                    // Only the focused window's glass is lit and vivid; the others are
++                    // quieter frost, so focus reads at a glance.
++                    let blur = &self.options.blur;
++                    let k = if self.border.is_active() { 1. } else { blur.border_inactive };
++                    // Unfocused: as much less light as it is quieter, and below that, shade
++                    // (unlit frost of a bright sky is still bright).
++                    let light = blur.border_light * k - (1. - k) * 0.4;
++                    let saturation = (1. + (glass - 1.) * k) as f32;
++                    if real {
++                        let elem = self
++                            .border_glass
++                            .render(
++                                None,
++                                params,
++                                Some(BlurOptions::from(*blur)),
++                                blur.noise as f32,
++                                saturation,
++                            )
++                            .with_ring(width, light as f32, blur.border_shade as f32);
++                        push(BackgroundEffectElement::from(elem).into());
++                    } else if let Some(xray) = ctx.xray {
++                        xray.render_ring(
++                            ctx.as_gles(),
++                            params,
++                            tile_xray_pos,
++                            true,
++                            blur.noise as f32,
++                            saturation,
++                            width,
++                            light as f32,
++                            blur.border_shade as f32,
++                            &mut |elem| push(BackgroundEffectElement::from(elem).into()),
++                        );
++                    }
++                }
++            }
+         }
+ 
+         // Hide the focus ring when maximized/fullscreened. It's not normally visible anyway due to
+diff --git a/src/render_helpers/framebuffer_effect.rs b/src/render_helpers/framebuffer_effect.rs
+index 4dc529db..92b7114d 100644
+--- a/src/render_helpers/framebuffer_effect.rs
++++ b/src/render_helpers/framebuffer_effect.rs
+@@ -38,6 +38,10 @@ pub struct FramebufferEffectElement {
+     blur_options: Option<BlurOptions>,
+     noise: f32,
+     saturation: f32,
++    /// Above 0, only a ring this wide along the clip edge is drawn (see `Xray::render_ring`).
++    ring_width: f32,
++    ring_light: f32,
++    ring_shade: f32,
+ }
+ 
+ #[derive(Debug)]
+@@ -89,16 +93,28 @@ impl FramebufferEffect {
+             blur_options,
+             noise,
+             saturation,
++            ring_width: 0.,
++            ring_light: 0.,
++            ring_shade: 0.,
+         }
+     }
+ }
+ 
+ impl FramebufferEffectElement {
++    /// Draw only a ring along the clip's edge: the real backdrop under a window's border, for
++    /// glass borders on windows that see through to other windows (xray off).
++    pub fn with_ring(mut self, width: f64, light: f32, shade: f32) -> Self {
++        self.ring_width = width as f32;
++        self.ring_light = light;
++        self.ring_shade = shade;
++        self
++    }
++
+     fn compute_uniforms(
+         &self,
+         crop: Rectangle<f64, Logical>,
+         transform: Transform,
+-    ) -> [Uniform<'static>; 7] {
++    ) -> [Uniform<'static>; 10] {
+         let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
+         let offset = Vec2::new(offset.x as f32, offset.y as f32);
+         let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
+@@ -124,6 +140,10 @@ impl FramebufferEffectElement {
+             Uniform::new("noise", self.noise),
+             Uniform::new("saturation", self.saturation),
+             Uniform::new("bg_color", [0f32, 0., 0., 0.]),
++            // The program is shared with glass border rings: uniforms stick, so always set them.
++            Uniform::new("ring_width", self.ring_width),
++            Uniform::new("ring_light", self.ring_light),
++            Uniform::new("ring_shade", self.ring_shade),
+         ]
+     }
+ }
+diff --git a/src/render_helpers/shaders/clipped_surface.frag b/src/render_helpers/shaders/clipped_surface.frag
+index e97f18c0..f90ea84a 100644
+--- a/src/render_helpers/shaders/clipped_surface.frag
++++ b/src/render_helpers/shaders/clipped_surface.frag
+@@ -25,6 +25,22 @@ uniform float niri_scale;
+ uniform vec2 geo_size;
+ uniform vec4 corner_radius;
+ uniform mat3 input_to_geo;
++// Above 0: only a ring this wide along the edge is drawn (glass borders); its
++// inner edge follows the corners like a border's.
++uniform float ring_width;
++// …and how much light the ring's glass catches: what is behind it, lifted toward
++// white; below 0, glass in shadow (an unfocused window's), dimmed instead.
++uniform float ring_light;
++// …and the dark line at its outer edge (the glass's silhouette), so the ring
++// still reads over a backdrop as bright as itself.
++uniform float ring_shade;
++
++// Distance inside a rounded box (circular corners: close enough to the
++// squircle for a profile across a few pixels).
++float ring_depth(vec2 p, vec2 size, float r) {
++    vec2 q = abs(p - size * 0.5) - (size * 0.5 - vec2(r));
++    return r - (length(max(q, 0.0)) + min(max(q.x, q.y), 0.0));
++}
+ 
+ float niri_rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius);
+ vec4 postprocess(vec4 color);
+@@ -46,6 +62,25 @@ void main() {
+     } else {
+         // Apply corner rounding inside geometry.
+         color = color * niri_rounding_alpha(coords_geo.xy * geo_size, geo_size, corner_radius);
++
++        if (ring_width > 0.0) {
++            // Across the ring, outside in: a dark hairline, then the lit glass.
++            vec2 p = coords_geo.xy * geo_size;
++            float r = p.x < geo_size.x * 0.5
++                ? (p.y < geo_size.y * 0.5 ? corner_radius.x : corner_radius.w)
++                : (p.y < geo_size.y * 0.5 ? corner_radius.y : corner_radius.z);
++            float depth = ring_depth(p, geo_size, r) / ring_width;
++            float edge = 1.0 - smoothstep(0.18, 0.42, depth);
++            float lift = ring_light * (1.0 - edge);
++            color.rgb = lift >= 0.0 ? mix(color.rgb, vec3(color.a), lift) : color.rgb * (1.0 + lift);
++            color.rgb *= 1.0 - ring_shade * edge;
++            vec2 inner = coords_geo.xy * geo_size - vec2(ring_width);
++            vec2 inner_size = geo_size - vec2(ring_width * 2.0);
++            if (0.0 <= inner.x && inner.x <= inner_size.x && 0.0 <= inner.y && inner.y <= inner_size.y) {
++                vec4 inner_radius = max(corner_radius - vec4(ring_width), 0.0);
++                color = color * (1.0 - niri_rounding_alpha(inner, inner_size, inner_radius));
++            }
++        }
+     }
+ 
+     // Apply final alpha and tint.
+diff --git a/src/render_helpers/shaders/mod.rs b/src/render_helpers/shaders/mod.rs
+index b833fe88..3b9400fa 100644
+--- a/src/render_helpers/shaders/mod.rs
++++ b/src/render_helpers/shaders/mod.rs
+@@ -123,6 +123,9 @@ impl Shaders {
+                     UniformName::new("noise", UniformType::_1f),
+                     UniformName::new("saturation", UniformType::_1f),
+                     UniformName::new("bg_color", UniformType::_4f),
++                    UniformName::new("ring_width", UniformType::_1f),
++                    UniformName::new("ring_light", UniformType::_1f),
++                    UniformName::new("ring_shade", UniformType::_1f),
+                 ],
+             )
+             .map_err(|err| {
+diff --git a/src/render_helpers/xray.rs b/src/render_helpers/xray.rs
+index f4b4f861..3de13e33 100644
+--- a/src/render_helpers/xray.rs
++++ b/src/render_helpers/xray.rs
+@@ -80,6 +80,12 @@ pub struct XrayElement {
+     noise: f32,
+     saturation: f32,
+     bg_color: Color32F,
++    /// Above 0, only a ring this wide along the clip edge is drawn (in clip geometry units).
++    ring_width: f32,
++    /// How far the ring's backdrop is lifted toward white.
++    ring_light: f32,
++    /// How dark the ring's outer edge goes.
++    ring_shade: f32,
+     program: Option<GlesTexProgram>,
+ }
+ 
+@@ -103,6 +109,25 @@ impl Xray {
+         noise: f32,
+         saturation: f32,
+         push: &mut dyn FnMut(XrayElement),
++    ) {
++        self.render_ring(ctx, params, xray_pos, blur, noise, saturation, 0., 0., 0., push);
++    }
++
++    /// Like `render`, but only a ring `ring_width` wide along the clip's edge: the backdrop
++    /// right under a window's border, for glass borders.
++    #[allow(clippy::too_many_arguments)]
++    pub fn render_ring(
++        &self,
++        ctx: RenderCtx<GlesRenderer>,
++        params: RenderParams,
++        xray_pos: XrayPos,
++        blur: bool,
++        noise: f32,
++        saturation: f32,
++        ring_width: f64,
++        ring_light: f32,
++        ring_shade: f32,
++        push: &mut dyn FnMut(XrayElement),
+     ) {
+         let program = Shaders::get(ctx.renderer).postprocess_and_clip.clone();
+ 
+@@ -201,6 +226,9 @@ impl Xray {
+                     noise,
+                     saturation,
+                     bg_color: *bg_color,
++                    ring_width: ring_width as f32,
++                    ring_light,
++                    ring_shade,
+                     program: program.clone(),
+                 };
+                 push(elem);
+@@ -251,6 +279,10 @@ impl Xray {
+                 noise,
+                 saturation,
+                 bg_color: self.backdrop_color,
++                // The backdrop's clip geometry is zoomed.
++                ring_width: (ring_width * zoom) as f32,
++                ring_light,
++                ring_shade,
+                 program: program.clone(),
+             };
+             push(elem);
+@@ -259,7 +291,7 @@ impl Xray {
+ }
+ 
+ impl XrayElement {
+-    fn compute_uniforms(&self) -> [Uniform<'static>; 7] {
++    fn compute_uniforms(&self) -> [Uniform<'static>; 10] {
+         [
+             Uniform::new("niri_scale", self.scale),
+             Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
+@@ -268,6 +300,9 @@ impl XrayElement {
+             Uniform::new("noise", self.noise),
+             Uniform::new("saturation", self.saturation),
+             Uniform::new("bg_color", self.bg_color.components()),
++            Uniform::new("ring_width", self.ring_width),
++            Uniform::new("ring_light", self.ring_light),
++            Uniform::new("ring_shade", self.ring_shade),
+         ]
+     }
+ }

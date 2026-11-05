@@ -116,7 +116,7 @@ part Finder {
             move: fx0 + 16, 44
             zone ellipse fdb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
             body {
-                color: mix(chip, chip_hi, fdb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * fdb.hover - fdb.pressed, 4.2, 21%
+                color: mix(chip, chip_hi, fdb.hover); material: control
                 ellipse { at: 16, 18; radius: 16 - 0.6 * fdb.pressed }
             }
             path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * fdb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
@@ -126,7 +126,7 @@ part Finder {
             zone ellipse fhb { at: 56, 18; radius: 16; cursor: pointer; label: "Keyboard shortcuts (?)" }
             body {
                 gradient: 40, 2 to 72, 34, mix(mix(chip, chip_hi, fhb.hover), soft_l, hk), mix(mix(chip, chip_hi, fhb.hover), soft_s, hk)
-                glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * fhb.hover - fhb.pressed, 4.2, 21%
+                material: control; opacity: lgc_fill + 55% * hk
                 ellipse { at: 56, 18; radius: 16 - 0.6 * fhb.pressed }
             }
             text "?" { at: 56, 18.5; anchor: center; size: 14; weight: 700; family: "SF Pro Display"; color: mix(ink, pearl_ink, hk) }
@@ -154,15 +154,15 @@ part Finder {
                 group {
                     opacity: if(fnd_scoped, 1, 0)
                     body {
-                        color: chip; glass: 25%; blur: 0%; light: 3%, 6, 12
+                        color: chip; material: control
                         box { from: 380 - srt_w, 6; size: srt_w, 24; corner: 12 continuous }
                     }
                     text fnd_sort { at: 380 - srt_w / 2, 18; anchor: center; size: 10.5; weight: 600; family: "SF Pro Display"; color: tint_ink; measure: srtm }
                 }
             }
             body {
-                color: mix(chip, chip_hi, fsb.hover * (1 - fsx)); glass: 25%; blur: 0%; light: 4%, 2, 18
-                shadow: 0, (1.2 + 0.5 * fsb.hover - fsb.pressed) * (1 - fsx), 4.2, 21%; opacity: 1 - fsx
+                color: mix(chip, chip_hi, fsb.hover * (1 - fsx)); material: field
+                opacity: (lgc_fill + 5%) * (1 - fsx)
                 box { from: ffl, 0; size: 420 - ffl, 36; corner: 18 continuous }
             }
             box { from: ffl, 0; size: 420 - ffl, 36; corner: 18 continuous; color: well; opacity: 30% * fsx }
@@ -191,7 +191,10 @@ part Finder {
             color: ink; opacity: if(fhits.count == 0, 50%, 0)
         }
 
-        //  The preview: a pressed-in panel on the right, its name and what it is on top.
+        //  The preview: a pressed-in panel on the right, its name and what it is on top
+        //  (none when the files are too narrow for it, beside an app: the list alone).
+        group {
+        show: pv_on
         let pvx = fx0 + 444
         let pvy = 44
         box { from: pvx, pvy; size: pvw, 502; corner: 22 continuous; color: well; opacity: 26% }
@@ -205,7 +208,7 @@ part Finder {
             //  Its path, to the clipboard (as yp).
             zone ellipse pcopy { at: pvx + pvw - 30, pvy + 28; radius: 14; cursor: pointer; label: "Copy the path" }
             body {
-                color: mix(chip, chip_hi, pcopy.hover); glass: 25%; blur: 0%; light: 4%, pvy + 14, 14; shadow: 0, 1.2, 4, 20%
+                color: mix(chip, chip_hi, pcopy.hover); material: control
                 ellipse { at: pvx + pvw - 30, pvy + 28; radius: 14 - 0.5 * pcopy.pressed }
             }
             image ic_clip { at: pvx + pvw - 37, pvy + 21; size: 14, 14; tint: ink; opacity: 85% }
@@ -218,7 +221,7 @@ part Finder {
             prop vsel = 0 ~shape
             follow vsel = if(pvd_list, 0, 1)
             body {
-                color: chip; glass: 25%; blur: 0%; light: 3%, 5, 13
+                color: chip; material: control
                 box { from: vsx, 5; size: 60, 26; corner: 13 continuous }
             }
             body {
@@ -254,11 +257,19 @@ part Finder {
                 at: pvx + 18, pvy + 68; anchor: left top; width: pvw - 36; lines: 24
                 size: 12; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(pv_kind == 3, 75%, 0)
             }
-            //  A folder: what is in it, as a list, two columns of twelve; what does not fit, counted under it.
+            //  A folder: what is in it, as a list, two columns of twelve (one, in a narrower preview);
+            //  what does not fit, counted under it.
+            let pvn = pvw < 600
             group {
                 opacity: if(pv_kind == 7 and pvd_list and not fnd_side, 1, 0)
                 grid {
+                    show: not pvn
                     at: pvx + 18, pvy + 70; columns: 2; width: 624; gap: 0; row: 31
+                    for t in pvd { PvRow(t) }
+                }
+                grid {
+                    show: pvn
+                    at: pvx + 18, pvy + 70; columns: 1; width: 312; gap: 0; row: 31
                     for t in pvd { PvRow(t) }
                 }
                 text "+{pvd_more} more" { at: pvx + pvw - 22, pvy + 70 + 12 * 31 + 14; anchor: right center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(pvd_more > 0, 55%, 0) }
@@ -267,17 +278,25 @@ part Finder {
             group {
                 opacity: if(pv_kind == 7 and not pvd_list and not fnd_side, 1, 0)
                 grid {
+                    show: not pvn
                     at: pvx + 18, pvy + 70; columns: 6; width: 624; gap: 0; row: 100
                     for t in pvd { PvTile(t) }
                 }
+                grid {
+                    show: pvn
+                    at: pvx + 18, pvy + 70; columns: 4; width: 416; gap: 0; row: 100
+                    for t in pvd { PvTile(t) }
+                }
+                //  (The last place: the sixth of four rows, or the fourth in a narrower preview.)
+                let mcol = if(pvn, 3, 5)
                 group {
                     opacity: if(pvd_more > 0, 1, 0)
                     body {
                         color: chip; light: 4%, pvy + 74, 26
-                        box { from: pvx + 18 + 5 * 104 + 26, pvy + 70 + 3 * 100 + 4; size: 52, 52; corner: 14 continuous }
+                        box { from: pvx + 18 + mcol * 104 + 26, pvy + 70 + 3 * 100 + 4; size: 52, 52; corner: 14 continuous }
                     }
-                    text "+{pvd_more}" { at: pvx + 18 + 5 * 104 + 52, pvy + 70 + 3 * 100 + 30; anchor: center; size: 14; weight: 600; family: "SF Pro Display"; color: ink; opacity: 80% }
-                    text "more" { at: pvx + 18 + 5 * 104 + 52, pvy + 70 + 3 * 100 + 71; anchor: center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 55% }
+                    text "+{pvd_more}" { at: pvx + 18 + mcol * 104 + 52, pvy + 70 + 3 * 100 + 30; anchor: center; size: 14; weight: 600; family: "SF Pro Display"; color: ink; opacity: 80% }
+                    text "more" { at: pvx + 18 + mcol * 104 + 52, pvy + 70 + 3 * 100 + 71; anchor: center; size: 11; weight: 500; family: "SF Pro Display"; color: ink; opacity: 55% }
                 }
             }
             //  Beside a view: one column of names, as many as fit.
@@ -345,6 +364,7 @@ part Finder {
             at: pvx + pvw / 2, pvy + 489; anchor: center; width: pvw - 40; lines: 1; align: center; size: 10.5; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: if(fnd_toast_on, 100%, 0)
         }
 
+        }
         //  Rename, a new file, a new folder: a field of glass rising over the list's foot.
         prop prm = 0 ~260ms
         follow prm = if(fnd_prompting, 1, 0)
@@ -362,8 +382,8 @@ part Finder {
         }
     }
 
-    on press fdb while not side { emit go_home }
-    on press fdb while side { side = false }
+    on press fdb while not fnd_card { app = none }
+    on press fdb while fnd_card { expanded = false }
     on press fhb { emit fnd_help }
     on press vs_list { emit fnd_view_as(0) }
     on press vs_icons { emit fnd_view_as(1) }

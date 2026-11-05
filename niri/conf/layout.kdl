@@ -1,0 +1,108 @@
+// layout.kdl — the strip: gaps, struts, widths, borders, shadows, blur, and
+// the overview (was lua/layout.lua, decorations.lua, colors.lua).
+// Colours that follow the wallpaper are in ../theme.kdl.
+//
+// scripts/layout.sh hardcodes gaps, struts and border width from here.
+// Auto-fit (columns that size themselves) is switched on in ../theme.kdl,
+// where the patched-only keys live; how it sizes: rules/apps.kdl.
+
+layout {
+    gaps 8
+    // The focused column slides to the middle only when it wouldn't fit. A
+    // lone column is full width (auto-fit), except one that sizes itself
+    // (mpv) or that you sized: that sits centred, not at the left.
+    center-focused-column "on-overflow"
+    always-center-single-column
+    background-color "transparent"
+
+    // A sliver of the neighbouring columns stays in view at both edges, so
+    // the strip always shows there's more to either side.
+    struts {
+        left 16
+        right 16
+        // The lumen island sits 5px below the top of the screen; this brings
+        // the windows 5px under it too (8 - 3), so the bar has even room
+        // above and below. Hyprland keeps its own spacing.
+        top -3
+    }
+
+    // Mod+Alt+Z steps through these.
+    preset-column-widths {
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+        proportion 1.0
+    }
+    preset-window-heights {
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+        proportion 1.0
+    }
+    // Apps with no width of their own: auto-fit sizes these freely
+    // (alone → full, two → ½ each, more → ½ and scroll).
+    default-column-width { proportion 0.5; }
+
+    focus-ring {
+        off
+    }
+
+    // Glass rim: the frost of what is behind each window, lit, inside a dark
+    // hairline (theme.kdl, from ../theme/wallpaper-theme.py).
+    // `on` must be spelled out: from an included file, a border section
+    // without it stays off (it only defaults to on in config.kdl itself).
+    border {
+        on
+        width 2
+        // active-gradient: theme.kdl (follows the wallpaper)
+        inactive-color "#FFFFFF1F"
+        urgent-color "#FF2A6D"
+    }
+
+    // Soft floating-glass shadow.
+    shadow {
+        on
+        softness 24
+        spread 2
+        offset x=0 y=4
+        color "#0000004D"
+        inactive-color "#00000026"
+    }
+
+    // Where a dragged window will land: the same lilac as the rim.
+    insert-hint {
+        // color: theme.kdl (follows the wallpaper)
+    }
+
+    tab-indicator {
+        hide-when-single-tab
+        place-within-column
+        gap 4
+        width 4
+        corner-radius 2
+        // active-color: theme.kdl (follows the wallpaper)
+        inactive-color "#FFFFFF33"
+    }
+}
+
+// Frost behind anything that asks for it (window/layer rules, and the lumen
+// island through ext-background-effect). Light, like Hyprland's size 4 /
+// 1 pass: the island blurs as well.
+blur {
+    passes 2
+    offset 3
+    noise 0.015
+    saturation 1.25
+}
+
+// Mod+Tab, the top-left hot corner, or a 4-finger swipe: every workspace
+// zoomed out over the wallpaper; drag windows between them.
+overview {
+    zoom 0.45
+    // Workspaces are square, so their shadow in the overview showed as a
+    // square ghost panel behind the rounded windows: the windows' own
+    // shadows are enough.
+    workspace-shadow {
+        off
+    }
+}

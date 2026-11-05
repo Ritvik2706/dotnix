@@ -1,0 +1,39 @@
+// startup.kdl — what niri starts at login (was lua/execs.lua).
+// These only run when niri starts, not on a config reload.
+
+// The session autologins, so it is unauthenticated until hyprlock covers it.
+// hyprlock.service is PartOf graphical-session.target, which niri.service
+// brings up, so systemd already starts it; this is the second, independent
+// trigger (idempotent). boot-unblank.sh then brings the backlight back that
+// hyprlock-blank.service zeroed, once the lock is up.
+spawn-at-startup "systemctl" "--user" "start" "hyprlock.service"
+spawn-sh-at-startup "~/.config/hypr/scripts/boot-unblank.sh"
+
+// Wallpaper, and the lumen island.
+spawn-at-startup "awww-daemon"
+spawn-sh-at-startup "~/.local/bin/lumen --scene ~/.config/lumen/shells/island/island.plm --no-hud --stall 0"
+// Hold AltGr to peek at the island, let go to close (scripts/altgr-peek.py).
+spawn-sh-at-startup "~/.config/niri/scripts/altgr-peek.py"
+// A newly opened app window (not dialogs or splashes) takes you to its
+// workspace (scripts/follow-new.py).
+spawn-sh-at-startup "~/.config/niri/scripts/follow-new.py"
+
+spawn-at-startup "hypridle"
+// Display corners: continuous like macOS, and small like a MacBook panel's
+// own (about 10pt): there to soften the edge, not to be noticed.
+spawn-sh-at-startup "~/.config/hypr/scripts/screen-corners.py 10"
+spawn-at-startup "xfsettingsd"
+
+// While a game is open: no idle sleep, and warnings worth having.
+spawn-sh-at-startup "~/github/config/dotnix/razer/game-guard.py"
+
+// Sound goes where you are working (and off a TV that looks connected but is off).
+spawn-sh-at-startup "~/.config/niri/scripts/sound-follows.py"
+spawn-sh-at-startup "gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'; gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark'"
+
+// The apps with windows: a terminal, and after a compositor switch whatever
+// was open, put back where it was (scripts/startup.sh).
+spawn-sh-at-startup "~/.config/niri/scripts/startup.sh"
+
+spawn-sh-at-startup "wlsunset -l 43.6 -L 3.9"
+spawn-at-startup "/home/ritvik/github/config/dotnix/razer/razer-fx.py" "aurora" "reactive" "starlight:BFEFFF" "--battery" "wallpaper" "reactive"

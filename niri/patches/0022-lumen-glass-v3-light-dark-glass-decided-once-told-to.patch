@@ -1,0 +1,473 @@
+From 83bdbd21ebd032503a7c10bc7b082a22d98ef292 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 13:23:41 +0400
+Subject: [PATCH 22/38] lumen-glass v3: light/dark glass decided once, told to
+ the client
+
+Replaces the per-frame light/dark guess (it flickered as a pill expanded:
+its sample points slid across the backdrop every frame). Now the capture
+reads back the frosted backdrop's brightness behind each shape (5 pixels,
+at most every 200 ms); each shape decides light/dark with hysteresis (on
+above 0.56, off below 0.40) and a change must hold for two readings; the
+glass crossfades over 300 ms. Clients at v3 get an 'appearance' event per
+change so their text switches with the glass (full light then; v1/v2
+clients keep light at 80% for white text).
+---
+ resources/lumen-glass-v1.xml                 |  18 ++-
+ src/protocols/lumen_glass.rs                 |  20 +++-
+ src/render_helpers/framebuffer_effect.rs     | 101 +++++++++++++++-
+ src/render_helpers/liquid_glass.rs           | 116 ++++++++++++++++++-
+ src/render_helpers/shaders/liquid_glass.frag |  23 ++--
+ 5 files changed, 250 insertions(+), 28 deletions(-)
+
+diff --git a/resources/lumen-glass-v1.xml b/resources/lumen-glass-v1.xml
+index fd79c713..3fbff1ff 100644
+--- a/resources/lumen-glass-v1.xml
++++ b/resources/lumen-glass-v1.xml
+@@ -34,7 +34,7 @@
+     Private to lumen and the patched niri.
+   </description>
+ 
+-  <interface name="lumen_glass_manager_v1" version="2">
++  <interface name="lumen_glass_manager_v1" version="3">
+     <description summary="glass for surfaces">
+     </description>
+ 
+@@ -58,7 +58,7 @@
+     </request>
+   </interface>
+ 
+-  <interface name="lumen_glass_surface_v1" version="2">
++  <interface name="lumen_glass_surface_v1" version="3">
+     <description summary="the glass of one surface">
+       All state is double-buffered: it applies on the surface's next
+       wl_surface.commit, together with what the client drew for that frame.
+@@ -112,5 +112,19 @@
+       <arg name="frost" type="fixed"/>
+       <arg name="saturation" type="fixed"/>
+     </request>
++
++    <event name="appearance" since="3">
++      <description summary="whether a shape's glass is light or dark">
++        The compositor decides, from what is really behind each shape (its
++        frosted backdrop's brightness, with hysteresis so it doesn't flicker),
++        whether that shape's glass is light (1) or dark (0), and draws it so,
++        crossfading over about 300 ms. Sent when a shape's decision changes,
++        and for every shape after set_shapes changes their number. Content on
++        the glass should switch with it (dark text on light glass), over the
++        same time. `shape` is the index in the last set_shapes.
++      </description>
++      <arg name="shape" type="uint"/>
++      <arg name="light" type="uint"/>
++    </event>
+   </interface>
+ </protocol>
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index 28b5f50c..77d37dc0 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -14,7 +14,7 @@ use super::raw::lumen_glass::v1::server::{lumen_glass_manager_v1, lumen_glass_su
+ use lumen_glass_manager_v1::LumenGlassManagerV1;
+ use lumen_glass_surface_v1::LumenGlassSurfaceV1;
+ 
+-const VERSION: u32 = 2;
++const VERSION: u32 = 3;
+ 
+ /// Floats per shape in set_shapes: 13, or 16 (version 2) with lens zoom, tint
+ /// and rim tint (the two can't be confused with at most 8 shapes).
+@@ -77,6 +77,15 @@ impl Cacheable for LumenGlassCachedState {
+ #[derive(Default)]
+ struct HasGlass(std::sync::Mutex<bool>);
+ 
++/// The surface's glass object, to tell the client about it (appearance, v3).
++#[derive(Default)]
++struct GlassObject(std::sync::Mutex<Option<LumenGlassSurfaceV1>>);
++
++/// The glass object of a surface, if it has one (inside `with_states`).
++pub fn glass_object(states: &smithay::wayland::compositor::SurfaceData) -> Option<LumenGlassSurfaceV1> {
++    states.data_map.get::<GlassObject>().and_then(|g| g.0.lock().unwrap().clone())
++}
++
+ pub struct LumenGlassManagerState;
+ 
+ pub struct LumenGlassManagerGlobalData {
+@@ -153,7 +162,11 @@ where
+                     );
+                     return;
+                 }
+-                data_init.init(id, surface.downgrade());
++                let glass = data_init.init(id, surface.downgrade());
++                with_states(&surface, |states| {
++                    let obj = states.data_map.get_or_insert_threadsafe(GlassObject::default);
++                    *obj.0.lock().unwrap() = Some(glass);
++                });
+             }
+         }
+     }
+@@ -189,6 +202,9 @@ where
+                         if let Some(has) = states.data_map.get::<HasGlass>() {
+                             *has.0.lock().unwrap() = false;
+                         }
++                        if let Some(obj) = states.data_map.get::<GlassObject>() {
++                            *obj.0.lock().unwrap() = None;
++                        }
+                     });
+                 }
+             }
+diff --git a/src/render_helpers/framebuffer_effect.rs b/src/render_helpers/framebuffer_effect.rs
+index eda2f7b6..585e60d7 100644
+--- a/src/render_helpers/framebuffer_effect.rs
++++ b/src/render_helpers/framebuffer_effect.rs
+@@ -11,7 +11,7 @@ use smithay::backend::renderer::utils::CommitCounter;
+ use smithay::backend::renderer::{Frame as _, FrameContext, Offscreen, Texture as _};
+ use smithay::gpu_span_location;
+ use smithay::utils::user_data::UserDataMap;
+-use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
++use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+ 
+ use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
+ use crate::render_helpers::background_effect::RenderParams;
+@@ -53,8 +53,20 @@ pub struct FramebufferEffectElement {
+ pub struct GlassDraw {
+     pub shapes: Vec<[f32; 16]>,
+     pub merge: f32,
++    /// Where the brightness behind each shape is reported (light/dark glass).
++    pub measure: Option<std::sync::Arc<std::sync::Mutex<GlassMeasure>>>,
+ }
+ 
++/// The frosted backdrop's brightness behind each glass shape (0..1), read back
++/// from the capture at most every MEASURE_EVERY; liquid_glass.rs decides from it.
++#[derive(Debug, Default)]
++pub struct GlassMeasure {
++    pub last: Option<std::time::Instant>,
++    pub lum: Vec<f32>,
++}
++
++const MEASURE_EVERY: std::time::Duration = std::time::Duration::from_millis(200);
++
+ #[derive(Debug)]
+ struct Inner {
+     framebuffer: Option<GlesTexture>,
+@@ -121,6 +133,68 @@ impl FramebufferEffectElement {
+         self
+     }
+ 
++    /// The backdrop's brightness behind each glass shape: five pixels of the
++    /// capture (its centre twice, and +/-30% of its size each way), mapped from
++    /// the element's logical geometry through the output transform to `tex`,
++    /// which holds the framebuffer rectangle `dst_fb` at `tex_size`.
++    #[allow(clippy::too_many_arguments)]
++    fn measure_glass(
++        &self,
++        frame: &mut GlesFrame<'_, '_>,
++        tex: &GlesTexture,
++        glass: &GlassDraw,
++        dst_fb: Rectangle<i32, Physical>,
++        tex_size: Size<i32, Buffer>,
++        transform: Transform,
++        out_size: Size<i32, Physical>,
++    ) -> Result<Vec<f32>, GlesError> {
++        if dst_fb.size.w <= 0 || dst_fb.size.h <= 0 {
++            return Ok(Vec::new());
++        }
++        let scale = self.scale as f64;
++        let area = out_size.to_f64();
++        let to_tex = |x: f64, y: f64| -> (i32, i32) {
++            let phys = Point::<f64, Physical>::from(((self.geometry.loc.x + x) * scale, (self.geometry.loc.y + y) * scale));
++            let fb = transform.transform_point_in(phys, &area);
++            let tx = (fb.x - dst_fb.loc.x as f64) / dst_fb.size.w as f64 * tex_size.w as f64;
++            let ty = (fb.y - dst_fb.loc.y as f64) / dst_fb.size.h as f64 * tex_size.h as f64;
++            (
++                (tx.floor() as i32).clamp(0, tex_size.w - 1),
++                (ty.floor() as i32).clamp(0, tex_size.h - 1),
++            )
++        };
++        let mut points = Vec::new();
++        for s in &glass.shapes {
++            let (cx, cy, hx, hy) = ((s[0] + s[2] * 0.5) as f64, (s[1] + s[3] * 0.5) as f64, (s[2] * 0.3) as f64, (s[3] * 0.3) as f64);
++            for (x, y) in [(cx, cy), (cx + hx, cy), (cx - hx, cy), (cx, cy + hy), (cx, cy - hy)] {
++                points.push(to_tex(x, y));
++            }
++        }
++        let lums = frame.with_context(|gl| unsafe {
++            let mut prev = 0i32;
++            gl.GetIntegerv(ffi::READ_FRAMEBUFFER_BINDING, &mut prev as *mut _);
++            let mut fbo = 0;
++            gl.GenFramebuffers(1, &mut fbo as *mut _);
++            gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, fbo);
++            gl.FramebufferTexture2D(ffi::READ_FRAMEBUFFER, ffi::COLOR_ATTACHMENT0, ffi::TEXTURE_2D, tex.tex_id(), 0);
++            let mut out = Vec::with_capacity(points.len());
++            for (x, y) in &points {
++                let mut px = [0u8; 4];
++                gl.ReadPixels(*x, *y, 1, 1, ffi::RGBA, ffi::UNSIGNED_BYTE, px.as_mut_ptr().cast());
++                let a = (px[3] as f32 / 255.).max(1e-3);
++                let l = (0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32) / 255. / a;
++                out.push(l.clamp(0., 1.));
++            }
++            gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, prev as u32);
++            gl.DeleteFramebuffers(1, &mut fbo as *mut _);
++            out
++        })?;
++        Ok(lums
++            .chunks(5)
++            .map(|c| (c[0] * 2. + c[1] + c[2] + c[3] + c[4]) / 6.)
++            .collect())
++    }
++
+     pub fn with_ring(mut self, width: f64, light: f32, shade: f32) -> Self {
+         self.ring_width = width as f32;
+         self.ring_light = light;
+@@ -372,10 +446,7 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+             // If blur is off, use the unblurred texture.
+             if self.blur_options.is_none() {
+                 inner.intermediate = Some(framebuffer.clone());
+-                return Ok(());
+-            }
+-
+-            if let Some((blur, options)) = blur {
++            } else if let Some((blur, options)) = blur {
+                 let mut guard = frame.renderer();
+                 let renderer = guard.as_mut();
+                 match blur.render(renderer, framebuffer, options) {
+@@ -386,6 +457,26 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+                 }
+             }
+ 
++            // Liquid glass: how bright it is behind each shape, now and then.
++            if let (Some(glass), Some(tex)) = (&self.glass, inner.intermediate.clone()) {
++                if let Some(measure) = &glass.measure {
++                    let due = measure
++                        .lock()
++                        .unwrap()
++                        .last
++                        .is_none_or(|t| t.elapsed() >= MEASURE_EVERY);
++                    if due {
++                        let out_size = output_rect.size;
++                        let lum = self.measure_glass(frame, &tex, glass, dst, size, transform, out_size);
++                        let mut m = measure.lock().unwrap();
++                        m.last = Some(std::time::Instant::now());
++                        if let Ok(lum) = lum {
++                            m.lum = lum;
++                        }
++                    }
++                }
++            }
++
+             Ok(())
+         })
+     }
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index f621ba5d..5bb39cf3 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -2,18 +2,20 @@
+ //! framebuffer capture over the bounding box of the surface's glass shapes (what
+ //! is really behind them, this frame), drawn through the liquid_glass shader.
+ 
+-use std::sync::Mutex;
++use std::sync::{Arc, Mutex};
++use std::time::{Duration, Instant};
+ 
+ use niri_config::CornerRadius;
+ use smithay::backend::renderer::gles::GlesRenderer;
+ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
++use smithay::reexports::wayland_server::Resource;
+ use smithay::utils::{Logical, Point, Rectangle, Size};
+ use smithay::wayland::compositor::with_states;
+ 
+-use crate::protocols::lumen_glass::LumenGlassCachedState;
++use crate::protocols::lumen_glass::{glass_object, LumenGlassCachedState};
+ use crate::render_helpers::background_effect::{BackgroundEffectElement, RenderParams};
+ use crate::render_helpers::blur::BlurOptions;
+-use crate::render_helpers::framebuffer_effect::{FramebufferEffect, GlassDraw};
++use crate::render_helpers::framebuffer_effect::{FramebufferEffect, GlassDraw, GlassMeasure};
+ use crate::render_helpers::RenderCtx;
+ 
+ /// How far around its shapes a glass captures the backdrop, logical px: the
+@@ -30,6 +32,47 @@ struct SurfaceGlass(Mutex<SurfaceGlassInner>);
+ struct SurfaceGlassInner {
+     effect: FramebufferEffect,
+     last: Option<LumenGlassCachedState>,
++    /// The backdrop's brightness behind each shape, read back by the capture.
++    measure: Arc<Mutex<GlassMeasure>>,
++    /// Each shape's light/dark glass, as decided and as drawn (crossfading).
++    lights: Vec<ShapeLight>,
++    /// The reading the decisions were last made from (one decision per reading).
++    seen: Option<Instant>,
++}
++
++/// Light or dark glass for a shape, like iOS: decided from what is behind with
++/// hysteresis (light above LIGHT_ON, dark again only below LIGHT_OFF, so a
++/// backdrop in between never flickers), crossfaded over FADE. The client is
++/// told (lumen-glass v3 `appearance`) so the text on it switches with it.
++#[derive(Clone, Copy)]
++struct ShapeLight {
++    known: bool,
++    light: bool,
++    from: f32,
++    start: Instant,
++    /// Readings in a row that wanted the other state: it switches at SETTLE,
++    /// so glass sweeping over a bright patch (a pill expanding) never flips.
++    against: u8,
++}
++
++const SETTLE: u8 = 2;
++
++const LIGHT_ON: f32 = 0.56;
++const LIGHT_OFF: f32 = 0.40;
++const FADE: Duration = Duration::from_millis(300);
++
++impl ShapeLight {
++    fn new() -> Self {
++        Self { known: false, light: false, from: 0., start: Instant::now(), against: 0 }
++    }
++
++    /// How light it is drawn now (0 dark .. 1 light), eased.
++    fn value(&self, now: Instant) -> f32 {
++        let target = if self.light { 1. } else { 0. };
++        let t = (now.saturating_duration_since(self.start).as_secs_f32() / FADE.as_secs_f32()).clamp(0., 1.);
++        let e = t * t * (3. - 2. * t);
++        self.from + (target - self.from) * e
++    }
+ }
+ 
+ /// Renders the surface's liquid glass, if it has any; `location` is the
+@@ -73,7 +116,7 @@ pub fn render_for_surface(
+             Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
+         );
+ 
+-        let shapes = state
++        let shapes: Vec<[f32; 16]> = state
+             .shapes
+             .iter()
+             .map(|s| {
+@@ -120,14 +163,74 @@ pub fn render_for_surface(
+                 SurfaceGlass(Mutex::new(SurfaceGlassInner {
+                     effect: FramebufferEffect::new(),
+                     last: None,
++                    measure: Arc::new(Mutex::new(GlassMeasure::default())),
++                    lights: Vec::new(),
++                    seen: None,
+                 }))
+             });
+         let mut glass = glass.0.lock().unwrap();
++        let glass = &mut *glass;
+         if glass.last.as_ref() != Some(&state) {
+             glass.effect.damage();
+             glass.last = Some(state.clone());
+         }
+ 
++        // Light or dark, per shape, from the latest reading of what is behind.
++        let mut shapes = shapes;
++        let object = glass_object(states).filter(|o| o.version() >= 3);
++        let announce = glass.lights.len() != shapes.len();
++        if announce {
++            glass.lights = vec![ShapeLight::new(); shapes.len()];
++        }
++        let (lum, reading) = {
++            let m = glass.measure.lock().unwrap();
++            (m.lum.clone(), m.last)
++        };
++        // Decide only on a new reading (not once per frame).
++        let fresh = reading.is_some() && reading != glass.seen;
++        glass.seen = reading;
++        let now = Instant::now();
++        let mut animating = false;
++        for (i, (shape, l)) in shapes.iter_mut().zip(glass.lights.iter_mut()).enumerate() {
++            if fresh && lum.len() == glass_count(&state) {
++                if let Some(&b) = lum.get(i) {
++                    let want = if l.light { b > LIGHT_OFF } else { b > LIGHT_ON };
++                    if !l.known {
++                        // The first reading: as it is, no fade on appearing.
++                        l.known = true;
++                        l.light = want;
++                        l.from = if want { 1. } else { 0. };
++                        if let Some(o) = &object {
++                            o.appearance(i as u32, want as u32);
++                        }
++                    } else if want != l.light {
++                        l.against += 1;
++                        if l.against >= SETTLE {
++                            l.against = 0;
++                            l.from = l.value(now);
++                            l.light = want;
++                            l.start = now;
++                            if let Some(o) = &object {
++                                o.appearance(i as u32, want as u32);
++                            }
++                        }
++                    } else {
++                        l.against = 0;
++                    }
++                }
++            }
++            let v = l.value(now);
++            animating |= v != if l.light { 1. } else { 0. };
++            // A client that can't switch its text keeps light glass at 80%,
++            // so white text on it still reads.
++            let v = if object.is_some() { v } else { v * 0.8 };
++            // corner (0/1) + 2 x (rim tint % + 128 x light %), see the shader.
++            shape[8] += 2. * 128. * (v * 100.).round();
++        }
++        if animating {
++            glass.effect.damage();
++        }
++
+         let params = RenderParams {
+             geometry,
+             subregion: None,
+@@ -140,8 +243,13 @@ pub fn render_for_surface(
+             .with_glass(GlassDraw {
+                 shapes,
+                 merge: state.merge,
++                measure: Some(glass.measure.clone()),
+             });
+         push(elem.into());
+         true
+     })
+ }
++
++fn glass_count(state: &LumenGlassCachedState) -> usize {
++    state.shapes.len()
++}
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 156c61cb..42edeff7 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -205,7 +205,13 @@ void main() {
+     float frost = clamp(s[3].y, 0.0, 1.0);
+     float magnify = s[3].z;                          // vertical lens of the whole slab
+     float tint_mix = clamp(s[3].w, 0.0, 1.0);        // flat tint mixed in
+-    float rim_tint = clamp(floor(s[2].x / 2.0) / 100.0, 0.0, 1.0);  // 0 white rim .. 1 the glass's colour
++    // s[2].x = corner (0/1) + 2 x (rim tint % + 128 x light %).
++    float glass_bits = floor(s[2].x / 2.0);
++    float rim_tint = clamp(mod(glass_bits, 128.0) / 100.0, 0.0, 1.0);  // 0 white rim .. 1 the glass's colour
++    // Light or dark glass (0 dark .. 1 light), decided by niri from what is
++    // behind with hysteresis and crossfaded (liquid_glass.rs); the client's
++    // text switches with it.
++    float light = clamp(floor(glass_bits / 128.0) / 100.0, 0.0, 1.0);
+ 
+     // From logical px to texture coordinates (inverse of input_to_geo's linear part).
+     mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
+@@ -247,20 +253,7 @@ void main() {
+     vec2 centre = s[0].xy + s[0].zw * 0.5;
+     vec2 ps = vec2(p.x, (p.y - centre.y) * (1.0 - magnify * 1.5) + centre.y);
+ 
+-    // Light or dark glass, chosen like iOS by what is behind: the frosted
+-    // backdrop's brightness over the shape (its centre and four points around
+-    // it, so a whole pill turns together). Bright scenery gets MacShell's light
+-    // glass, dark gets its dark glass; "light" stops at 80% so lumen's white
+-    // text keeps its contrast.
+-    vec2 sh = s[0].zw * 0.3;
+-    vec2 cv = v_coords + inv * ((centre - p) / geo_size);
+-    vec2 ox = inv * (vec2(sh.x, 0.0) / geo_size);
+-    vec2 oy = inv * (vec2(0.0, sh.y) / geo_size);
+-    const vec3 lw = vec3(0.2126, 0.7152, 0.0722);
+-    float scene = (dot(backdrop(cv, 0.0).rgb, lw) * 2.0
+-                 + dot(backdrop(cv + ox, 0.0).rgb, lw) + dot(backdrop(cv - ox, 0.0).rgb, lw)
+-                 + dot(backdrop(cv + oy, 0.0).rgb, lw) + dot(backdrop(cv - oy, 0.0).rgb, lw)) / 6.0;
+-    float dark = mix(1.0, 0.2, smoothstep(0.35, 0.75, scene));
++    float dark = 1.0 - light;
+ 
+     // The backdrop per colour channel (dispersion shifts each), crisp for
+     // clear glass, frosted (the capture's blur, MacShell's pre-blur) otherwise.

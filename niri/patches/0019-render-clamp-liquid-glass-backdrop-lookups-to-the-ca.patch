@@ -1,0 +1,30 @@
+From 5d72baec316e27d19f0a30d686ea38a62658bf2d Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 12:38:05 +0400
+Subject: [PATCH 19/38] render: clamp liquid glass backdrop lookups to the
+ capture
+
+The rim samples outward; at the top of the screen (the island's capsules)
+that is past the capture, and the texture wrapped round, so their top edges
+showed the bottom of the expanded card. Every lookup is now clamped.
+---
+ src/render_helpers/shaders/liquid_glass.frag | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 79dce9a6..e1bccf1a 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -172,8 +172,11 @@ float displacement(float u, float bevel, float thickness, float ior, float power
+ #endif
+ }
+ 
+-// The backdrop at c: frosted, or crisp by `clear` (0..1).
++// The backdrop at c: frosted, or crisp by `clear` (0..1). Clamped to the
++// capture: the rim samples outward, and past the capture's edge (the screen's
++// top, above the island) the texture wraps round to the opposite side.
+ vec4 backdrop(vec2 c, float clear) {
++    c = clamp(c, vec2(0.0005), vec2(0.9995));
+     vec4 frosted = texture2D(tex, c);
+     return clear > 0.0 ? mix(frosted, texture2D(tex_sharp, c), clear) : frosted;
+ }

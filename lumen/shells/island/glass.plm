@@ -1,0 +1,120 @@
+// Compositor-rendered glass. Save to reload; no compositor restart for values.
+//
+// Tunable from the island: Control Center → Glass (pages/glasstune.plm). Its
+// sliders set live overrides (the `lgo_*` facts, -1 = none); Save writes the
+// `lgs_*` values below (scripts/glass-save.py), Reset drops the overrides.
+// Edit the `lgs_*` lines by hand too; keep each on one line, `let lgs_x = v`.
+part Glass {
+    // ── saved values (rewritten by Save) ─────────────────────────────────
+    // MacShell's liquid glass (github.com/0-ss/MacShell): its popover values for
+    // the card (thickness 48, bezel min(h*0.36, 26)), its Dock's for the
+    // capsules (30), dispersion 0.08, magnify 0.08, rim 0.45, tintMix 0.23.
+    let lgs_readability = 99%      // tint/contrast: 0% clear … 100% most readable
+    let lgs_frost_strength = 34%    // how much the glass frosts: 0% sharp … 100% full
+    let lgs_refraction = 30        // resting capsules: glass thickness, px
+    let lgs_bevel = 10              // resting capsules: curved edge width, px (≤ half height)
+    let lgs_card_refraction = 48   // open card and panels: glass thickness, px
+    let lgs_card_bevel = 26        // open card and panels: curved edge width, px
+    let lgs_dispersion = 8%       // colour split at the edge (Apple: faint)
+    let lgs_specular = 45%         // rim light: glint, inner reflection, hairline
+    let lgs_merge = 17.01              // shapes closer than this, px, melt together
+    let lgs_tint = 6%             // resting capsules: lumen's tint over the glass
+    let lgs_card_tint = 6%        // open card: lumen's tint over the glass
+    let lgs_prism = 0%             // the island's coloured rim
+    let lgs_card_rim = 0%          // the open card's grey rim
+    let lgs_magnify = 8%            // how much the whole shape magnifies what is behind
+    let lgs_glass_tint = 23%       // flat tint mixed into the glass (MacShell tintMix)
+    let lgs_rim_tint = 0%          // rim colour: 0% white … 100% a brighter shade of the glass
+    let lgs_milk = 4%              // milky lightening of what is seen through the glass
+
+    // ── live values: a slider's override, else the saved value ───────────
+    let lg_readability = if(lgo_readability >= 0, lgo_readability, lgs_readability)
+    let lg_frost_strength = if(lgo_frost_strength >= 0, lgo_frost_strength, lgs_frost_strength)
+    let lg_refraction = if(lgo_refraction >= 0, lgo_refraction, lgs_refraction)
+    let lg_bevel = if(lgo_bevel >= 0, lgo_bevel, lgs_bevel)
+    let lg_card_refraction = if(lgo_card_refraction >= 0, lgo_card_refraction, lgs_card_refraction)
+    let lg_card_bevel = if(lgo_card_bevel >= 0, lgo_card_bevel, lgs_card_bevel)
+    let lg_dispersion = if(lgo_dispersion >= 0, lgo_dispersion, lgs_dispersion)
+    let lg_specular = if(lgo_specular >= 0, lgo_specular, lgs_specular)
+    let lg_merge = if(lgo_merge >= 0, lgo_merge, lgs_merge)
+    let lg_tint_base = if(lgo_tint >= 0, lgo_tint, lgs_tint)
+    let lg_card_tint = if(lgo_card_tint >= 0, lgo_card_tint, lgs_card_tint)
+    let lg_prism = if(lgo_prism >= 0, lgo_prism, lgs_prism)
+    let lg_card_rim = if(lgo_card_rim >= 0, lgo_card_rim, lgs_card_rim)
+    let lg_magnify = if(lgo_magnify >= 0, lgo_magnify, lgs_magnify)
+    let lg_glass_tint = if(lgo_glass_tint >= 0, lgo_glass_tint, lgs_glass_tint)
+    let lg_rim_tint = if(lgo_rim_tint >= 0, lgo_rim_tint, lgs_rim_tint)
+    let lg_milk = if(lgo_milk >= 0, lgo_milk, lgs_milk)
+
+    // ── derived ──────────────────────────────────────────────────────────
+    let lg_read = clamp(lg_readability, 0, 1)
+    let lg_soften = clamp(lg_frost_strength, 0, 1)
+    // Frost is shared per surface: the most frosted visible shape wins.
+    // Expanded cards request more than the small resting capsules.
+    let lg_frost      = 12% * lg_read * lg_soften
+    let lg_card_frost = 90% * lg_read * lg_soften
+    // Light foreground over a dark adaptive material.
+    let lg_tint       = lg_tint_base
+    let card_alpha    = lg_card_tint
+    let glass_milk    = lg_milk
+    let card_smoke    = 4% + 10% * lg_read
+    let lg_card_milk  = lg_milk + 2% * lg_read
+
+    // ── controls on the card (layer 1: glass on the card's glass) ──────────
+    // MacShell's Control Center: buttons and pills are thickness 14 x 0.6
+    // against the dock's 30 (x0.45 of the capsules), tiles 22 against the
+    // dock's 30; bezel min(h x 0.36, 26), set per body; dispersion and magnify
+    // x0.6; no inner edge shading nor drop shadow (niri: layer 1 is flat).
+    // They sample the card's glass, already tinted: half its tint.
+    let lgc_refraction       = lg_refraction * 0.45
+    let lgc_panel_refraction = lg_card_refraction * 0.73
+    let lgc_dispersion       = lg_dispersion * 0.6
+    let lgc_magnify          = lg_magnify * 0.6
+    let lgc_glass_tint       = lg_glass_tint * 0.5
+    // lumen's own fill over it: a whisper, a touch more under the pointer.
+    let lgc_fill             = 7%
+
+    // Buttons, pills and fields are layer 2: they lens what is really behind
+    // the card (niri bends the crisp backdrop, not the card's frost), as iOS's
+    // buttons: thick glass whose narrow curved edge squeezes the backdrop into
+    // rings at the rim. A round button is clear all over; a pill or a field
+    // eases into the card's frost toward its middle, where its words are.
+    // Tiles (`panel`) stay layer 1, frosted: they hold the most text, and over
+    // a terminal the crisp backdrop ran through it.
+    let lgb_refraction       = lg_refraction * 1.3
+    let lgb_bevel            = 9
+    // 2026-10-28, the user: the buttons read clearer than the card they sit on. Their glass
+    // takes the card's whole tint (MacShell's tintMix) instead of a third of it, and a little
+    // more fill; the lens is unchanged. (Their rims sparkled with colour over sharp text: no
+    // dispersion on them.)
+    let lgb_glass_tint       = lg_glass_tint * 1.0
+    let lgb_fill             = lgc_fill + 8%
+
+    // ── materials: what every control is made of ───────────────────────
+    // Anything you press or type in is `body { material: control; box {…} }`
+    // (or `field`, `panel`); the body says only what differs (its colour, an
+    // `opacity: lgc_fill + 7% * zone.hover`, …). The edge's width follows
+    // the shape (`bevel: -1` = auto, min(short side x 0.36, 26), MacShell).
+    // Not for content (messages, list rows, avatars) nor for a control lit
+    // with a colour (switches, the selected segment): those stay lumen's.
+    material control {
+        color: chip; opacity: lgb_fill
+        glass: 100%; layer: 1; rim: 0%; ripple: 0%; blur: lg_card_frost
+        refraction: lgb_refraction; bevel: lgb_bevel; dispersion: 0%; specular: lg_specular
+        magnify: lgc_magnify; glass_tint: lgb_glass_tint; rim_tint: lg_rim_tint
+    }
+    //  Where text is typed: a little more fill under the letters.
+    material field {
+        color: chip; opacity: lgb_fill + 5%
+        glass: 100%; layer: 1; rim: 0%; ripple: 0%; blur: lg_card_frost
+        refraction: lgb_refraction; bevel: lgb_bevel; dispersion: 0%; specular: lg_specular
+        magnify: lgc_magnify; glass_tint: lgb_glass_tint; rim_tint: lg_rim_tint
+    }
+    //  A tile or sheet on the card (weather, inbox, a menu): thicker glass.
+    material panel {
+        color: chip; opacity: lgc_fill
+        glass: 100%; layer: 1; rim: 0%; ripple: 0%; blur: lg_frost
+        refraction: lgc_panel_refraction; bevel: -1; dispersion: lgc_dispersion; specular: lg_specular
+        magnify: lgc_magnify; glass_tint: lgc_glass_tint; rim_tint: lg_rim_tint
+    }
+}

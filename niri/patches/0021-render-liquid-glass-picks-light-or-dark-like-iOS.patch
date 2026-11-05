@@ -1,0 +1,48 @@
+From 80d8ca9259b51fe50a365213fc2ff2fea0428eee Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 12:58:54 +0400
+Subject: [PATCH 21/38] render: liquid glass picks light or dark like iOS
+
+MacShell's dark/light switch now follows what is behind the glass: the
+frosted backdrop's brightness over the shape (centre + 4 points, so a
+whole pill turns together). Bright scenery gets light glass (white tint,
+bigger milky lift), dark scenery dark glass; light stops at 80% so white
+text keeps its contrast.
+---
+ src/render_helpers/shaders/liquid_glass.frag | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index faf8b3db..156c61cb 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -206,7 +206,6 @@ void main() {
+     float magnify = s[3].z;                          // vertical lens of the whole slab
+     float tint_mix = clamp(s[3].w, 0.0, 1.0);        // flat tint mixed in
+     float rim_tint = clamp(floor(s[2].x / 2.0) / 100.0, 0.0, 1.0);  // 0 white rim .. 1 the glass's colour
+-    const float dark = 1.0;                          // lumen's island is dark
+ 
+     // From logical px to texture coordinates (inverse of input_to_geo's linear part).
+     mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
+@@ -248,6 +247,21 @@ void main() {
+     vec2 centre = s[0].xy + s[0].zw * 0.5;
+     vec2 ps = vec2(p.x, (p.y - centre.y) * (1.0 - magnify * 1.5) + centre.y);
+ 
++    // Light or dark glass, chosen like iOS by what is behind: the frosted
++    // backdrop's brightness over the shape (its centre and four points around
++    // it, so a whole pill turns together). Bright scenery gets MacShell's light
++    // glass, dark gets its dark glass; "light" stops at 80% so lumen's white
++    // text keeps its contrast.
++    vec2 sh = s[0].zw * 0.3;
++    vec2 cv = v_coords + inv * ((centre - p) / geo_size);
++    vec2 ox = inv * (vec2(sh.x, 0.0) / geo_size);
++    vec2 oy = inv * (vec2(0.0, sh.y) / geo_size);
++    const vec3 lw = vec3(0.2126, 0.7152, 0.0722);
++    float scene = (dot(backdrop(cv, 0.0).rgb, lw) * 2.0
++                 + dot(backdrop(cv + ox, 0.0).rgb, lw) + dot(backdrop(cv - ox, 0.0).rgb, lw)
++                 + dot(backdrop(cv + oy, 0.0).rgb, lw) + dot(backdrop(cv - oy, 0.0).rgb, lw)) / 6.0;
++    float dark = mix(1.0, 0.2, smoothstep(0.35, 0.75, scene));
++
+     // The backdrop per colour channel (dispersion shifts each), crisp for
+     // clear glass, frosted (the capture's blur, MacShell's pre-blur) otherwise.
+     float clear = 1.0 - smoothstep(0.0, 0.02, frost);

@@ -1,0 +1,36 @@
+// general.kdl — environment, cursor, decorations, screenshot folder.
+
+// ─── Environment (was lua/env.lua) ───────────────────────────────────────
+environment {
+    // Qt: native Wayland so the compositor scale is applied once; xcb fallback.
+    QT_QPA_PLATFORM "wayland;xcb"
+    QT_AUTO_SCREEN_SCALE_FACTOR "1"
+    // Zen/Firefox: never fork a fresh profile when the install path changes.
+    MOZ_LEGACY_PROFILES "1"
+    XCURSOR_THEME "Bibata-Modern-Ice"
+    XCURSOR_SIZE "21"
+    // Electron apps on Wayland, not blurry X11 at scale 1.6 (newer ones do it
+    // anyway; this catches the older ones).
+    ELECTRON_OZONE_PLATFORM_HINT "auto"
+    // Steam: the window's close button hides it to the tray instead of
+    // minimising (which does nothing on niri). Set globally so Steam gets it
+    // however it is started (game shortcuts, steam:// links), not only from
+    // its own .desktop file.
+    STEAM_FRAME_FORCE_CLOSE "1"
+}
+
+cursor {
+    xcursor-theme "Bibata-Modern-Ice"
+    xcursor-size 21
+    // Out of the way while typing, or left alone a few seconds.
+    hide-when-typing
+    hide-after-inactive-ms 5000
+}
+
+prefer-no-csd
+
+hotkey-overlay {
+    skip-at-startup
+}
+
+screenshot-path "~/Pictures/Screenshots/screenshot-%Y-%m-%d-%H-%M-%S.png"

@@ -1,0 +1,78 @@
+From 17eeecbe8ee349c8add8438ad0b935d9055d36d9 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 01:18:23 +0400
+Subject: [PATCH 10/38] render: liquid glass diffuses with a real blur, not
+ spread taps
+
+Busy areas showed stacked copies of the text behind: the 'wider frost' was
+an average of taps 24 px apart over a capture that, with a light window
+blur (passes 2, offset 3, further scaled down by frost), was nearly sharp.
+The capture now always uses window blur + 1 pass at full offset; frosted
+glass and busy backdrops show that capture directly; the taps only measure
+how busy the backdrop is.
+---
+ src/render_helpers/liquid_glass.rs           | 16 +++++++---------
+ src/render_helpers/shaders/liquid_glass.frag |  6 +++---
+ 2 files changed, 10 insertions(+), 12 deletions(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 81e88f81..a635a56b 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -18,8 +18,8 @@ use crate::render_helpers::RenderCtx;
+ 
+ /// How far outside its shapes a glass draws (its darkened edge), logical px.
+ const EDGE_PAD: f32 = 4.;
+-/// The least frost the backdrop is captured with, for diffusing busy content.
+-const DIFFUSE_MIN: f32 = 0.4;
++/// The most blur passes the glass's frost takes.
++const MAX_PASSES: u8 = 6;
+ 
+ /// The capture a surface's glass is drawn from, and the state it was last
+ /// drawn with (a change re-renders it).
+@@ -96,16 +96,14 @@ pub fn render_for_surface(
+             })
+             .collect();
+ 
+-        // The backdrop is always frosted at least DIFFUSE_MIN, even for clear
+-        // glass: the shader shows it crisp where what is behind is calm, and
+-        // diffuses busy content (text, fine detail) from this, like iOS 27.
++        // The backdrop is always captured really frosted (one pass more than
++        // window blur), whatever the glass asks for: the shader shows it crisp
++        // (clear glass, calm backdrop) or frosted (frosted glass, busy
++        // backdrop) — never a sharp image smeared by sparse taps, which ghosts.
+         let frosted = !blur_config.off;
+-        let strength = state.frost.max(DIFFUSE_MIN);
+         let blur = frosted.then(|| {
+             let mut options = BlurOptions::from(blur_config);
+-            // Low frost must not retain the full downsampling pyramid.
+-            options.passes = ((options.passes as f32 * strength).ceil() as u8).max(1);
+-            options.offset *= strength as f64;
++            options.passes = options.passes.saturating_add(1).min(MAX_PASSES);
+             options
+         });
+         let noise = if frosted { blur_config.noise as f32 } else { 0. };
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 6b7c8cd4..e1ba0933 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -201,8 +201,8 @@ void main() {
+     // iOS 27: busy content behind the glass (text, fine detail) is diffused
+     // more. How busy, measured over ~24 px around the point (so the frost
+     // changes by region, not line by line): how far the crisp backdrop
+-    // strays from the frosted one. The same taps, averaged, are a wider
+-    // frost built from an already smooth image (no ghosting).
++    // strays from the frosted one. The taps only measure; what is shown is
++    // the frosted capture itself (averaging spread taps would stack copies).
+     vec2 r1 = inv * (vec2(24.0, 0.0) / geo_size);
+     vec2 r2 = inv * (vec2(0.0, 24.0) / geo_size);
+     vec4 f0 = texture2D(tex, v_coords);
+@@ -217,7 +217,7 @@ void main() {
+                  + abs(dot(texture2D(tex_sharp, v_coords + r2).rgb - fc.rgb, lw))
+                  + abs(dot(texture2D(tex_sharp, v_coords - r2).rgb - fd.rgb, lw));
+     float busy = smoothstep(0.04, 0.22, detail);
+-    vec4 diffused = (f0 * 2.0 + fa + fb + fc + fd) / 6.0;
++    vec4 diffused = f0;
+ 
+     vec4 color;
+     float rim = 0.0;

@@ -1,0 +1,57 @@
+From a405ddfeda100fdd8bea575979e65988081c446b Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Mon, 2 Nov 2026 13:18:28 +0400
+Subject: [PATCH 35/38] liquid glass: always the dark glass, whatever is behind
+
+The glass no longer turns light or dark with what is behind it: every shape
+is drawn at GLASS_TONE (0: the dark glass's tint, lift and sheen), so it looks
+the same over any backdrop. The light/dark decision is still made and sent to
+the client (lumen-glass appearance), which switches its text colour with it.
+---
+ src/render_helpers/liquid_glass.rs | 19 +++++++++++++------
+ 1 file changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 1747bb2a..e2aebe94 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -81,6 +81,10 @@ struct ShapeLight {
+ 
+ const SETTLE: u8 = 2;
+ 
++/// The tone every glass is drawn at (0 dark .. 1 light), whatever is behind
++/// it, instead of switching with the backdrop: the dark glass, for now (0.5
++/// would be halfway between the old dark and light glass's tint, lift and sheen).
++const GLASS_TONE: f32 = 0.0;
+ const LIGHT_ON: f32 = 0.56;
+ const LIGHT_OFF: f32 = 0.40;
+ const FADE: Duration = Duration::from_millis(300);
+@@ -343,8 +347,9 @@ impl Glass {
+                         (v, v != if l.light { 1. } else { 0. })
+                     });
+                     animating |= moving;
+-                    let v = if object.is_some() { v } else { v * 0.8 };
+-                    shapes.push(packed(s, x0, y0, v, layer));
++                    // Drawn at the one tone like everything else (GLASS_TONE).
++                    let _ = v;
++                    shapes.push(packed(s, x0, y0, GLASS_TONE, layer));
+                     continue;
+                 }
+                 let l = &mut glass.lights[i];
+@@ -376,10 +381,12 @@ impl Glass {
+                 }
+                 let v = l.value(now);
+                 animating |= v != if l.light { 1. } else { 0. };
+-                // A client that can't switch its text keeps light glass at 80%,
+-                // so white text on it still reads.
+-                let v = if object.is_some() { v } else { v * 0.8 };
+-                shapes.push(packed(s, x0, y0, v, layer));
++                // The glass itself no longer turns light or dark: it is always
++                // drawn at one tone (GLASS_TONE), so it looks the same over any
++                // backdrop. The decision above still goes to the
++                // client (`appearance`), which switches its text with it.
++                let _ = (v, &object);
++                shapes.push(packed(s, x0, y0, GLASS_TONE, layer));
+             }
+             if animating {
+                 lay.effect.damage();

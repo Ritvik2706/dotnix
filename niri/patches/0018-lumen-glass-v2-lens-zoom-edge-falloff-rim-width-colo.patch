@@ -1,0 +1,267 @@
+From ae0f27872aa9ef6a400dd9fe5c0694fd76a0d9e0 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 03:08:34 +0400
+Subject: [PATCH 18/38] lumen-glass v2: lens zoom, edge falloff, rim width;
+ coloured rim
+
+Version 2 of the protocol takes 16 floats per shape (13 still accepted):
+magnify (the whole shape zooms what is behind toward its centre, so a
+pill acts as one lens, as on iOS), falloff (exponent of the edge's bend),
+rim width. The rim light now brightens the backdrop's own colour instead
+of going white. Clients send 16 only when bound at version 2.
+---
+ resources/lumen-glass-v1.xml                 | 12 +++++--
+ src/protocols/lumen_glass.rs                 | 24 ++++++++++---
+ src/render_helpers/liquid_glass.rs           |  8 +++--
+ src/render_helpers/shaders/liquid_glass.frag | 38 +++++++++++++-------
+ 4 files changed, 59 insertions(+), 23 deletions(-)
+
+diff --git a/resources/lumen-glass-v1.xml b/resources/lumen-glass-v1.xml
+index dcd670ae..507de838 100644
+--- a/resources/lumen-glass-v1.xml
++++ b/resources/lumen-glass-v1.xml
+@@ -34,7 +34,7 @@
+     Private to lumen and the patched niri.
+   </description>
+ 
+-  <interface name="lumen_glass_manager_v1" version="1">
++  <interface name="lumen_glass_manager_v1" version="2">
+     <description summary="glass for surfaces">
+     </description>
+ 
+@@ -58,7 +58,7 @@
+     </request>
+   </interface>
+ 
+-  <interface name="lumen_glass_surface_v1" version="1">
++  <interface name="lumen_glass_surface_v1" version="2">
+     <description summary="the glass of one surface">
+       All state is double-buffered: it applies on the surface's next
+       wl_surface.commit, together with what the client drew for that frame.
+@@ -78,7 +78,8 @@
+ 
+     <request name="set_shapes">
+       <description summary="the glass shapes">
+-        Native-endian 32-bit floats, 13 per shape, at most 8 shapes; an empty
++        Native-endian 32-bit floats, 13 per shape (16 from version 2, all
++        shapes alike), at most 8 shapes; an empty
+         array removes all glass. Per shape, in surface-local logical pixels
+         unless noted:
+ 
+@@ -92,6 +93,11 @@
+           bevel: how far in from the edge the glass is curved; the middle
+             is flat and shows the backdrop undisplaced
+           specular: 0..1, the light along the rim
++        and, with 16 per shape (version 2):
++          magnify: 0..0.9, how much the whole shape magnifies what is behind
++            toward its centre (default 0)
++          falloff: the exponent of the edge's bend fading inward (default 2)
++          rim width: how wide the rim light is, px (default 1.2)
+       </description>
+       <arg name="shapes" type="array"/>
+     </request>
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index 185f744e..64d9fd55 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -14,10 +14,12 @@ use super::raw::lumen_glass::v1::server::{lumen_glass_manager_v1, lumen_glass_su
+ use lumen_glass_manager_v1::LumenGlassManagerV1;
+ use lumen_glass_surface_v1::LumenGlassSurfaceV1;
+ 
+-const VERSION: u32 = 1;
++const VERSION: u32 = 2;
+ 
+-/// Floats per shape in set_shapes.
++/// Floats per shape in set_shapes: 13, or 16 with lens zoom, edge falloff and
++/// rim width (the two can't be confused with at most 8 shapes).
+ const SHAPE_FLOATS: usize = 13;
++const SHAPE_FLOATS_EXT: usize = 16;
+ pub const MAX_SHAPES: usize = 8;
+ 
+ #[derive(Debug, Clone, Copy, PartialEq)]
+@@ -33,6 +35,12 @@ pub struct GlassShape {
+     pub dispersion: f32,
+     pub bevel: f32,
+     pub specular: f32,
++    /// How much the middle magnifies what is behind (0 none).
++    pub magnify: f32,
++    /// How the edge's bend falls off from the rim inward: the exponent of (1 - x).
++    pub falloff: f32,
++    /// How wide the rim light is, px.
++    pub rim_width: f32,
+ }
+ 
+ /// Double-buffered glass state of a surface.
+@@ -186,7 +194,12 @@ where
+             }
+             lumen_glass_surface_v1::Request::SetShapes { shapes } => {
+                 let floats = shapes.len() / 4;
+-                if shapes.len() % 4 != 0 || floats % SHAPE_FLOATS != 0 {
++                let per = if floats % SHAPE_FLOATS_EXT == 0 && floats / SHAPE_FLOATS_EXT <= MAX_SHAPES {
++                    SHAPE_FLOATS_EXT
++                } else {
++                    SHAPE_FLOATS
++                };
++                if shapes.len() % 4 != 0 || floats % per != 0 {
+                     glass.post_error(
+                         lumen_glass_surface_v1::Error::InvalidShapes,
+                         "the shapes array is not a whole number of shapes",
+@@ -198,7 +211,7 @@ where
+                     .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
+                     .collect();
+                 let parsed: Vec<GlassShape> = f
+-                    .chunks_exact(SHAPE_FLOATS)
++                    .chunks_exact(per)
+                     .take(MAX_SHAPES)
+                     .filter(|v| v.iter().all(|x| x.is_finite()) && v[2] > 0. && v[3] > 0.)
+                     .map(|v| GlassShape {
+@@ -212,6 +225,9 @@ where
+                         dispersion: v[10].clamp(0., 1.),
+                         bevel: v[11].max(0.),
+                         specular: v[12].clamp(0., 1.),
++                        magnify: v.get(13).copied().unwrap_or(0.).clamp(0., 0.9),
++                        falloff: v.get(14).copied().unwrap_or(2.).clamp(0.3, 6.),
++                        rim_width: v.get(15).copied().unwrap_or(1.2).clamp(0.25, 12.),
+                     })
+                     .collect();
+                 with_pending(surface, |p| p.shapes = parsed);
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 6ed50406..5b19f0b5 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -86,14 +86,16 @@ pub fn render_for_surface(
+                     s.radii[1],
+                     s.radii[2],
+                     s.radii[3],
+-                    if s.continuous { 1. } else { 0. },
++                    // corner style and rim width share a float: continuous (0/1)
++                    // + 2 x rim width in quarter px (decoded in the shader).
++                    (if s.continuous { 1. } else { 0. }) + 2. * (s.rim_width * 4.).round(),
+                     s.refraction,
+                     s.dispersion,
+                     s.bevel,
+                     s.specular,
+                     state.frost,
+-                    0.,
+-                    0.,
++                    s.magnify,
++                    s.falloff,
+                 ]
+             })
+             .collect();
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 8c02d151..79dce9a6 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -66,7 +66,8 @@ float shape_sdf(vec2 p, mat4 s) {
+     float half_side = min(size.x, size.y) * 0.5;
+     r = min(r, half_side);
+ 
+-    if (s[2].x < 0.5 || r < 0.5) {
++    // s[2].x: continuous corner (0/1) + 2 x rim width in quarter px.
++    if (mod(s[2].x, 2.0) < 0.5 || r < 0.5) {
+         vec2 c = abs(q) - (size * 0.5 - vec2(r));
+         return length(max(c, 0.0)) + min(max(c.x, c.y), 0.0) - r;
+     }
+@@ -148,14 +149,13 @@ float edge_slope(float u, float bevel, float thickness) {
+ // How far (px, inward) the backdrop shifts at `u` px in from the edge. A ray
+ // through glass of index `ior` this thick shifts about thickness * (ior - 1)
+ // at the rim, capped at LENS_CAP x bevel. The shift falls off as
+-// (1 - x)^LENS_POWER across the bevel. It is taken OUTWARD (see main): the
++// (1 - x)^falloff across the bevel (per shape). It is taken OUTWARD (see main): the
+ // rim shows what lies just outside the glass, pulled in and squeezed, so lines
+ // crossing the edge bend toward the inside of the shape, as on Apple's glass;
+ // outward sampling only compresses, so it never folds into mirror images.
+-#define LENS_POWER 2.0
+ #define LENS_CAP 1.0
+ #define LENS_TRACED 0
+-float displacement(float u, float bevel, float thickness, float ior) {
++float displacement(float u, float bevel, float thickness, float ior, float power) {
+     float x = clamp(u / bevel, 0.0, 1.0);
+ #if LENS_TRACED
+     // The physical trace: a ray straight down through the squircle surface
+@@ -168,7 +168,7 @@ float displacement(float u, float bevel, float thickness, float ior) {
+     return profile(max(x, 1e-3)) * thickness * tan(t1 - t2);
+ #else
+     float peak = min(thickness * (ior - 1.0), LENS_CAP * bevel);
+-    return peak * pow(1.0 - x, LENS_POWER);
++    return peak * pow(1.0 - x, power);
+ #endif
+ }
+ 
+@@ -201,6 +201,9 @@ void main() {
+     float bevel = min(s[2].w, min(s[0].z, s[0].w) * 0.5);
+     float specular = s[3].x;
+     float frost = clamp(s[3].y, 0.0, 1.0);
++    float magnify = s[3].z;                       // the middle's zoom (0 none)
++    float falloff = max(s[3].w, 0.3);             // how the edge's bend fades inward
++    float rim_width = max(floor(s[2].x / 2.0) / 4.0, 0.25);
+ 
+     // Outward normal of the (merged) outline.
+     float ignore;
+@@ -226,6 +229,11 @@ void main() {
+     // needs a blurred detail map from the capture, see liquid_glass.rs.)
+     float busy = 0.0;
+ 
++    // Lens zoom: the whole shape magnifies what is behind toward its centre
++    // (a pill acts as one lens, as on iOS), on top of the edge's bend.
++    vec2 centre = s[0].xy + s[0].zw * 0.5;
++    vec2 zoomed = v_coords + inv * ((centre - p) * magnify / geo_size);
++
+     vec4 color;
+     float rim = 0.0;
+     if (bevel > 0.5 && thickness > 0.0 && u < bevel) {
+@@ -233,7 +241,7 @@ void main() {
+         // (Apple's edges bend lines toward the inside of the shape). Sampling
+         // outward only ever compresses, so it can't fold into mirror images.
+         slope = edge_slope(u, bevel, thickness);
+-        float dg = displacement(u, bevel, thickness, 1.5);
++        float dg = displacement(u, bevel, thickness, 1.5, falloff);
+         vec2 dir = inv * (n / geo_size);
+         // One material: the rim bends the same (frosted or clear) backdrop the
+         // middle shows. A crisp rim around a frosted middle reads as a seam,
+@@ -241,19 +249,19 @@ void main() {
+         float e = clamp(1.0 - u / bevel, 0.0, 1.0);
+         rim = e * e * (3.0 - 2.0 * e);
+         float c = clear;
+-        vec4 g = backdrop(v_coords + dir * dg, c);
++        vec4 g = backdrop(zoomed + dir * dg, c);
+         if (dispersion > 0.0) {
+             // Red bends less, blue more: a prism's spread of the index.
+             // (around the capped shift, so the split survives the cap).
+             float dr = dg * (1.0 - 0.35 * dispersion);
+             float db = dg * (1.0 + 0.35 * dispersion);
+-            color = vec4(backdrop(v_coords + dir * dr, c).r, g.g,
+-                         backdrop(v_coords + dir * db, c).b, g.a);
++            color = vec4(backdrop(zoomed + dir * dr, c).r, g.g,
++                         backdrop(zoomed + dir * db, c).b, g.a);
+         } else {
+             color = g;
+         }
+     } else {
+-        color = backdrop(v_coords, clear);
++        color = backdrop(zoomed, clear);
+     }
+ #if defined(NO_ALPHA)
+     color.a = 1.0;
+@@ -286,13 +294,17 @@ void main() {
+     // Fresnel: grazing surfaces (the steep rim) reflect more.
+     float fresnel = pow(1.0 - normal.z, 2.0);
+     // A hairline right at the silhouette, so the outline reads even flat-on.
+-    float hairline = 1.0 - smoothstep(0.0, 1.2, u);
++    float hairline = 1.0 - smoothstep(0.0, rim_width, u);
+     // The glints live on the curved band (where the surface tilts), brightest
+     // where it faces the light; the hairline keeps the whole outline drawn.
+-    float tilt = smoothstep(0.0, 0.35, fresnel);
++    // ...and over the rim's width at least, so a wide rim glows as a band.
++    float tilt = max(smoothstep(0.0, 0.35, fresnel), 1.0 - smoothstep(0.0, rim_width * 1.6, u));
+     // Brighter than iOS 26's: iOS 27 strengthened the highlights for separation.
+     float lit = specular * ((1.2 * glint + 0.55 * inner) * tilt + 0.55 * hairline);
+-    color.rgb = mix(color.rgb, vec3(color.a), clamp(lit, 0.0, 1.0));
++    // The rim catches the colour of what is behind it, brightened (pink over
++    // pink, blue over blue, as on iOS), rather than going white.
++    vec3 bright = min(color.rgb * 1.7 + vec3(0.3 * color.a), vec3(color.a));
++    color.rgb = mix(color.rgb, bright, clamp(lit, 0.0, 1.0));
+ 
+     
+     color = color * cover * alpha + edge * (1.0 - cover);

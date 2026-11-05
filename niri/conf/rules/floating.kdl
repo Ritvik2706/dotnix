@@ -1,0 +1,143 @@
+// rules/floating.kdl — dialogs, pickers and panels that float over the strip
+// instead of becoming columns, and their sizes. Comes after apps.kdl, so a
+// dialog of an app sized there (a Zen "Save As") gets the size from here.
+// Floating windows are never touched by auto-fit.
+
+// File choosers and portal pickers: compact floating panel, real blur (the
+// patched niri gives xray-false windows a glass rim of the same real backdrop).
+window-rule {
+    match title=r#"^(Open Files?|Save File|Save As|Select a File|Open Folder|File Upload|All Files|Enter name of file to save to|Save Image|Choose wallpaper|Library)"#
+    match app-id=r#"^(xdg-desktop-portal-gtk|xdg-desktop-portal-gnome)$"#
+    match title=r#"(?i)^(save|open|export|import|select|choose|attach|upload)\b.*\b(as|file|files|folder|folders|directory|image|document|location|picture|video|to upload|wallpaper)\b"#
+    match title=r#"^(.*)(wants to (save|open))$"#
+    open-floating true
+    default-column-width { fixed 1024; }
+    default-window-height { fixed 600; }
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+// Screen-share picker (xdg-desktop-portal-gnome on niri).
+window-rule {
+    match app-id=r#"^xdg-desktop-portal-gnome$"# title=r#"(?i)share"#
+    open-floating true
+    default-column-width { fixed 900; }
+    default-window-height { fixed 620; }
+}
+
+// Settings panels: float, centered, glass.
+window-rule {
+    match app-id=r#"^(org\.twosheds\.iwgtk|iwgtk)$"#
+    match app-id=r#"^\.?blueman-.*$"#
+    open-floating true
+    default-column-width { fixed 1024; }
+    default-window-height { fixed 600; }
+    opacity 0.90
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+window-rule {
+    match app-id=r#"^(pavucontrol|org\.pulseaudio\.pavucontrol)$"#
+    match app-id=r#"^nm-connection-editor$"#
+    match app-id=r#"^Zotero$"#
+    open-floating true
+    default-column-width { proportion 0.45; }
+    default-window-height { proportion 0.45; }
+}
+
+window-rule {
+    match app-id=r#"^(blueberry\.py|guifetch)$"#
+    match app-id=r#".*plasmawindowed.*"#
+    match app-id=r#"^kcm_.*"#
+    match app-id=r#".*bluedevilwizard$"#
+    match title=r#".*Welcome$"#
+    open-floating true
+}
+
+window-rule {
+    match app-id=r#"org\.freedesktop\.impl\.portal\.desktop\.kde"#
+    open-floating true
+    default-column-width { proportion 0.6; }
+    default-window-height { proportion 0.65; }
+}
+
+// Thunar dialogs.
+window-rule {
+    match app-id=r#"^[Tt]hunar$"# title=r#"^(Properties|Preferences|Open With|Choose Application|Replace|Overwrite|Merge|Empty Trash|Confirm|Permissions)"#
+    match app-id=r#"^[Tt]hunar$"# title=r#".*(Bulk\s?Rename|Custom Actions?).*"#
+    match app-id=r#"^catfish$"#
+    open-floating true
+    default-column-width { proportion 0.55; }
+    default-window-height { proportion 0.6; }
+}
+
+// File-operation progress: out of the way, top-left, never takes focus.
+window-rule {
+    match app-id=r#"^[Tt]hunar$"# title=r#"^(File Operation Progress|Copying|Moving|Deleting|Transferring|Replacing|Merging)"#
+    open-floating true
+    open-focused false
+    default-column-width { proportion 0.36; }
+    default-window-height { proportion 0.22; }
+    default-floating-position x=40 y=80 relative-to="top-left"
+}
+
+window-rule {
+    match app-id=r#"^yazi-(picker|fm)$"#
+    match title=r#"^Yazi File Picker$"#
+    open-floating true
+    default-column-width { proportion 0.8; }
+    default-window-height { proportion 0.75; }
+    opacity 0.97
+}
+
+// Clipboard manager scratchpad.
+window-rule {
+    match app-id=r#"^(copyq|CopyQ|com\.github\.hluk\.copyq)$"#
+    open-floating true
+    default-column-width { fixed 900; }
+    default-window-height { fixed 600; }
+}
+
+// Mod+A's old terminal project picker (project.sh pick): a floating panel,
+// centred.
+window-rule {
+    match app-id=r#"^dev\.niri\.project-picker$"#
+    open-floating true
+    default-column-width { fixed 1100; }
+    default-window-height { fixed 560; }
+    opacity 0.96
+    background-effect {
+        blur true
+        xray false
+    }
+}
+
+// Picture-in-picture: bottom-right corner.
+window-rule {
+    match title=r#"^([Pp]icture[-\s]?[Ii]n[-\s]?[Pp]icture)"#
+    open-floating true
+    default-column-width { proportion 0.25; }
+    default-window-height { proportion 0.25; }
+    default-floating-position x=32 y=32 relative-to="bottom-right"
+}
+
+// Steam's own popups: toasts in the corner without taking focus, the
+// friends list and small windows floating.
+window-rule {
+    match app-id=r#"^steam$"# title=r#"^notificationtoastwindow$"#
+    open-floating true
+    open-focused false
+    default-floating-position x=16 y=16 relative-to="bottom-right"
+    // Their own size, not the client's ⅔ (which floating windows also take).
+    default-column-width {}
+}
+window-rule {
+    match app-id=r#"^steam$"# title=r#"^(Friends List|Steam Settings|Steam - News.*|Special Offers|Sign in to Steam|Steam Guard.*)$"#
+    open-floating true
+    default-column-width {}
+}

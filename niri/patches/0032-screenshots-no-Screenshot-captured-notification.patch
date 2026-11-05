@@ -1,0 +1,40 @@
+From 2efba92164e945cccdd91079b06373699b243905 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 21:49:07 +0400
+Subject: [PATCH 32/38] screenshots: no "Screenshot captured" notification
+
+lumen's island already shows the shot on the clipboard.
+---
+ src/niri.rs      | 6 ++----
+ src/utils/mod.rs | 1 +
+ 2 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/src/niri.rs b/src/niri.rs
+index fb8e5bfd..deaa7c1f 100644
+--- a/src/niri.rs
++++ b/src/niri.rs
+@@ -5762,10 +5762,8 @@ impl Niri {
+                 debug!("not saving screenshot to disk");
+             }
+ 
+-            #[cfg(feature = "dbus")]
+-            if let Err(err) = crate::utils::show_screenshot_notification(image_path.as_deref()) {
+-                warn!("error showing screenshot notification: {err:?}");
+-            }
++            // No "Screenshot captured" notification: lumen's island already
++            // shows the shot on the clipboard.
+ 
+             // Send screenshot completion event.
+             let path_string = image_path
+diff --git a/src/utils/mod.rs b/src/utils/mod.rs
+index bbeac5bc..65678e1a 100644
+--- a/src/utils/mod.rs
++++ b/src/utils/mod.rs
+@@ -541,6 +541,7 @@ pub fn baba_is_float_offset(now: Duration, view_height: f64) -> f64 {
+ }
+ 
+ #[cfg(feature = "dbus")]
++#[allow(dead_code)]
+ pub fn show_screenshot_notification(image_path: Option<&Path>) -> anyhow::Result<()> {
+     use std::collections::HashMap;
+ 

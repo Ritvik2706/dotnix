@@ -1,0 +1,482 @@
+From dd307f2cc8f6e5c3068263a26c3342c019d9c930 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 18:33:50 +0400
+Subject: [PATCH 28/38] liquid glass: round buttons lens the crisp backdrop
+ (layer 2), no meniscus frame on cards, lumen-glass v5 per-shape opacity
+
+---
+ resources/lumen-glass-v1.xml                 | 13 ++--
+ src/protocols/lumen_glass.rs                 | 21 ++++++-
+ src/render_helpers/framebuffer_effect.rs     | 65 +++++++++++++++++---
+ src/render_helpers/liquid_glass.rs           | 32 +++++++---
+ src/render_helpers/shaders/liquid_glass.frag | 29 +++++++--
+ src/render_helpers/shaders/mod.rs            |  3 +
+ 6 files changed, 136 insertions(+), 27 deletions(-)
+
+diff --git a/resources/lumen-glass-v1.xml b/resources/lumen-glass-v1.xml
+index 2cb7f444..163ab80a 100644
+--- a/resources/lumen-glass-v1.xml
++++ b/resources/lumen-glass-v1.xml
+@@ -34,7 +34,7 @@
+     Private to lumen and the patched niri.
+   </description>
+ 
+-  <interface name="lumen_glass_manager_v1" version="4">
++  <interface name="lumen_glass_manager_v1" version="5">
+     <description summary="glass for surfaces">
+     </description>
+ 
+@@ -58,7 +58,7 @@
+     </request>
+   </interface>
+ 
+-  <interface name="lumen_glass_surface_v1" version="4">
++  <interface name="lumen_glass_surface_v1" version="5">
+     <description summary="the glass of one surface">
+       All state is double-buffered: it applies on the surface's next
+       wl_surface.commit, together with what the client drew for that frame.
+@@ -78,8 +78,8 @@
+ 
+     <request name="set_shapes">
+       <description summary="the glass shapes">
+-        Native-endian 32-bit floats, 13 per shape (16 from version 2, all
+-        shapes alike), at most 8 shapes (48 from version 4); an empty
++        Native-endian 32-bit floats, 13 per shape (16 from version 2, 17
++        from version 5, all shapes alike), at most 8 shapes (48 from version 4); an empty
+         array removes all glass. Per shape, in surface-local logical pixels
+         unless noted:
+ 
+@@ -88,7 +88,8 @@
+           corner: 0 circular arcs, 1 continuous (squircle, lumen's
+             `continuous` corners); from version 4, plus 2 x layer: 0 glass
+             on what is behind the surface, 1 glass on top of that glass
+-            (a control on a panel), which refracts it
++            (a control on a panel), which refracts it; 2 the same, but it
++            bends the crisp backdrop under the panel instead (a button)
+           refraction: how far the backdrop is displaced at the very rim,
+             fading to 0 where the edge's curve ends
+           dispersion: 0..1, how much the colours separate at the rim
+@@ -99,6 +100,8 @@
+           magnify: 0..0.9, the whole shape as a gentle vertical lens (default 0)
+           tint: 0..1, flat tint mixed into the glass (default 0.23)
+           rim tint: 0..1, the rim white (0) or a brighter shade of the glass (1)
++        and, with 17 per shape (version 5):
++          opacity: 0..1, how much of the glass is drawn (default 1)
+       </description>
+       <arg name="shapes" type="array"/>
+     </request>
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index ce3c1807..73966efc 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -14,12 +14,14 @@ use super::raw::lumen_glass::v1::server::{lumen_glass_manager_v1, lumen_glass_su
+ use lumen_glass_manager_v1::LumenGlassManagerV1;
+ use lumen_glass_surface_v1::LumenGlassSurfaceV1;
+ 
+-const VERSION: u32 = 4;
++const VERSION: u32 = 5;
+ 
+ /// Floats per shape in set_shapes: 13, or 16 (version 2) with lens zoom, tint
+ /// and rim tint (the two can't be confused with at most 8 shapes).
+ const SHAPE_FLOATS: usize = 13;
+ const SHAPE_FLOATS_EXT: usize = 16;
++/// Version 5: plus the shape's opacity.
++const SHAPE_FLOATS_V5: usize = 17;
+ pub const MAX_SHAPES: usize = 48;
+ 
+ #[derive(Debug, Clone, Copy, PartialEq)]
+@@ -34,6 +36,10 @@ pub struct GlassShape {
+     /// 0: glass on what is behind the surface (panels, capsules); 1: glass on
+     /// top of that glass (controls inside a panel), drawn as a second layer.
+     pub layer: u8,
++    /// Layer 2 as the client says it: glass on glass (layer 1) that bends the
++    /// crisp backdrop under the panel, not the panel's frosted glass — iOS
++    /// buttons, a clear lens with what is really behind stretched round its rim.
++    pub sharp: bool,
+     pub refraction: f32,
+     pub dispersion: f32,
+     pub bevel: f32,
+@@ -44,6 +50,9 @@ pub struct GlassShape {
+     pub tint: f32,
+     /// The rim's colour: 0 white .. 1 a brighter shade of the glass (rimTint).
+     pub rim_tint: f32,
++    /// How much of the glass is drawn (version 5): a control fading in with
++    /// what is on it fades its glass too, instead of its glass popping in whole.
++    pub alpha: f32,
+ }
+ 
+ /// Double-buffered glass state of a surface.
+@@ -214,7 +223,13 @@ where
+             lumen_glass_surface_v1::Request::SetShapes { shapes } => {
+                 let floats = shapes.len() / 4;
+                 // Version 2 clients send 16 per shape, older ones 13.
+-                let per = if glass.version() >= 2 { SHAPE_FLOATS_EXT } else { SHAPE_FLOATS };
++                let per = if glass.version() >= 5 {
++                    SHAPE_FLOATS_V5
++                } else if glass.version() >= 2 {
++                    SHAPE_FLOATS_EXT
++                } else {
++                    SHAPE_FLOATS
++                };
+                 if shapes.len() % 4 != 0 || floats % per != 0 {
+                     glass.post_error(
+                         lumen_glass_surface_v1::Error::InvalidShapes,
+@@ -239,6 +254,7 @@ where
+                         // corner: continuous (0/1) + 2 x layer.
+                         continuous: v[8].rem_euclid(2.) >= 0.5,
+                         layer: ((v[8] / 2.).floor() as i32).clamp(0, 1) as u8,
++                        sharp: (v[8] / 2.).floor() as i32 >= 2,
+                         refraction: v[9].clamp(-200., 200.),
+                         dispersion: v[10].clamp(0., 1.),
+                         bevel: v[11].max(0.),
+@@ -246,6 +262,7 @@ where
+                         magnify: v.get(13).copied().unwrap_or(0.).clamp(0., 0.9),
+                         tint: v.get(14).copied().unwrap_or(0.23).clamp(0., 1.),
+                         rim_tint: v.get(15).copied().unwrap_or(0.).clamp(0., 1.),
++                        alpha: v.get(16).copied().unwrap_or(1.).clamp(0., 1.),
+                     })
+                     .collect();
+                 with_pending(surface, |p| p.shapes = parsed);
+diff --git a/src/render_helpers/framebuffer_effect.rs b/src/render_helpers/framebuffer_effect.rs
+index 4ed860c7..4c5e4851 100644
+--- a/src/render_helpers/framebuffer_effect.rs
++++ b/src/render_helpers/framebuffer_effect.rs
+@@ -53,10 +53,27 @@ pub struct FramebufferEffectElement {
+ pub struct GlassDraw {
+     pub shapes: Vec<[f32; 16]>,
+     pub merge: f32,
++    /// The surface's frost (0..1), the same for all its shapes.
++    pub frost: f32,
+     /// Where the brightness behind each shape is reported (light/dark glass).
+     pub measure: Option<std::sync::Arc<std::sync::Mutex<GlassMeasure>>>,
++    /// Layer 0: where to leave its crisp capture for the glass on top of it.
++    pub publish: Option<SharpShare>,
++    /// Layer 1: the crisp backdrop under the panel it sits on, which it bends
++    /// instead of the panel's frosted glass (controls lens what is really
++    /// behind, as on iOS).
++    pub under: Option<SharpShare>,
+ }
+ 
++/// Layer 0's capture before any blur, and the framebuffer rectangle it holds.
++#[derive(Debug, Clone)]
++pub struct SharpBackdrop {
++    pub tex: GlesTexture,
++    pub dst: Rectangle<i32, Physical>,
++}
++
++pub type SharpShare = std::sync::Arc<std::sync::Mutex<Option<SharpBackdrop>>>;
++
+ /// The frosted backdrop's brightness behind each glass shape (0..1), read back
+ /// from the capture at most every MEASURE_EVERY; liquid_glass.rs decides from it.
+ #[derive(Debug, Default)]
+@@ -89,6 +106,8 @@ struct Inner {
+     /// The light/dark reading in flight, and when it was asked for.
+     readback: Option<Readback>,
+     measured: Option<std::time::Instant>,
++    /// The framebuffer rectangle the capture holds.
++    dst_fb: Rectangle<i32, Physical>,
+ }
+ 
+ impl FramebufferEffect {
+@@ -305,7 +324,8 @@ impl FramebufferEffectElement {
+         glass: &GlassDraw,
+         crop: Rectangle<f64, Logical>,
+         transform: Transform,
+-    ) -> [Uniform<'static>; 9] {
++        sharp_map: Option<[f32; 4]>,
++    ) -> [Uniform<'static>; 12] {
+         let (input_to_clip_geo, clip_geo_size) = self.input_to_clip_geo(crop, transform);
+         [
+             Uniform::new("niri_scale", self.scale),
+@@ -320,9 +340,12 @@ impl FramebufferEffectElement {
+             },
+             Uniform::new("glass_count", glass.shapes.len() as f32),
+             Uniform::new("glass_merge", glass.merge),
++            Uniform::new("glass_frost", glass.frost),
+             Uniform::new("saturation", self.saturation),
+             Uniform::new("noise", self.noise),
+             Uniform::new("tex_sharp", 1i32),
++            Uniform::new("sharp_map", sharp_map.unwrap_or([1., 1., 0., 0.])),
++            Uniform::new("sharp_under", if sharp_map.is_some() { 1f32 } else { 0. }),
+         ]
+     }
+ 
+@@ -520,6 +543,11 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+                 }
+             })??;
+ 
++            inner.dst_fb = dst;
++            if let Some(share) = self.glass.as_ref().and_then(|g| g.publish.as_ref()) {
++                *share.lock().unwrap() = Some(SharpBackdrop { tex: framebuffer.clone(), dst });
++            }
++
+             // If blur is off, use the unblurred texture.
+             if self.blur_options.is_none() {
+                 inner.intermediate = Some(framebuffer.clone());
+@@ -646,12 +674,31 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
+         );
+ 
++        // Layer 1 on a panel: the panel's crisp backdrop, and how this
++        // capture's texture coordinates map into it (both are linear over
++        // their framebuffer rectangles).
++        let under = self
++            .glass
++            .as_ref()
++            .and_then(|g| g.under.as_ref())
++            .and_then(|u| u.lock().unwrap().clone())
++            .filter(|u| u.dst.size.w > 0 && u.dst.size.h > 0);
++        let sharp_map = under.as_ref().map(|u| {
++            let (a, b) = (inner.dst_fb, u.dst);
++            [
++                a.size.w as f32 / b.size.w as f32,
++                a.size.h as f32 / b.size.h as f32,
++                (a.loc.x - b.loc.x) as f32 / b.size.w as f32,
++                (a.loc.y - b.loc.y) as f32 / b.size.h as f32,
++            ]
++        });
++
+         let shaders = Shaders::get_from_frame(frame);
+         let (program, uniforms): (_, Vec<Uniform<'static>>) = match &self.glass {
+             Some(glass) => {
+                 let program = shaders.liquid_glass.clone();
+                 let uniforms = program.is_some().then(|| {
+-                    self.compute_glass_uniforms(glass, crop, frame.transformation())
++                    self.compute_glass_uniforms(glass, crop, frame.transformation(), sharp_map)
+                         .to_vec()
+                 });
+                 (program, uniforms.unwrap_or_default())
+@@ -668,11 +715,14 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+ 
+         // Liquid glass also reads the backdrop unblurred (texture unit 1), for the
+         // crisp lensing at its rim over a frosted middle.
+-        let sharp = self
+-            .glass
+-            .as_ref()
+-            .and(inner.framebuffer.as_ref())
+-            .map(|fb| fb.tex_id());
++        let sharp = match &under {
++            Some(u) => Some(u.tex.tex_id()),
++            None => self
++                .glass
++                .as_ref()
++                .and(inner.framebuffer.as_ref())
++                .map(|fb| fb.tex_id()),
++        };
+         if let Some(id) = sharp {
+             frame.with_context(|gl| unsafe {
+                 gl.ActiveTexture(ffi::TEXTURE1);
+@@ -769,6 +819,7 @@ impl Inner {
+             subregion_damage: Vec::new(),
+             readback: None,
+             measured: None,
++            dst_fb: Rectangle::default(),
+         }
+     }
+ }
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 2c22a0e3..f3f7d498 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -15,7 +15,9 @@ use smithay::wayland::compositor::with_states;
+ use crate::protocols::lumen_glass::{glass_object, GlassShape, LumenGlassCachedState};
+ use crate::render_helpers::background_effect::{BackgroundEffectElement, RenderParams};
+ use crate::render_helpers::blur::BlurOptions;
+-use crate::render_helpers::framebuffer_effect::{FramebufferEffect, GlassDraw, GlassMeasure};
++use crate::render_helpers::framebuffer_effect::{
++    FramebufferEffect, GlassDraw, GlassMeasure, SharpShare,
++};
+ use crate::render_helpers::RenderCtx;
+ 
+ /// How far around its shapes a glass captures the backdrop, logical px: the
+@@ -37,6 +39,8 @@ struct SurfaceGlassInner {
+     last: Option<LumenGlassCachedState>,
+     /// Each shape's light/dark glass, as decided and as drawn (crossfading).
+     lights: Vec<ShapeLight>,
++    /// Layer 0's crisp capture, which layer 1 bends.
++    sharp: SharpShare,
+ }
+ 
+ struct GlassLayer {
+@@ -145,7 +149,7 @@ fn carry_lights(old: &[GlassShape], lights: &[ShapeLight], new: &[GlassShape]) -
+ 
+ /// A shape as the shader reads it, in the capture's coordinates (from x0, y0),
+ /// drawn `light` light (0 dark .. 1 light).
+-fn packed(s: &GlassShape, x0: f32, y0: f32, v: f32, layer: u8, frost: f32) -> [f32; 16] {
++fn packed(s: &GlassShape, x0: f32, y0: f32, v: f32, layer: u8) -> [f32; 16] {
+     [
+         s.x - x0,
+         s.y - y0,
+@@ -156,15 +160,23 @@ fn packed(s: &GlassShape, x0: f32, y0: f32, v: f32, layer: u8, frost: f32) -> [f
+         s.radii[2],
+         s.radii[3],
+         // corner (0/1) + 2 x (rim tint % + 128 x (light % + 128 x flat)),
+-        // see the shader; layer 1 (controls on a panel) is flat.
++        // see the shader; layer 1 (controls on a panel) is flat: 1, or 2 for
++        // one that bends the crisp backdrop (GlassShape::sharp).
+         (if s.continuous { 1. } else { 0. })
+             + 2. * ((s.rim_tint * 100.).round()
+-                + 128. * ((v * 100.).round() + 128. * if layer >= 1 { 1. } else { 0. })),
++                + 128.
++                    * ((v * 100.).round()
++                        + 128.
++                            * match (layer >= 1, s.sharp) {
++                                (false, _) => 0.,
++                                (true, false) => 1.,
++                                (true, true) => 2.,
++                            })),
+         s.refraction,
+         s.dispersion,
+         s.bevel,
+         s.specular,
+-        frost,
++        s.alpha,
+         s.magnify,
+         s.tint,
+     ]
+@@ -236,6 +248,7 @@ pub fn render_for_surface(
+                 layers: [GlassLayer::new(), GlassLayer::new()],
+                 last: None,
+                 lights: Vec::new(),
++                sharp: SharpShare::default(),
+             }))
+         });
+         let mut glass = glass.0.lock().unwrap();
+@@ -307,7 +320,7 @@ pub fn render_for_surface(
+                     });
+                     animating |= moving;
+                     let v = if object.is_some() { v } else { v * 0.8 };
+-                    shapes.push(packed(s, x0, y0, v, layer, state.frost));
++                    shapes.push(packed(s, x0, y0, v, layer));
+                     continue;
+                 }
+                 let l = &mut glass.lights[i];
+@@ -342,7 +355,7 @@ pub fn render_for_surface(
+                 // A client that can't switch its text keeps light glass at 80%,
+                 // so white text on it still reads.
+                 let v = if object.is_some() { v } else { v * 0.8 };
+-                shapes.push(packed(s, x0, y0, v, layer, state.frost));
++                shapes.push(packed(s, x0, y0, v, layer));
+             }
+             if animating {
+                 lay.effect.damage();
+@@ -370,8 +383,13 @@ pub fn render_for_surface(
+                     shapes,
+                     // Controls side by side stay apart: only the panels melt.
+                     merge: if layer >= 1 { 0. } else { state.merge },
++                    frost: state.frost,
+                     // Layer 1 follows layer 0: nothing to read back.
+                     measure: (layer == 0).then(|| lay.measure.clone()),
++                    publish: (layer == 0).then(|| glass.sharp.clone()),
++                    // Only when one of them asks: otherwise as before.
++                    under: (layer >= 1 && idx.iter().any(|&i| state.shapes[i].sharp))
++                        .then(|| glass.sharp.clone()),
+                 });
+             push(elem.into());
+         }
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 1747968a..0a65be83 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -51,11 +51,12 @@ uniform vec2 geo_size;
+ uniform mat3 input_to_geo;
+ 
+ // Per shape, columns: (x, y, w, h), radii (tl, tr, br, bl),
+-// (corner, refraction, dispersion, bevel), (specular, frost, -, -).
++// (corner, refraction, dispersion, bevel), (specular, opacity, magnify, tint); frost is glass_frost.
+ // Coordinates in logical px from the bounding box's top-left.
+ uniform mat4 glass_shapes[32];
+ uniform float glass_count;
+ uniform float glass_merge;
++uniform float glass_frost;
+ uniform float saturation;
+ uniform float noise;
+ 
+@@ -219,8 +220,17 @@ float displacement(float u, float bevel, float thickness, float ior, float power
+ // The backdrop at c: frosted, or crisp by `clear` (0..1). Clamped to the
+ // capture: the rim samples outward, and past the capture's edge (the screen's
+ // top, above the island) the texture wraps round to the opposite side.
++// Glass on a panel (layer 1) that asked for it (flat = 2): tex_sharp is the
++// panel's crisp backdrop, at sharp_map (scale, offset) from this capture's
++// coordinates, and it is bent instead of the panel's glass.
++uniform vec4 sharp_map;
++uniform float sharp_under;
++float shape_sharp = 0.0;
++
+ vec4 backdrop(vec2 c, float clear) {
+     c = clamp(c, vec2(0.0005), vec2(0.9995));
++    if (sharp_under > 0.5 && shape_sharp > 0.5)
++        return texture2D(tex_sharp, clamp(c * sharp_map.xy + sharp_map.zw, vec2(0.0005), vec2(0.9995)));
+     vec4 frosted = texture2D(tex, c);
+     return clear > 0.0 ? mix(frosted, texture2D(tex_sharp, c), clear) : frosted;
+ }
+@@ -241,7 +251,9 @@ void main() {
+     float dispersion = s[2].z;
+     float bezel = s[2].w;
+     float rim = s[3].x;                              // specular rim strength (MacShell ~0.45)
+-    float frost = clamp(s[3].y, 0.0, 1.0);
++    float frost = clamp(glass_frost, 0.0, 1.0);
++    // How much of this glass is drawn (lumen-glass v5): a control fading in.
++    float shape_alpha = clamp(s[3].y, 0.0, 1.0);
+     float magnify = s[3].z;                          // vertical lens of the whole slab
+     float tint_mix = clamp(s[3].w, 0.0, 1.0);        // flat tint mixed in
+     // s[2].x = corner (0/1) + 2 x (rim tint % + 128 x (light % + 128 x flat)).
+@@ -254,6 +266,7 @@ void main() {
+     // Flat: a control on a panel (MacShell's buttons, flatInner): no inner edge
+     // shading and no drop shadow.
+     float flat_inner = clamp(floor(glass_bits / 16384.0), 0.0, 1.0);
++    shape_sharp = step(1.5, floor(glass_bits / 16384.0));
+ 
+     // From logical px to texture coordinates (inverse of input_to_geo's linear part).
+     mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
+@@ -273,7 +286,7 @@ void main() {
+         shadow = shadow_k * (1.0 - smoothstep(-2.0, 9.0, sds));
+     }
+     if (sd > 1.0) {
+-        gl_FragColor = vec4(0.0, 0.0, 0.0, shadow * 0.5) * alpha;
++        gl_FragColor = vec4(0.0, 0.0, 0.0, shadow * 0.5) * alpha * shape_alpha;
+         return;
+     }
+ 
+@@ -350,9 +363,13 @@ void main() {
+     float wide = exp(-t / 5.0);
+     float edge_hi = (hair * (0.18 + 0.78 * spec) + wide * 0.10 * (0.30 + spec)) * rim * mix(0.85, 1.0, dark);
+     col += edge_hi * rim_col;
+-    // Meniscus: a soft second highlight inside the rim.
++    // Meniscus: a soft second highlight inside the rim. It sells the bulge of
++    // small glass (capsules, buttons, pills); on a card or a tile it only
++    // traced a faint lighter frame ~20 px inside the edge, so it fades out by
++    // the shape's short side, 56 px to 96 px.
+     float mx = (t - bz * 0.5) / (bz * 0.2 + 1.0);
+-    col += exp(-mx * mx) * 0.07 * (0.35 + spec) * rim * rim_col;
++    float meniscus = 1.0 - smoothstep(56.0, 96.0, min(s[0].z, s[0].w));
++    col += exp(-mx * mx) * 0.07 * (0.35 + spec) * rim * rim_col * meniscus;
+ 
+     // Fine grain, the same on every channel.
+     if (noise > 0.0) {
+@@ -362,7 +379,7 @@ void main() {
+     col = clamp(col, 0.0, 1.0);
+ 
+     float outa = cov + shadow * 0.5 * (1.0 - cov);
+-    vec4 color = vec4(col * cov, outa) * alpha;
++    vec4 color = vec4(col * cov, outa) * alpha * shape_alpha;
+ 
+ #if defined(DEBUG_FLAGS)
+     if (tint == 1.0)
+diff --git a/src/render_helpers/shaders/mod.rs b/src/render_helpers/shaders/mod.rs
+index dea3ac1b..b992007a 100644
+--- a/src/render_helpers/shaders/mod.rs
++++ b/src/render_helpers/shaders/mod.rs
+@@ -144,9 +144,12 @@ impl Shaders {
+                     UniformName::new("glass_shapes", UniformType::Matrix4x4),
+                     UniformName::new("glass_count", UniformType::_1f),
+                     UniformName::new("glass_merge", UniformType::_1f),
++                    UniformName::new("glass_frost", UniformType::_1f),
+                     UniformName::new("saturation", UniformType::_1f),
+                     UniformName::new("noise", UniformType::_1f),
+                     UniformName::new("tex_sharp", UniformType::_1i),
++                    UniformName::new("sharp_map", UniformType::_4f),
++                    UniformName::new("sharp_under", UniformType::_1f),
+                 ],
+             )
+             .map_err(|err| {

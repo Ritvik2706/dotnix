@@ -1,0 +1,30 @@
+From e0ffd7d796f22f3c3b07ac7368d018fa7b84c10d Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 27 Oct 2026 21:06:36 +0400
+Subject: [PATCH 01/38] input: bare hjkl move focus in the overview, like the
+ arrows
+
+---
+ src/input/mod.rs | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index f1ad4932..772ecdf1 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -4648,10 +4648,11 @@ fn hardcoded_overview_bind(raw: Keysym, mods: ModifiersState) -> Option<Bind> {
+             repeat = false;
+             Action::ToggleOverview
+         }
+-        Keysym::Left => Action::FocusColumnLeft,
+-        Keysym::Right => Action::FocusColumnRight,
+-        Keysym::Up => Action::FocusWindowOrWorkspaceUp,
+-        Keysym::Down => Action::FocusWindowOrWorkspaceDown,
++        // Vim keys work bare too, like the arrows.
++        Keysym::Left | Keysym::h => Action::FocusColumnLeft,
++        Keysym::Right | Keysym::l => Action::FocusColumnRight,
++        Keysym::Up | Keysym::k => Action::FocusWindowOrWorkspaceUp,
++        Keysym::Down | Keysym::j => Action::FocusWindowOrWorkspaceDown,
+         _ => {
+             return None;
+         }

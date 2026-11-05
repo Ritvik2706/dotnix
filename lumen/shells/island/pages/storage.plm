@@ -1,0 +1,250 @@
+// The Storage page (Controls → Storage, or Mod+B): where the disk went and
+// what can go. A bar of the disk as iOS's iPhone Storage draws it —a colour per
+// category, the free space the track showing through—, then three tabs:
+//   · Overview: the categories, biggest first; a row opens what is in it, and
+//     again, down to the files (‹ goes back up). A folder in your home has a
+//     Trash bead: press it once to arm it, again to move that folder to the Trash.
+//   · Clean up: what can be freed, each with its size; a row opens its review
+//     (what exactly goes, in full) and only the review's button cleans. Root
+//     ones ask for the password on the island's own prompt (pages/auth.plm).
+//   · Large files: every file of 100 MB and up in your home; a row opens its
+//     folder in the file manager, the bead moves it to the Trash.
+// Vim, as the clipboard: it opens in normal mode —j k move, gg G the ends, l or
+// Enter opens, h goes up, Tab or 1 2 3 the tabs, dd to the Trash, o in the file
+// manager, r scans again, q closes—; i or / stretches the search button into the
+// field (insert), Esc back to normal keeping the filter, Esc again lets it go.
+// The logic (island.luau, "storage") asks scripts/storage.py; nothing runs while
+// the page is closed.
+part Storage {
+    //  One row of either tab: a colour bead, the name and what it is, the size, a
+    //  thin bar of how it compares with the biggest, and in a folder the Trash bead.
+    component StorRow(r: record) {
+        size: 352, 46
+        zone box row { from: 0, 0; size: if(r.can_trash, 312, 352), 46; corner: 23 continuous; cursor: pointer; label: "{r.name}, {r.size}"; active: r.dir; selected: r.sel }
+        body {
+            color: chip_hi; opacity: 38% * row.hover * if(r.dir, 1, 0); light: 4%, 0, 23
+            box { from: 0, 0; size: 352, 46; corner: 23 continuous }
+        }
+        //  The one the keys are on (content, not a control: no glass).
+        body {
+            gradient: 0, 0 to 352, 46, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
+            opacity: 85%; light: 4%, 0, 23; show: r.sel
+            box { from: 0, 0; size: 352, 46; corner: 23 continuous }
+        }
+        ellipse { at: 18, 23; radius: 5; color: pick(r.hue, #0a84ff, #bf5af2, #ff9f0a, #30d158, #ff375f, #64d2ff, #ffd60a, #5e5ce6, #ac8e68, #8e8e93, #d1d1d6) }
+        text r.name {
+            at: 34, 15; anchor: left center; width: if(r.can_trash, 176, 190); lines: 1
+            size: 13; weight: 600; family: "SF Pro Display"; color: ink
+        }
+        text r.sub {
+            at: 34, 31; anchor: left center; width: if(r.can_trash, 176, 190); lines: 1
+            size: 10.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 45%
+        }
+        //  Root ones say so before they are pressed: a small lock beside the size.
+        image ic_lock_s { at: if(r.can_trash, 210, 226), 9; size: 12, 12; tint: ink; opacity: if(r.root, 45%, 0) }
+        text r.size {
+            at: if(r.can_trash, 298, 312), 15; anchor: right center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 85%
+        }
+        box { from: if(r.can_trash, 226, 240), 29; size: 72, 3; corner: 1.5 continuous; color: well; opacity: 30% }
+        box {
+            from: if(r.can_trash, 226, 240), 29; size: max(3, 72 * r.frac), 3; corner: 1.5 continuous
+            color: pick(r.hue, #0a84ff, #bf5af2, #ff9f0a, #30d158, #ff375f, #64d2ff, #ffd60a, #5e5ce6, #ac8e68, #8e8e93, #d1d1d6); opacity: 85%
+        }
+        //  Into a folder: the chevron. To the Trash: a bead, armed (rose) on the first press.
+        image ic_chev { at: 326, 16; size: 14, 14; tint: ink; opacity: if(r.dir and not r.can_trash, 40%, 0) }
+        group {
+            show: r.can_trash
+            zone ellipse tb { at: 334, 23; radius: 14; cursor: pointer; label: pick(if(r.armed, 1, 0), "Move {r.name} to the Trash", "Move {r.name} to the Trash (press again)") }
+            body {
+                color: if(r.armed, mix(rose, #8a3e50, tb.hover), mix(chip, chip_hi, tb.hover)); material: control
+                opacity: if(r.armed, 60%, lgc_fill + 7% * tb.hover)
+                ellipse { at: 334, 23; radius: 13 - 0.5 * tb.pressed }
+            }
+            image ic_trash_s { at: 327, 16; size: 14, 14; tint: if(r.armed, rose_ink, ink); opacity: 85% }
+            on press tb { emit stor_trash(r.index) }
+        }
+        on press row { emit stor_row(r.index) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_stor)
+        move: 28 * (1 - on_stor), 0
+
+        //  The header: the name, rescan; inside a folder or a review, Up before the name.
+        prop stu = 0 ~240ms
+        follow stu = if(stor_depth > 0 or stor_rev, 1, 0)
+        group {
+            move: ex0 + 16, 44
+            group {
+                opacity: stu
+                zone ellipse stb { at: 16, 18; radius: 16; cursor: pointer; label: "Up"; active: stor_depth > 0 or stor_rev }
+                body {
+                    color: mix(chip, chip_hi, stb.hover); material: control
+                    ellipse { at: 16, 18; radius: (16 - 0.6 * stb.pressed) * stu }
+                }
+                path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * stb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            }
+            //  The search, as the clipboard's: a round button that `i` (or a click) stretches
+            //  leftward into the field as the title slides away; with a filter kept, the
+            //  field stays (unlit) to show it.
+            prop ssx = 0 ~300ms
+            follow ssx = if(stor_ins or not stor_q_empty, 1, 0)
+            prop ssi = 0 ~200ms
+            follow ssi = if(stor_ins, 1, 0)
+            let ssr = if(stor_can_open, 280, 318)
+            let ssl = (ssr - 36) - (ssr - 36 - 38 * stu) * ssx
+            text "Storage" { at: 4 + 38 * stu - 10 * ssx, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink; opacity: 1 - smooth(0, 0.5, ssx) }
+            body {
+                color: mix(chip, chip_hi, ssb.hover * (1 - ssx)); material: field
+                opacity: lgc_fill + 5% * (1 - ssx)
+                box { from: ssl, 0; size: ssr - ssl, 36; corner: 18 continuous }
+            }
+            box { from: ssl, 0; size: ssr - ssl, 36; corner: 18 continuous; stroke: 1; color: soft_l; opacity: 45% * ssi }
+            image ic_search { at: ssl + 11 + 2 * ssx, 11; size: 14, 14; tint: ink; opacity: 85% - 25% * ssx * (1 - ssi) }
+            group {
+                opacity: smooth(0.55, 1, ssx)
+                input stor_q { at: ssl + 34, 9; width: max(10, ssr - ssl - 44); size: 13; color: ink; placeholder: ""; label: "Search storage" }
+                text "Search" {
+                    at: ssl + 34, 18; anchor: left center; size: 13; weight: 500; family: "SF Pro Display"
+                    color: ink; opacity: 40%; show: stor_q_empty
+                }
+            }
+            zone box ssb { from: ssl, 0; size: ssr - ssl, 36; corner: 18 continuous; cursor: pointer; label: "Search (i)"; active: not stor_ins }
+            //  Open this folder in the file manager (inside a folder only).
+            group {
+                show: stor_can_open
+                zone ellipse sto { at: 298, 18; radius: 16; cursor: pointer; label: "Open in Files"; active: stor_can_open }
+                body {
+                    color: mix(chip, chip_hi, sto.hover); material: control; opacity: lgc_fill + 7% * sto.hover
+                    ellipse { at: 298, 18; radius: 16 - 0.6 * sto.pressed }
+                }
+                image ic_folder_s { at: 290, 10; size: 16, 16; tint: ink; opacity: 85% }
+            }
+            zone ellipse str { at: 336, 18; radius: 16; cursor: pointer; label: "Scan again"; active: not stor_busy }
+            body {
+                color: mix(chip, chip_hi, str.hover); material: control; opacity: lgc_fill + 7% * str.hover
+                ellipse { at: 336, 18; radius: 16 - 0.6 * str.pressed }
+            }
+            image ic_re { at: 327, 9; size: 18, 18; tint: ink; opacity: if(stor_state == 1, 35%, 85%) }
+        }
+
+        //  The disk: how much is used, what is free, and the bar of what by.
+        group {
+            move: ex0 + 16, 86
+            text stor_used { at: 0, 14; anchor: left center; size: 20; weight: 700; family: "SF Pro Display"; color: ink }
+            text stor_free { at: 352, 15; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: 60% }
+            box { from: 0, 32; size: 352, 12; corner: 6 continuous; color: well; opacity: 30% }
+            group {
+                clip box { from: 0, 32; size: 352, 12; corner: 6 continuous }
+                row {
+                    at: 0, 32; gap: 0
+                    for s in stseg {
+                        group {
+                            size: s.w, 12
+                            box { from: 0, 0; size: max(0, s.w - 1), 12; color: pick(s.hue, #0a84ff, #bf5af2, #ff9f0a, #30d158, #ff375f, #64d2ff, #ffd60a, #5e5ce6, #ac8e68, #8e8e93, #d1d1d6) }
+                        }
+                    }
+                }
+            }
+        }
+
+        //  Overview · Clean up · Large files (iOS's segmented control); inside a folder, where you are instead.
+        prop stt = 0 ~240ms
+        follow stt = stor_tab
+        group {
+            move: ex0 + 16, 146
+            show: stor_depth == 0 and not stor_rev
+            body {
+                color: chip; material: control
+                box { from: 0, 0; size: 352, 28; corner: 14 continuous }
+            }
+            body {
+                color: chip_hi; light: 5%, 2, 12
+                box { from: 2 + 116 * stt, 2; size: 116, 24; corner: 12 continuous }
+            }
+            repeat k in 0..3 {
+                zone box sttz.$k { from: 2 + 116 * k, 0; size: 116, 28; corner: 14 continuous; cursor: pointer; label: "Show"; role: tab; selected: stor_tab == k }
+                on press sttz.$k { emit stor_tab_at(k) }
+            }
+            text "Overview" { at: 60, 14.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * clamp(1 - abs(stt - 0), 0, 1) }
+            text "Clean up" { at: 176, 14.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * clamp(1 - abs(stt - 1), 0, 1) }
+            text "Large files" { at: 292, 14.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * clamp(1 - abs(stt - 2), 0, 1) }
+        }
+        group {
+            move: ex0 + 16, 146
+            show: stor_depth > 0 or stor_rev
+            body {
+                color: well; opacity: 22%
+                box { from: 0, 0; size: 352, 28; corner: 14 continuous }
+            }
+            image ic_folder_s { at: 10, 6; size: 16, 16; tint: ink; opacity: if(stor_rev, 0, 70%) }
+            text stor_crumb { at: if(stor_rev, 12, 32), 14.5; anchor: left center; width: if(stor_rev, 328, 310); lines: 1; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 85% }
+        }
+
+        //  The list (both tabs, and every folder): under the rows, so a press reaches them.
+        group {
+            show: not stor_rev
+            zone box stor_list { from: ex0 + 16, 186; size: 352, 7 * 48 - 2; label: "Storage" }
+            column {
+                at: ex0 + 16, 186; gap: 2
+                for r in strows { StorRow(r) }
+            }
+            text pick(stor_state, "", "Scanning…", "Empty", "Couldn't scan") {
+                at: ex0 + 192, 214; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+                color: ink; opacity: 50%; show: strows.count == 0
+            }
+        }
+
+        //  The review: what it is, what exactly goes, and the one button that cleans.
+        group {
+            show: stor_rev
+            let srx = ex0 + 16
+            text stor_rev_title { at: srx + 2, 198; anchor: left center; width: 240; lines: 1; size: 15; weight: 700; family: "SF Pro Display"; color: ink }
+            text stor_rev_size { at: srx + 350, 198; anchor: right center; size: 15; weight: 700; family: "SF Pro Display"; color: tint_ink }
+            text stor_rev_about {
+                at: srx + 2, 214; anchor: left top; width: 348; lines: 5; line_height: 1.3
+                size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 70%
+            }
+            body {
+                color: well; opacity: 24%
+                box { from: srx, 296; size: 352, 168; corner: 16 continuous }
+            }
+            group {
+                clip box { from: srx + 8, 302; size: 336, 156 }
+                text stor_rev_text {
+                    at: srx + 12, 306; anchor: left top; width: 328; lines: 11; line_height: 1.25
+                    size: 10.5; weight: 400; family: "JetBrainsMono Nerd Font"; color: ink; opacity: 78%
+                }
+            }
+            //  Cancel, and the button that does it (rose: it removes things).
+            zone box src { from: srx, 476; size: 120, 34; corner: 17 continuous; cursor: pointer; label: "Cancel"; active: not stor_busy }
+            body {
+                color: mix(chip, chip_hi, src.hover); material: control; opacity: lgc_fill + 7% * src.hover
+                box { from: srx, 476; size: 120, 34; corner: 17 continuous }
+            }
+            text "Cancel" { at: srx + 60, 493; anchor: center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: 85% }
+            zone box srg { from: srx + 128, 476; size: 224, 34; corner: 17 continuous; cursor: pointer; label: "{stor_rev_btn}"; active: not stor_busy }
+            body {
+                color: mix(rose, #8a3e50, srg.hover); material: control; opacity: if(stor_busy, 35%, 55%)
+                box { from: srx + 128, 476; size: 224, 34; corner: 17 continuous }
+            }
+            image ic_lock_s { at: srx + 142, 485; size: 16, 16; tint: rose_ink; opacity: if(stor_rev_root, 85%, 0) }
+            text pick(if(stor_busy, 1, 0), stor_rev_btn, "Cleaning…") { at: srx + 240, 493; anchor: center; size: 12; weight: 700; family: "SF Pro Display"; color: rose_ink }
+            on press src { emit stor_rev_cancel }
+            on press srg { emit stor_rev_go }
+        }
+
+        //  What happened last, or what can be freed.
+        text stor_status {
+            at: ex0 + 192, 186 + 7 * 48 + 10; anchor: center; width: 352; lines: 1; align: center
+            size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink
+        }
+    }
+
+    on press stb while stor_rev { emit stor_rev_cancel }
+    on press stb while not stor_rev and stor_depth > 0 { emit stor_up }
+    on press str { emit stor_rescan }
+    on press sto { emit stor_files }
+    on press ssb { stor_ins = true; focus stor_q }
+    on scroll stor_list { emit stor_scroll(wheel) }
+}

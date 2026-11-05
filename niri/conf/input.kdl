@@ -1,0 +1,43 @@
+// input.kdl — keyboard, touchpad, mouse, focus, and the lid switch.
+
+// ─── Input (was lua/input.lua) ───────────────────────────────────────────
+input {
+    keyboard {
+        xkb {
+            layout "us"
+            options "caps:swapescape"
+        }
+        // Quicker than niri's 600ms / 25 per second, for holding hjkl.
+        repeat-delay 300
+        repeat-rate 40
+    }
+
+    // macOS-feel trackpad, adaptive acceleration kept.
+    touchpad {
+        tap
+        natural-scroll
+        dwt
+        drag true
+        drag-lock
+        click-method "clickfinger"
+        tap-button-map "left-right-middle"
+        scroll-method "two-finger"
+        scroll-factor 0.45
+    }
+
+    // Real mice: raw 1:1, no acceleration (Windows' 6/11 without EPP).
+    mouse {
+        accel-profile "flat"
+        accel-speed 0.0
+    }
+
+    // Hovering focuses, but never scrolls the strip: brushing the slivers
+    // of the neighbouring columns at the screen edges no longer yanks the
+    // view sideways.
+    focus-follows-mouse max-scroll-amount="0%"
+}
+
+// ─── Lid (was the switch:on:Lid Switch bind) ─────────────────────────────
+switch-events {
+    lid-close { spawn "sh" "-c" "~/.config/hypr/scripts/sleep-lock.sh lid"; }
+}

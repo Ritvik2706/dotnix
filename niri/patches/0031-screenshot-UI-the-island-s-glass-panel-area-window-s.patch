@@ -1,0 +1,1670 @@
+From 121f6db8d6da35854cf3c6f550bafc84135483e0 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 21:20:10 +0400
+Subject: [PATCH 31/38] screenshot UI: the island's glass panel,
+ area/window/screen modes, vim keys
+
+The help panel is a liquid glass card (the island's open card, its values
+from ~/.config/niri/glass.json written by dotnix theme/niri-glass.py) with
+the modes, pointer and capture as glass controls (layer 2). a/w/s pick the
+mode; hjkl moves the area or jumps between windows, Shift+hjkl resizes, y
+copies, Enter/Space saves, p toggles the pointer, q/Esc cancels. The
+liquid glass renderer is now a Glass type niri's own UI can use too.
+---
+ niri-config/src/binds.rs           |  10 +
+ src/input/mod.rs                   |  12 +
+ src/layout/monitor.rs              |  23 +
+ src/niri.rs                        |  33 +-
+ src/protocols/lumen_glass.rs       |   2 +-
+ src/render_helpers/liquid_glass.rs | 343 ++++++-----
+ src/ui/screenshot_ui.rs            | 902 ++++++++++++++++++++++++-----
+ 7 files changed, 1026 insertions(+), 299 deletions(-)
+
+diff --git a/niri-config/src/binds.rs b/niri-config/src/binds.rs
+index 0be7596f..55f0c9d4 100644
+--- a/niri-config/src/binds.rs
++++ b/niri-config/src/binds.rs
+@@ -120,6 +120,16 @@ pub enum Action {
+     CancelScreenshot,
+     #[knuffel(skip)]
+     ScreenshotTogglePointer,
++    /// The screenshot UI's mode: 0 area, 1 window, 2 screen.
++    #[knuffel(skip)]
++    ScreenshotSetMode(u8),
++    /// The screenshot UI's vim keys: move the selection (area), or jump to the
++    /// next window that way (window), by (dx, dy) steps.
++    #[knuffel(skip)]
++    ScreenshotNudge(i8, i8),
++    /// Grow (or with negative steps, shrink) the selection by (dw, dh) steps.
++    #[knuffel(skip)]
++    ScreenshotGrow(i8, i8),
+     Screenshot(
+         #[knuffel(property(name = "show-pointer"), default = true)] bool,
+         // Path; not settable from knuffel
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index 772ecdf1..76822904 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -740,6 +740,18 @@ impl State {
+                 self.niri.screenshot_ui.toggle_pointer();
+                 self.niri.queue_redraw_all();
+             }
++            Action::ScreenshotSetMode(mode) => {
++                self.niri.screenshot_ui.set_mode(mode);
++                self.niri.queue_redraw_all();
++            }
++            Action::ScreenshotNudge(dx, dy) => {
++                self.niri.screenshot_ui.nudge(dx, dy);
++                self.niri.queue_redraw_all();
++            }
++            Action::ScreenshotGrow(dw, dh) => {
++                self.niri.screenshot_ui.grow(dw, dh);
++                self.niri.queue_redraw_all();
++            }
+             Action::Screenshot(show_cursor, path) => {
+                 self.open_screenshot_ui(show_cursor, path);
+                 self.niri.cancel_mru();
+diff --git a/src/layout/monitor.rs b/src/layout/monitor.rs
+index 216e7823..80535aed 100644
+--- a/src/layout/monitor.rs
++++ b/src/layout/monitor.rs
+@@ -1579,6 +1579,29 @@ impl<W: LayoutElement> Monitor<W> {
+         }
+     }
+ 
++    /// The windows on screen, topmost first, each with where it is (output-local,
++    /// cut to the output): for the screenshot UI's window mode. None in the
++    /// overview, whose windows are scaled.
++    pub fn visible_windows(&self) -> Vec<(&W, Rectangle<f64, Logical>)> {
++        if self.overview_progress.is_some() {
++            return Vec::new();
++        }
++        let output = Rectangle::from_size(self.view_size);
++        let mut windows = Vec::new();
++        for (ws, geo) in self.workspaces_with_render_geo() {
++            for (tile, pos, visible) in ws.tiles_with_render_positions() {
++                if !visible {
++                    continue;
++                }
++                let rect = Rectangle::new(geo.loc + pos + tile.window_loc(), tile.window_size());
++                if let Some(rect) = rect.intersection(output) {
++                    windows.push((tile.window(), rect));
++                }
++            }
++        }
++        windows
++    }
++
+     pub fn resize_edges_under(&self, pos_within_output: Point<f64, Logical>) -> Option<ResizeEdge> {
+         if self.overview_progress.is_some() {
+             return None;
+diff --git a/src/niri.rs b/src/niri.rs
+index 23d50646..fb8e5bfd 100644
+--- a/src/niri.rs
++++ b/src/niri.rs
+@@ -1989,10 +1989,37 @@ impl State {
+             touch.unset_grab(self);
+         }
+ 
++        // The windows on each screen, for the window mode, in physical pixels
++        // as the screenshot UI works.
++        let focus = self.niri.layout.focus().map(|w| w.id().clone());
++        let windows = self
++            .niri
++            .global_space
++            .outputs()
++            .filter_map(|output| {
++                let mon = self.niri.layout.monitor_for_output(output)?;
++                let scale = output.current_scale().fractional_scale();
++                let visible = mon.visible_windows();
++                let focused = visible
++                    .iter()
++                    .position(|(w, _)| Some(w.id()) == focus);
++                let rects = visible
++                    .into_iter()
++                    .map(|(_, r)| r.to_physical_precise_round(scale))
++                    .collect();
++                Some((output.clone(), (rects, focused)))
++            })
++            .collect();
++
+         self.backend.with_primary_renderer(|renderer| {
+-            self.niri
+-                .screenshot_ui
+-                .open(renderer, screenshots, default_output, show_pointer, path)
++            self.niri.screenshot_ui.open(
++                renderer,
++                screenshots,
++                default_output,
++                show_pointer,
++                path,
++                windows,
++            )
+         });
+ 
+         self.niri
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index 73966efc..f002211f 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -12,7 +12,7 @@ use smithay::wayland::compositor::{with_states, Cacheable};
+ 
+ use super::raw::lumen_glass::v1::server::{lumen_glass_manager_v1, lumen_glass_surface_v1};
+ use lumen_glass_manager_v1::LumenGlassManagerV1;
+-use lumen_glass_surface_v1::LumenGlassSurfaceV1;
++pub use lumen_glass_surface_v1::LumenGlassSurfaceV1;
+ 
+ const VERSION: u32 = 5;
+ 
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index f3f7d498..187323f1 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -12,7 +12,9 @@ use smithay::reexports::wayland_server::Resource;
+ use smithay::utils::{Logical, Point, Rectangle, Size};
+ use smithay::wayland::compositor::with_states;
+ 
+-use crate::protocols::lumen_glass::{glass_object, GlassShape, LumenGlassCachedState};
++use crate::protocols::lumen_glass::{
++    glass_object, GlassShape, LumenGlassCachedState, LumenGlassSurfaceV1,
++};
+ use crate::render_helpers::background_effect::{BackgroundEffectElement, RenderParams};
+ use crate::render_helpers::blur::BlurOptions;
+ use crate::render_helpers::framebuffer_effect::{
+@@ -27,9 +29,10 @@ use crate::render_helpers::RenderCtx;
+ /// their darkened edge are drawn.
+ const EDGE_PAD: f32 = 28.;
+ 
+-/// The capture a surface's glass is drawn from, and the state it was last
+-/// drawn with (a change re-renders it).
+-struct SurfaceGlass(Mutex<SurfaceGlassInner>);
++/// The capture a glass is drawn from, and the state it was last drawn with (a
++/// change re-renders it): a client surface's (lumen-glass-v1), or one of
++/// niri's own (the screenshot UI's panel).
++pub struct Glass(Mutex<SurfaceGlassInner>);
+ 
+ struct SurfaceGlassInner {
+     /// Layer 0: glass on what is behind the surface. Layer 1: glass on top of
+@@ -224,175 +227,201 @@ pub fn render_for_surface(
+         if state.shapes.is_empty() {
+             return false;
+         }
++        let glass = states.data_map.get_or_insert_threadsafe(Glass::new);
++        let object = glass_object(states).filter(|o| o.version() >= 3);
++        glass.render(ns, location, scale, &state, blur_config, object, push);
++        true
++    })
++}
+ 
+-        // Frost is a dial, not a switch: it scales the blur's passes and offset
+-        // down to a light soften (the shapes behind stay recognisable, so the
+-        // lensing shows) and up to the window blur. Always a real blur of that
+-        // strength — never a half-mix of crisp and frosted, which ghosts.
+-        let frosted = !blur_config.off && state.frost > 0.02;
+-        let blur = frosted.then(|| {
+-            let f = state.frost.clamp(0., 1.);
+-            let mut options = BlurOptions::from(blur_config);
+-            options.passes = ((options.passes as f32 * (0.5 + 0.5 * f)).round() as u8).max(1);
+-            options.offset *= 0.25 + 0.75 * f as f64;
+-            options
+-        });
+-        let noise = if frosted {
+-            blur_config.noise as f32
+-        } else {
+-            0.
+-        };
+-
+-        let glass = states.data_map.get_or_insert_threadsafe(|| {
+-            SurfaceGlass(Mutex::new(SurfaceGlassInner {
+-                layers: [GlassLayer::new(), GlassLayer::new()],
+-                last: None,
+-                lights: Vec::new(),
+-                sharp: SharpShare::default(),
+-            }))
+-        });
+-        let mut glass = glass.0.lock().unwrap();
+-        let glass = &mut *glass;
+-        if glass.last.as_ref() != Some(&state) {
+-            for l in &mut glass.layers {
+-                l.effect.damage();
+-            }
+-            let old = glass.last.as_ref().map_or(&[][..], |l| &l.shapes[..]);
+-            glass.lights = carry_lights(old, &glass.lights, &state.shapes);
+-            glass.last = Some(state.clone());
+-        }
++impl Glass {
++    pub fn new() -> Self {
++        Glass(Mutex::new(SurfaceGlassInner {
++            layers: [GlassLayer::new(), GlassLayer::new()],
++            last: None,
++            lights: Vec::new(),
++            sharp: SharpShare::default(),
++        }))
++    }
+ 
+-        let object = glass_object(states).filter(|o| o.version() >= 3);
+-        if glass.lights.len() != state.shapes.len() {
+-            glass.lights = vec![ShapeLight::new(); state.shapes.len()];
+-        }
+-        let now = Instant::now();
++    /// Draws `state`'s shapes, whose coordinates are from `location`. `object`
++    /// is told when a shape turns light or dark (a client's glass); without
++    /// one, light glass stays at 80% so white text on it still reads.
++    #[allow(clippy::too_many_arguments)]
++    pub fn render(
++        &self,
++        ns: Option<usize>,
++        location: Point<f64, Logical>,
++        scale: f64,
++        state: &LumenGlassCachedState,
++        blur_config: niri_config::Blur,
++        object: Option<LumenGlassSurfaceV1>,
++        push: &mut dyn FnMut(BackgroundEffectElement),
++    ) {
++            // Frost is a dial, not a switch: it scales the blur's passes and offset
++            // down to a light soften (the shapes behind stay recognisable, so the
++            // lensing shows) and up to the window blur. Always a real blur of that
++            // strength — never a half-mix of crisp and frosted, which ghosts.
++            let frosted = !blur_config.off && state.frost > 0.02;
++            let blur = frosted.then(|| {
++                let f = state.frost.clamp(0., 1.);
++                let mut options = BlurOptions::from(blur_config);
++                options.passes = ((options.passes as f32 * (0.5 + 0.5 * f)).round() as u8).max(1);
++                options.offset *= 0.25 + 0.75 * f as f64;
++                options
++            });
++            let noise = if frosted {
++                blur_config.noise as f32
++            } else {
++                0.
++            };
+ 
+-        // Layer 1 first: pushed first, it is drawn on top (and captures layer 0).
+-        for layer in [1u8, 0] {
+-            // At most the shader's 32 per layer.
+-            let idx: Vec<usize> = (0..state.shapes.len())
+-                .filter(|&i| state.shapes[i].layer == layer)
+-                .take(32)
+-                .collect();
+-            if idx.is_empty() {
+-                continue;
++            let mut glass = self.0.lock().unwrap();
++            let glass = &mut *glass;
++            if glass.last.as_ref() != Some(state) {
++                for l in &mut glass.layers {
++                    l.effect.damage();
++                }
++                let old = glass.last.as_ref().map_or(&[][..], |l| &l.shapes[..]);
++                glass.lights = carry_lights(old, &glass.lights, &state.shapes);
++                glass.last = Some(state.clone());
+             }
+-            let lay = &mut glass.layers[layer as usize];
+ 
+-            // The layer's shapes' bounding box, captured wider (see EDGE_PAD).
+-            let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+-            for &i in &idx {
+-                let s = &state.shapes[i];
+-                x0 = x0.min(s.x);
+-                y0 = y0.min(s.y);
+-                x1 = x1.max(s.x + s.w);
+-                y1 = y1.max(s.y + s.h);
++            if glass.lights.len() != state.shapes.len() {
++                glass.lights = vec![ShapeLight::new(); state.shapes.len()];
+             }
+-            let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
+-            let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
+-            let geometry = Rectangle::new(
+-                location + Point::from((x0 as f64, y0 as f64)),
+-                Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
+-            );
++            let now = Instant::now();
+ 
+-            // Light or dark, per shape, from this layer's latest reading.
+-            let (lum, reading) = {
+-                let m = lay.measure.lock().unwrap();
+-                (m.lum.clone(), m.last)
+-            };
+-            // Decide only on a new reading (not once per frame).
+-            let fresh = reading.is_some() && reading != lay.seen && lum.len() == idx.len();
+-            lay.seen = reading;
+-            let mut animating = false;
+-            let mut shapes: Vec<[f32; 16]> = Vec::with_capacity(idx.len());
+-            for (k, &i) in idx.iter().enumerate() {
+-                let s = &state.shapes[i];
+-                // Glass on glass is light or dark as the glass it sits on: no
+-                // reading or decision of its own, so a row of controls never
+-                // splits into light and dark ones, nor flickers by itself.
+-                if layer >= 1 {
+-                    let parent = under(&state.shapes, s);
+-                    let (v, moving) = parent.map_or((0., false), |p| {
+-                        let l = &glass.lights[p];
+-                        let v = l.value(now);
+-                        (v, v != if l.light { 1. } else { 0. })
+-                    });
+-                    animating |= moving;
+-                    let v = if object.is_some() { v } else { v * 0.8 };
+-                    shapes.push(packed(s, x0, y0, v, layer));
++            // Layer 1 first: pushed first, it is drawn on top (and captures layer 0).
++            for layer in [1u8, 0] {
++                // At most the shader's 32 per layer.
++                let idx: Vec<usize> = (0..state.shapes.len())
++                    .filter(|&i| state.shapes[i].layer == layer)
++                    .take(32)
++                    .collect();
++                if idx.is_empty() {
+                     continue;
+                 }
+-                let l = &mut glass.lights[i];
+-                if fresh {
+-                    let b = lum[k];
+-                    let want = if l.light { b > LIGHT_OFF } else { b > LIGHT_ON };
+-                    if !l.known {
+-                        // The first reading: as it is, no fade on appearing.
+-                        l.known = true;
+-                        l.light = want;
+-                        l.from = if want { 1. } else { 0. };
+-                        if let Some(o) = &object {
+-                            o.appearance(i as u32, want as u32);
+-                        }
+-                    } else if want != l.light {
+-                        l.against += 1;
+-                        if l.against >= SETTLE {
+-                            l.against = 0;
+-                            l.from = l.value(now);
++                let lay = &mut glass.layers[layer as usize];
++
++                // The layer's shapes' bounding box, captured wider (see EDGE_PAD).
++                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
++                for &i in &idx {
++                    let s = &state.shapes[i];
++                    x0 = x0.min(s.x);
++                    y0 = y0.min(s.y);
++                    x1 = x1.max(s.x + s.w);
++                    y1 = y1.max(s.y + s.h);
++                }
++                let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
++                let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
++                let geometry = Rectangle::new(
++                    location + Point::from((x0 as f64, y0 as f64)),
++                    Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
++                );
++
++                // Light or dark, per shape, from this layer's latest reading.
++                let (lum, reading) = {
++                    let m = lay.measure.lock().unwrap();
++                    (m.lum.clone(), m.last)
++                };
++                // Decide only on a new reading (not once per frame).
++                let fresh = reading.is_some() && reading != lay.seen && lum.len() == idx.len();
++                lay.seen = reading;
++                let mut animating = false;
++                let mut shapes: Vec<[f32; 16]> = Vec::with_capacity(idx.len());
++                for (k, &i) in idx.iter().enumerate() {
++                    let s = &state.shapes[i];
++                    // Glass on glass is light or dark as the glass it sits on: no
++                    // reading or decision of its own, so a row of controls never
++                    // splits into light and dark ones, nor flickers by itself.
++                    if layer >= 1 {
++                        let parent = under(&state.shapes, s);
++                        let (v, moving) = parent.map_or((0., false), |p| {
++                            let l = &glass.lights[p];
++                            let v = l.value(now);
++                            (v, v != if l.light { 1. } else { 0. })
++                        });
++                        animating |= moving;
++                        let v = if object.is_some() { v } else { v * 0.8 };
++                        shapes.push(packed(s, x0, y0, v, layer));
++                        continue;
++                    }
++                    let l = &mut glass.lights[i];
++                    if fresh {
++                        let b = lum[k];
++                        let want = if l.light { b > LIGHT_OFF } else { b > LIGHT_ON };
++                        if !l.known {
++                            // The first reading: as it is, no fade on appearing.
++                            l.known = true;
+                             l.light = want;
+-                            l.start = now;
++                            l.from = if want { 1. } else { 0. };
+                             if let Some(o) = &object {
+                                 o.appearance(i as u32, want as u32);
+                             }
++                        } else if want != l.light {
++                            l.against += 1;
++                            if l.against >= SETTLE {
++                                l.against = 0;
++                                l.from = l.value(now);
++                                l.light = want;
++                                l.start = now;
++                                if let Some(o) = &object {
++                                    o.appearance(i as u32, want as u32);
++                                }
++                            }
++                        } else {
++                            l.against = 0;
+                         }
+-                    } else {
+-                        l.against = 0;
+                     }
++                    let v = l.value(now);
++                    animating |= v != if l.light { 1. } else { 0. };
++                    // A client that can't switch its text keeps light glass at 80%,
++                    // so white text on it still reads.
++                    let v = if object.is_some() { v } else { v * 0.8 };
++                    shapes.push(packed(s, x0, y0, v, layer));
+                 }
+-                let v = l.value(now);
+-                animating |= v != if l.light { 1. } else { 0. };
+-                // A client that can't switch its text keeps light glass at 80%,
+-                // so white text on it still reads.
+-                let v = if object.is_some() { v } else { v * 0.8 };
+-                shapes.push(packed(s, x0, y0, v, layer));
+-            }
+-            if animating {
+-                lay.effect.damage();
++                if animating {
++                    lay.effect.damage();
++                }
++
++                let params = RenderParams {
++                    geometry,
++                    subregion: None,
++                    clip: Some((geometry, CornerRadius::default())),
++                    scale,
++                };
++                // Layer 1 captures layer 0's glass, already frosted: not blurred a
++                // second time (one light pass only made it blocky).
++                let blur = if layer >= 1 { None } else { blur };
++                let elem = lay
++                    .effect
++                    .render(
++                        ns,
++                        params,
++                        blur,
++                        if layer >= 1 { 0. } else { noise },
++                        state.saturation,
++                    )
++                    .with_glass(GlassDraw {
++                        shapes,
++                        // Controls side by side stay apart: only the panels melt.
++                        merge: if layer >= 1 { 0. } else { state.merge },
++                        frost: state.frost,
++                        // Layer 1 follows layer 0: nothing to read back.
++                        measure: (layer == 0).then(|| lay.measure.clone()),
++                        publish: (layer == 0).then(|| glass.sharp.clone()),
++                        // Only when one of them asks: otherwise as before.
++                        under: (layer >= 1 && idx.iter().any(|&i| state.shapes[i].sharp))
++                            .then(|| glass.sharp.clone()),
++                    });
++                push(elem.into());
+             }
++    }
++}
+ 
+-            let params = RenderParams {
+-                geometry,
+-                subregion: None,
+-                clip: Some((geometry, CornerRadius::default())),
+-                scale,
+-            };
+-            // Layer 1 captures layer 0's glass, already frosted: not blurred a
+-            // second time (one light pass only made it blocky).
+-            let blur = if layer >= 1 { None } else { blur };
+-            let elem = lay
+-                .effect
+-                .render(
+-                    ns,
+-                    params,
+-                    blur,
+-                    if layer >= 1 { 0. } else { noise },
+-                    state.saturation,
+-                )
+-                .with_glass(GlassDraw {
+-                    shapes,
+-                    // Controls side by side stay apart: only the panels melt.
+-                    merge: if layer >= 1 { 0. } else { state.merge },
+-                    frost: state.frost,
+-                    // Layer 1 follows layer 0: nothing to read back.
+-                    measure: (layer == 0).then(|| lay.measure.clone()),
+-                    publish: (layer == 0).then(|| glass.sharp.clone()),
+-                    // Only when one of them asks: otherwise as before.
+-                    under: (layer >= 1 && idx.iter().any(|&i| state.shapes[i].sharp))
+-                        .then(|| glass.sharp.clone()),
+-                });
+-            push(elem.into());
+-        }
+-        true
+-    })
++impl Default for Glass {
++    fn default() -> Self {
++        Self::new()
++    }
+ }
+diff --git a/src/ui/screenshot_ui.rs b/src/ui/screenshot_ui.rs
+index 3ffc1362..f1082fde 100644
+--- a/src/ui/screenshot_ui.rs
++++ b/src/ui/screenshot_ui.rs
+@@ -16,14 +16,17 @@ use smithay::backend::input::TouchSlot;
+ use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
+ use smithay::backend::renderer::element::Kind;
+ use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
+-use smithay::backend::renderer::{ExportMem, Texture as _};
++use smithay::backend::renderer::ExportMem;
+ use smithay::input::keyboard::{Keysym, ModifiersState};
+ use smithay::output::{Output, WeakOutput};
+-use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
++use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+ 
+ use crate::animation::{Animation, Clock};
+ use crate::layout::floating::DIRECTIONAL_MOVE_PX;
+ use crate::niri_render_elements;
++use crate::protocols::lumen_glass::{GlassShape, LumenGlassCachedState};
++use crate::render_helpers::background_effect::BackgroundEffectElement;
++use crate::render_helpers::liquid_glass::Glass;
+ use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
+ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
+ use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
+@@ -32,16 +35,49 @@ use crate::utils::to_physical_precise_round;
+ 
+ const SELECTION_BORDER: i32 = 2;
+ 
+-const PADDING: i32 = 8;
+-const RADIUS: i32 = 16;
+-const FONT: &str = "sans 14px";
+-const BORDER: i32 = 4;
+-const TEXT_HIDE_P: &str =
+-    "Press <span face='mono' bgcolor='#2C2C2C'> Space </span> to save the screenshot.\n\
+-     Press <span face='mono' bgcolor='#2C2C2C'> P </span> to hide the pointer.";
+-const TEXT_SHOW_P: &str =
+-    "Press <span face='mono' bgcolor='#2C2C2C'> Space </span> to save the screenshot.\n\
+-     Press <span face='mono' bgcolor='#2C2C2C'> P </span> to show the pointer.";
++// The panel: a glass card along the bottom (the island's open card), with the
++// modes as glass buttons on it (the island's controls), logical px.
++const CARD_PAD: f64 = 10.;
++const CARD_RADIUS: f64 = 24.;
++const CARD_BOTTOM: f64 = 24.;
++const CTRL_H: f64 = 36.;
++const SEG_W: f64 = 104.;
++const GAP: f64 = 6.;
++const GROUP_GAP: f64 = 14.;
++const ROW_GAP: f64 = 7.;
++const HINT_H: f64 = 16.;
++const LABEL_FONT: &str = "SF Pro Text Medium 13px";
++const HINT_FONT: &str = "SF Pro Text 11px";
++const MODE_NAMES: [&str; 3] = ["Area", "Window", "Screen"];
++const MODE_KEYS: [&str; 3] = ["a", "w", "s"];
++
++/// What the selection is: a dragged area, a window (snapped to it, hjkl jumps
++/// between windows), or the whole screen.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Mode {
++    Area,
++    Window,
++    Screen,
++}
++
++impl Mode {
++    fn index(self) -> usize {
++        match self {
++            Mode::Area => 0,
++            Mode::Window => 1,
++            Mode::Screen => 2,
++        }
++    }
++
++    fn from_index(i: u8) -> Option<Self> {
++        match i {
++            0 => Some(Mode::Area),
++            1 => Some(Mode::Window),
++            2 => Some(Mode::Screen),
++            _ => None,
++        }
++    }
++}
+ 
+ // Ideally the screenshot UI should support cross-output selections. However, that poses some
+ // technical challenges when the outputs have different scales and such. So, this implementation
+@@ -60,6 +96,10 @@ pub enum ScreenshotUi {
+         output_data: HashMap<Output, OutputData>,
+         button: Button,
+         show_pointer: bool,
++        mode: Mode,
++        /// The area selection, kept while the window or screen is selected.
++        area: Option<(Output, Point<i32, Physical>, Point<i32, Physical>)>,
++        style: GlassStyle,
+         open_anim: Animation,
+         clock: Clock,
+         config: Rc<RefCell<Config>>,
+@@ -94,7 +134,13 @@ pub struct OutputData {
+     screenshot: [OutputScreenshot; 3],
+     buffers: [SolidColorBuffer; 8],
+     locations: [Point<i32, Physical>; 8],
+-    panel: Option<(TextureBuffer<GlesTexture>, TextureBuffer<GlesTexture>)>,
++    /// The panel's drawing (fills, labels), per mode and pointer shown.
++    panel: Option<[[TextureBuffer<GlesTexture>; 2]; 3]>,
++    /// The windows on screen (topmost first) and the focused one.
++    windows: Vec<Rectangle<i32, Physical>>,
++    focused: Option<usize>,
++    /// The panel's glass.
++    glass: Glass,
+ }
+ 
+ pub struct OutputScreenshot {
+@@ -107,6 +153,7 @@ niri_render_elements! {
+     ScreenshotUiRenderElement => {
+         Screenshot = PrimaryGpuTextureRenderElement,
+         SolidColor = SolidColorRenderElement,
++        Glass = BackgroundEffectElement,
+     }
+ }
+ 
+@@ -143,6 +190,7 @@ impl ScreenshotUi {
+         default_output: Output,
+         show_pointer: bool,
+         path: Option<String>,
++        mut windows: HashMap<Output, (Vec<Rectangle<i32, Physical>>, Option<usize>)>,
+     ) -> bool {
+         if screenshots.is_empty() {
+             return false;
+@@ -183,6 +231,7 @@ impl ScreenshotUi {
+             selection.1.loc + selection.1.size - Size::from((1, 1)),
+         );
+ 
++        let style = GlassStyle::load();
+         let output_data = screenshots
+             .into_iter()
+             .map(|(output, screenshot)| {
+@@ -202,15 +251,22 @@ impl ScreenshotUi {
+                 ];
+                 let locations = [Default::default(); 8];
+ 
+-                let mut render_panel_ = |text| {
+-                    render_panel(renderer, scale, text)
+-                        .map_err(|err| warn!("error rendering help panel: {err:?}"))
+-                        .ok()
+-                };
+-                let panel_show = render_panel_(TEXT_SHOW_P);
+-                let panel_hide = render_panel_(TEXT_HIDE_P);
+-                let panel = Option::zip(panel_show, panel_hide);
++                let mut panels = Vec::new();
++                for mode in [Mode::Area, Mode::Window, Mode::Screen] {
++                    for pointer in [false, true] {
++                        match render_panel(renderer, scale, mode, pointer, &style) {
++                            Ok(panel) => panels.push(panel),
++                            Err(err) => warn!("error rendering the screenshot panel: {err:?}"),
++                        }
++                    }
++                }
++                let panel = (panels.len() == 6).then(|| {
++                    let mut it = panels.into_iter();
++                    let mut next = || [it.next().unwrap(), it.next().unwrap()];
++                    [next(), next(), next()]
++                });
+ 
++                let (windows, focused) = windows.remove(&output).unwrap_or_default();
+                 let data = OutputData {
+                     size,
+                     scale,
+@@ -219,6 +275,9 @@ impl ScreenshotUi {
+                     buffers,
+                     locations,
+                     panel,
++                    windows,
++                    focused,
++                    glass: Glass::new(),
+                 };
+                 (output, data)
+             })
+@@ -234,6 +293,9 @@ impl ScreenshotUi {
+             output_data,
+             button: Button::Up,
+             show_pointer,
++            mode: Mode::Area,
++            area: None,
++            style,
+             open_anim,
+             clock: clock.clone(),
+             config: config.clone(),
+@@ -248,6 +310,7 @@ impl ScreenshotUi {
+     pub fn close(&mut self) -> bool {
+         let Self::Open {
+             selection,
++            area,
+             clock,
+             config,
+             ..
+@@ -256,6 +319,8 @@ impl ScreenshotUi {
+             return false;
+         };
+ 
++        // The area is what comes back next time, not a window or the screen.
++        let selection = area.as_ref().unwrap_or(selection);
+         let last_selection = Some((
+             selection.0.downgrade(),
+             rect_from_corner_points(selection.1, selection.2),
+@@ -276,6 +341,109 @@ impl ScreenshotUi {
+         }
+     }
+ 
++    pub fn set_mode(&mut self, new: u8) {
++        let Some(new) = Mode::from_index(new) else {
++            return;
++        };
++        let Self::Open {
++            selection,
++            output_data,
++            mode,
++            area,
++            ..
++        } = self
++        else {
++            return;
++        };
++        if *mode == new {
++            return;
++        }
++        if *mode == Mode::Area {
++            *area = Some(selection.clone());
++        }
++        match new {
++            Mode::Area => {
++                if let Some(saved) = area.take() {
++                    *selection = saved;
++                }
++            }
++            Mode::Window => {
++                let data = &output_data[&selection.0];
++                if data.windows.is_empty() {
++                    if mode == &Mode::Area {
++                        *area = None;
++                    }
++                    return;
++                }
++                // The focused window if it is on this screen, else the one
++                // under the middle of the selection, else the first.
++                let rect = rect_from_corner_points(selection.1, selection.2);
++                let centre = rect.loc + rect.size.downscale(2).to_point();
++                let pick = data
++                    .focused
++                    .or_else(|| data.windows.iter().position(|w| w.contains(centre)))
++                    .unwrap_or(0);
++                set_rect(selection, data.windows[pick]);
++            }
++            Mode::Screen => {
++                let size = output_data[&selection.0].size;
++                set_rect(selection, Rectangle::from_size(size));
++            }
++        }
++        *mode = new;
++        self.update_buffers();
++    }
++
++    /// hjkl: moves the area, or jumps to the next window that way.
++    pub fn nudge(&mut self, dx: i8, dy: i8) {
++        let Self::Open { mode, .. } = self else {
++            return;
++        };
++        match *mode {
++            Mode::Area => {
++                for _ in 0..dx.unsigned_abs() {
++                    if dx < 0 { self.move_left() } else { self.move_right() }
++                }
++                for _ in 0..dy.unsigned_abs() {
++                    if dy < 0 { self.move_up() } else { self.move_down() }
++                }
++            }
++            Mode::Window => {
++                let Self::Open {
++                    selection,
++                    output_data,
++                    ..
++                } = self
++                else {
++                    return;
++                };
++                let data = &output_data[&selection.0];
++                let rect = rect_from_corner_points(selection.1, selection.2);
++                if let Some(next) = window_towards(&data.windows, rect, dx, dy) {
++                    set_rect(selection, data.windows[next]);
++                    self.update_buffers();
++                }
++            }
++            Mode::Screen => (),
++        }
++    }
++
++    /// Shift+hjkl: the area grows to the right and down, or shrinks back.
++    pub fn grow(&mut self, dw: i8, dh: i8) {
++        let Self::Open { mode, .. } = self else {
++            return;
++        };
++        if *mode != Mode::Area {
++            return;
++        }
++        if dw != 0 {
++            self.set_width(SizeChange::AdjustFixed(i32::from(dw) * DIRECTIONAL_MOVE_PX as i32));
++        }
++        if dh != 0 {
++            self.set_height(SizeChange::AdjustFixed(i32::from(dh) * DIRECTIONAL_MOVE_PX as i32));
++        }
++    }
++
+     pub fn is_open(&self) -> bool {
+         matches!(self, ScreenshotUi::Open { .. })
+     }
+@@ -631,6 +799,9 @@ impl ScreenshotUi {
+             output_data,
+             show_pointer,
+             button,
++            mode,
++            style,
++            config,
+             open_anim,
+             ..
+         } = self
+@@ -645,27 +816,36 @@ impl ScreenshotUi {
+         let scale = output_data.scale;
+         let progress = open_anim.clamped_value().clamp(0., 1.) as f32;
+ 
+-        // The help panel goes on top.
+-        if let Some((show, hide)) = &output_data.panel {
+-            let buffer = if *show_pointer { hide } else { show };
++        // The panel goes on top: its fills and labels, then its glass, which
++        // bends what is under it (the frozen screen, dimmed or not).
++        if let Some(panels) = &output_data.panel {
++            let buffer = &panels[mode.index()][usize::from(*show_pointer)];
+             let alpha = if button.is_dragging_selection() {
+                 0.3
+             } else {
+-                0.9
++                1.
+             };
+-            let location = panel_location(output_data, buffer.texture().size())
+-                .to_f64()
+-                .to_logical(scale);
+-
++            let layout = PanelLayout::new(output_data);
+             let elem = PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
+                 buffer.clone(),
+-                location,
++                layout.card.loc,
+                 alpha * progress,
+                 None,
+                 None,
+                 Kind::Unspecified,
+             ));
+             push(elem.into());
++
++            let state = layout.glass(style, alpha * progress);
++            output_data.glass.render(
++                None,
++                layout.card.loc,
++                scale,
++                &state,
++                config.borrow().blur,
++                None,
++                &mut |elem| push(elem.into()),
++            );
+         }
+ 
+         for (buffer, loc) in zip(&output_data.buffers, &output_data.locations) {
+@@ -855,6 +1035,8 @@ impl ScreenshotUi {
+             output_data,
+             show_pointer,
+             button,
++            mode,
++            area,
+             ..
+         } = self
+         else {
+@@ -883,16 +1065,13 @@ impl ScreenshotUi {
+             return false;
+         }
+ 
+-        let Some(output_data) = output_data.get(&output) else {
++        let Some(data) = output_data.get(&output) else {
+             return false;
+         };
+ 
+-        if let Some((show, hide)) = &output_data.panel {
+-            let buffer = if *show_pointer { hide } else { show };
+-            let panel_size = buffer.texture().size();
+-            let location = panel_location(output_data, panel_size);
+-
+-            if is_within_capture_button(output_data.scale, panel_size, point - location) {
++        let hit = data.panel.as_ref().and_then(|_| PanelLayout::new(data).hit(point));
++        match hit {
++            Some(Hit::Capture) => {
+                 *button = Button::Down {
+                     touch_slot: slot,
+                     on_capture_button: true,
+@@ -901,7 +1080,29 @@ impl ScreenshotUi {
+                 };
+                 return false;
+             }
++            Some(Hit::Pointer) => {
++                *show_pointer = !*show_pointer;
++                return true;
++            }
++            Some(Hit::Mode(m)) => {
++                self.set_mode(m);
++                return true;
++            }
++            Some(Hit::Card) => return false,
++            None => (),
++        }
++
++        // In window mode a click picks the window under it; anywhere else (and
++        // in screen mode) it starts dragging an area.
++        if *mode == Mode::Window && selection.0 == output {
++            if let Some(w) = data.windows.iter().find(|w| w.contains(point)) {
++                set_rect(selection, *w);
++                self.update_buffers();
++                return true;
++            }
+         }
++        *mode = Mode::Area;
++        *area = None;
+ 
+         *button = Button::Down {
+             touch_slot: slot,
+@@ -921,7 +1122,6 @@ impl ScreenshotUi {
+             selection,
+             output_data,
+             button,
+-            show_pointer,
+             ..
+         } = self
+         else {
+@@ -963,14 +1163,10 @@ impl ScreenshotUi {
+                 return None;
+             };
+ 
+-            if let Some((show, hide)) = &output_data.panel {
+-                let buffer = if *show_pointer { hide } else { show };
+-                let panel_size = buffer.texture().size();
+-                let location = panel_location(output_data, panel_size);
+-
+-                if is_within_capture_button(output_data.scale, panel_size, point - location) {
+-                    return Some(true);
+-                }
++            if output_data.panel.is_some()
++                && PanelLayout::new(output_data).hit(point) == Some(Hit::Capture)
++            {
++                return Some(true);
+             }
+         }
+ 
+@@ -1044,30 +1240,49 @@ impl OutputScreenshot {
+ }
+ 
+ fn action(raw: Keysym, mods: ModifiersState) -> Option<Action> {
+-    if raw == Keysym::Escape {
++    if raw == Keysym::Escape || (raw == Keysym::q && !mods.ctrl && !mods.alt) {
+         return Some(Action::CancelScreenshot);
+     }
+ 
+-    if mods.alt || mods.shift {
++    if mods.alt {
+         return None;
+     }
+ 
+-    if !mods.ctrl && (raw == Keysym::space || raw == Keysym::Return) {
+-        return Some(Action::ConfirmScreenshot {
+-            write_to_disk: true,
+-        });
+-    }
+-    if mods.ctrl && raw == Keysym::c {
+-        return Some(Action::ConfirmScreenshot {
++    if mods.ctrl {
++        return (raw == Keysym::c).then_some(Action::ConfirmScreenshot {
+             write_to_disk: false,
+         });
+     }
+ 
+-    if !mods.ctrl && raw == Keysym::p {
+-        return Some(Action::ScreenshotTogglePointer);
++    // Shift+hjkl: resize the area (l/j grow it, h/k shrink it).
++    if mods.shift {
++        return match raw {
++            Keysym::h | Keysym::H => Some(Action::ScreenshotGrow(-1, 0)),
++            Keysym::l | Keysym::L => Some(Action::ScreenshotGrow(1, 0)),
++            Keysym::k | Keysym::K => Some(Action::ScreenshotGrow(0, -1)),
++            Keysym::j | Keysym::J => Some(Action::ScreenshotGrow(0, 1)),
++            _ => None,
++        };
+     }
+ 
+-    None
++    match raw {
++        Keysym::space | Keysym::Return => Some(Action::ConfirmScreenshot {
++            write_to_disk: true,
++        }),
++        // Yank: to the clipboard only.
++        Keysym::y => Some(Action::ConfirmScreenshot {
++            write_to_disk: false,
++        }),
++        Keysym::p => Some(Action::ScreenshotTogglePointer),
++        Keysym::a => Some(Action::ScreenshotSetMode(0)),
++        Keysym::w => Some(Action::ScreenshotSetMode(1)),
++        Keysym::s => Some(Action::ScreenshotSetMode(2)),
++        Keysym::h => Some(Action::ScreenshotNudge(-1, 0)),
++        Keysym::l => Some(Action::ScreenshotNudge(1, 0)),
++        Keysym::k => Some(Action::ScreenshotNudge(0, -1)),
++        Keysym::j => Some(Action::ScreenshotNudge(0, 1)),
++        _ => None,
++    }
+ }
+ 
+ pub fn rect_from_corner_points(
+@@ -1083,112 +1298,423 @@ pub fn rect_from_corner_points(
+     Rectangle::from_extremities((x1, y1), (x2 + 1, y2 + 1))
+ }
+ 
+-fn panel_location(output_data: &OutputData, panel_size: Size<i32, Buffer>) -> Point<i32, Physical> {
+-    let scale = output_data.scale;
+-    let padding: i32 = to_physical_precise_round(scale, PADDING);
+-    let x = max(0, (output_data.size.w - panel_size.w) / 2);
+-    let y = max(0, output_data.size.h - panel_size.h - padding * 2);
+-    Point::from((x, y))
++/// The glass's look: lumen's (dotnix lumen/shells/island/glass.plm and the
++/// wallpaper theme), written for niri as ~/.config/niri/glass.json by
++/// theme/niri-glass.py; these defaults are its values as tuned.
++#[derive(Debug, Clone, serde::Deserialize)]
++#[serde(default)]
++pub struct GlassStyle {
++    frost: f32,
++    merge: f32,
++    card_refraction: f32,
++    card_bevel: f32,
++    dispersion: f32,
++    specular: f32,
++    glass_tint: f32,
++    rim_tint: f32,
++    card_alpha: f64,
++    card_smoke: f64,
++    card_milk: f64,
++    ctrl_refraction: f32,
++    ctrl_bevel: f32,
++    ctrl_magnify: f32,
++    ctrl_glass_tint: f32,
++    ctrl_fill: f64,
++    ctrl_lit: f64,
++    dusk: String,
++    deep: String,
++    chip: String,
++    soft_l: String,
++    soft_s: String,
++    ink: String,
++    /// The words on a lit control (the island's bead of soft light).
++    lit_ink: String,
+ }
+ 
+-fn is_within_capture_button(
+-    scale: f64,
+-    panel_size: Size<i32, Buffer>,
+-    pos_within_panel: Point<i32, Physical>,
+-) -> bool {
+-    let padding: i32 = to_physical_precise_round(scale, PADDING);
+-    let radius = to_physical_precise_round::<i32>(scale, RADIUS) - 2;
++impl Default for GlassStyle {
++    fn default() -> Self {
++        Self {
++            frost: 0.303,
++            merge: 17.,
++            card_refraction: 48.,
++            card_bevel: 26.,
++            dispersion: 0.08,
++            specular: 0.45,
++            glass_tint: 0.23,
++            rim_tint: 0.,
++            card_alpha: 0.06,
++            card_smoke: 0.139,
++            card_milk: 0.06,
++            ctrl_refraction: 39.,
++            ctrl_bevel: 9.,
++            ctrl_magnify: 0.048,
++            ctrl_glass_tint: 0.23,
++            ctrl_fill: 0.15,
++            ctrl_lit: 0.55,
++            dusk: String::from("#242530"),
++            deep: String::from("#1d1e28"),
++            chip: String::from("#393a42"),
++            soft_l: String::from("#d5d1f1"),
++            soft_s: String::from("#d0d6f4"),
++            ink: String::from("#f6f8fc"),
++            lit_ink: String::from("#25252c"),
++        }
++    }
++}
++
++impl GlassStyle {
++    fn load() -> Self {
++        let dir = std::env::var_os("XDG_CONFIG_HOME")
++            .map(std::path::PathBuf::from)
++            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")));
++        let Some(path) = dir.map(|d| d.join("niri/glass.json")) else {
++            return Self::default();
++        };
++        match std::fs::read_to_string(&path) {
++            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|err| {
++                warn!("error reading {path:?}: {err}");
++                Self::default()
++            }),
++            Err(_) => Self::default(),
++        }
++    }
++}
+ 
+-    let xc = padding + radius;
+-    let yc = panel_size.h / 2;
+-    let pos = pos_within_panel;
++fn rgb(hex: &str) -> (f64, f64, f64) {
++    let hex = hex.trim_start_matches('#');
++    let c = |i: usize| {
++        hex.get(i..i + 2)
++            .and_then(|h| u8::from_str_radix(h, 16).ok())
++            .map_or(0.5, |v| f64::from(v) / 255.)
++    };
++    (c(0), c(2), c(4))
++}
+ 
+-    (pos.x - xc) * (pos.x - xc) + (pos.y - yc) * (pos.y - yc) <= radius * radius
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum Hit {
++    Mode(u8),
++    Pointer,
++    Capture,
++    Card,
+ }
+ 
+-fn render_panel(
+-    renderer: &mut GlesRenderer,
++/// Where the panel's parts are: the card output-local, the rest from its corner.
++struct PanelLayout {
++    card: Rectangle<f64, Logical>,
+     scale: f64,
+-    text: &str,
+-) -> anyhow::Result<TextureBuffer<GlesTexture>> {
+-    let _span = tracy_client::span!("screenshot_ui::render_panel");
++}
+ 
+-    let padding: i32 = to_physical_precise_round(scale, PADDING);
+-    // Keep the border width even to avoid blurry edges.
+-    let border_width = (f64::from(BORDER) / 2. * scale).round() * 2.;
+-    let half_border_width = (border_width / 2.) as i32;
+-    let radius: i32 = to_physical_precise_round(scale, RADIUS);
+-    let circle_stroke: f64 = to_physical_precise_round(scale, 2.);
++impl PanelLayout {
++    fn size() -> Size<f64, Logical> {
++        Size::from((
++            2. * CARD_PAD + 3. * SEG_W + 2. * GAP + GROUP_GAP + 2. * CTRL_H + GAP,
++            2. * CARD_PAD + CTRL_H + ROW_GAP + HINT_H,
++        ))
++    }
+ 
+-    // Add 2 px of spacing to separate the backgrounds of the "Space" and "P" keys.
+-    let spacing = to_physical_precise_round::<i32>(scale, 2) * 1024;
++    fn segment(i: usize) -> Rectangle<f64, Logical> {
++        Rectangle::new(
++            Point::from((CARD_PAD + i as f64 * (SEG_W + GAP), CARD_PAD)),
++            Size::from((SEG_W, CTRL_H)),
++        )
++    }
+ 
+-    let mut font = FontDescription::from_string(FONT);
+-    font.set_absolute_size(to_physical_precise_round(scale, font.size()));
++    fn pointer() -> Rectangle<f64, Logical> {
++        Rectangle::new(
++            Point::from((CARD_PAD + 3. * SEG_W + 2. * GAP + GROUP_GAP, CARD_PAD)),
++            Size::from((CTRL_H, CTRL_H)),
++        )
++    }
+ 
+-    let surface = ImageSurface::create(cairo::Format::ARgb32, 0, 0)?;
+-    let cr = cairo::Context::new(&surface)?;
+-    let layout = pangocairo::functions::create_layout(&cr);
+-    layout.context().set_round_glyph_positions(false);
+-    layout.set_font_description(Some(&font));
+-    layout.set_alignment(Alignment::Left);
+-    layout.set_markup(text);
+-    layout.set_spacing(spacing);
++    fn capture() -> Rectangle<f64, Logical> {
++        let p = Self::pointer();
++        Rectangle::new(p.loc + Point::from((CTRL_H + GAP, 0.)), p.size)
++    }
+ 
+-    let (mut width, mut height) = layout.pixel_size();
++    fn hints() -> Rectangle<f64, Logical> {
++        Rectangle::new(
++            Point::from((CARD_PAD, CARD_PAD + CTRL_H + ROW_GAP)),
++            Size::from((Self::size().w - 2. * CARD_PAD, HINT_H)),
++        )
++    }
+ 
+-    width += padding + radius * 2 + padding - half_border_width + padding;
+-    height = max(height, radius * 2);
+-    height += padding * 2;
++    fn new(data: &OutputData) -> Self {
++        let out = data.size.to_f64().to_logical(data.scale);
++        let size = Self::size();
++        let loc = Point::<f64, Logical>::from((
++            ((out.w - size.w) / 2.).max(0.),
++            (out.h - size.h - CARD_BOTTOM).max(0.),
++        ));
++        // On whole physical pixels, as the texture is.
++        let loc = loc.to_physical_precise_round(data.scale).to_logical(data.scale);
++        Self {
++            card: Rectangle::new(loc, size),
++            scale: data.scale,
++        }
++    }
+ 
+-    let surface = ImageSurface::create(cairo::Format::ARgb32, width, height)?;
+-    let cr = cairo::Context::new(&surface)?;
+-    cr.set_source_rgb(0.1, 0.1, 0.1);
+-    cr.paint()?;
++    fn hit(&self, point: Point<i32, Physical>) -> Option<Hit> {
++        let p = point.to_f64().to_logical(self.scale) - self.card.loc;
++        if !Rectangle::from_size(self.card.size).contains(p) {
++            return None;
++        }
++        if let Some(i) = (0..3).find(|&i| Self::segment(i).contains(p)) {
++            return Some(Hit::Mode(i as u8));
++        }
++        let round = |r: Rectangle<f64, Logical>| {
++            let c = r.loc + r.size.downscale(2.).to_point();
++            (p.x - c.x).powi(2) + (p.y - c.y).powi(2) <= (r.size.w / 2.).powi(2)
++        };
++        if round(Self::pointer()) {
++            return Some(Hit::Pointer);
++        }
++        if round(Self::capture()) {
++            return Some(Hit::Capture);
++        }
++        Some(Hit::Card)
++    }
+ 
+-    let padding = f64::from(padding);
+-    let half_border_width = f64::from(half_border_width);
+-    let r = f64::from(radius);
++    /// The card's glass and its buttons' (glass on glass that bends the crisp
++    /// screen under the card, as the island's controls), from the card's corner.
++    fn glass(&self, style: &GlassStyle, alpha: f32) -> LumenGlassCachedState {
++        let size = self.card.size;
++        let mut shapes = vec![GlassShape {
++            x: 0.,
++            y: 0.,
++            w: size.w as f32,
++            h: size.h as f32,
++            radii: [CARD_RADIUS as f32; 4],
++            continuous: true,
++            layer: 0,
++            sharp: false,
++            refraction: style.card_refraction,
++            dispersion: style.dispersion,
++            bevel: style.card_bevel,
++            specular: style.specular,
++            magnify: 0.,
++            tint: style.glass_tint,
++            rim_tint: style.rim_tint,
++            alpha,
++        }];
++        let control = |r: Rectangle<f64, Logical>, continuous: bool| GlassShape {
++            x: r.loc.x as f32,
++            y: r.loc.y as f32,
++            w: r.size.w as f32,
++            h: r.size.h as f32,
++            radii: [(r.size.h / 2.) as f32; 4],
++            continuous,
++            layer: 1,
++            sharp: true,
++            refraction: style.ctrl_refraction,
++            dispersion: 0.,
++            bevel: style.ctrl_bevel,
++            specular: style.specular,
++            magnify: style.ctrl_magnify,
++            tint: style.ctrl_glass_tint,
++            rim_tint: style.rim_tint,
++            alpha,
++        };
++        shapes.extend((0..3).map(|i| control(Self::segment(i), true)));
++        shapes.push(control(Self::pointer(), false));
++        shapes.push(control(Self::capture(), false));
++        LumenGlassCachedState {
++            shapes,
++            merge: style.merge,
++            frost: style.frost,
++            saturation: 1.,
++        }
++    }
++}
+ 
+-    let yc = f64::from(height / 2);
++/// lumen's continuous corner (as the glass shader and niri's windows draw it):
++/// a superellipse reaching 1.84 x the radius along each side.
++fn squircle(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
++    let half = w.min(h) / 2.;
++    let r = r.min(half);
++    let e = (r * 1.84).min(half).max(r);
++    let n = if e > 0. {
++        (-std::f64::consts::LN_2 / (1. - 0.292_893_2 * r / e).ln()).max(2.)
++    } else {
++        2.
++    };
++    let n = if n < 2.01 { 2. } else { n };
++    // Corners clockwise from the top right, each from one side to the next.
++    let corners = [
++        (x + w - e, y + e, 1., -1., true),
++        (x + w - e, y + h - e, 1., 1., false),
++        (x + e, y + h - e, -1., 1., true),
++        (x + e, y + e, -1., -1., false),
++    ];
++    const STEPS: usize = 24;
++    cr.new_sub_path();
++    for (cx, cy, sx, sy, down) in corners {
++        for k in 0..=STEPS {
++            let t = k as f64 / STEPS as f64;
++            let a = if down { 1. - t } else { t } * std::f64::consts::FRAC_PI_2;
++            let px = cx + sx * e * a.cos().powf(2. / n);
++            let py = cy + sy * e * a.sin().powf(2. / n);
++            cr.line_to(px, py);
++        }
++    }
++    cr.close_path();
++}
+ 
++fn circle(cr: &cairo::Context, r: Rectangle<f64, Logical>, inset: f64) {
+     cr.new_sub_path();
+-    cr.arc(padding + r, yc, r, 0., TAU);
+-    cr.set_source_rgb(1., 1., 1.);
++    cr.arc(
++        r.loc.x + r.size.w / 2.,
++        r.loc.y + r.size.h / 2.,
++        r.size.w / 2. - inset,
++        0.,
++        TAU,
++    );
++}
++
++fn text_layout(cr: &cairo::Context, font: &str, markup: &str) -> pango::Layout {
++    let layout = pangocairo::functions::create_layout(cr);
++    layout.context().set_round_glyph_positions(false);
++    layout.set_font_description(Some(&FontDescription::from_string(font)));
++    layout.set_alignment(Alignment::Center);
++    layout.set_markup(markup);
++    layout
++}
++
++/// Shows `layout` centred in `r`.
++fn show_centred(cr: &cairo::Context, layout: &pango::Layout, r: Rectangle<f64, Logical>) {
++    let (_, logical) = layout.pixel_extents();
++    cr.move_to(
++        r.loc.x + (r.size.w - f64::from(logical.width())) / 2.,
++        r.loc.y + (r.size.h - f64::from(logical.height())) / 2.,
++    );
++    pangocairo::functions::show_layout(cr, layout);
++}
++
++/// The panel's own drawing over its glass: the card's tint (as the island's
++/// open card: a little smoke, milk and the theme's dusk), the buttons' fills
++/// (lit when on) and the words.
++fn render_panel(
++    renderer: &mut GlesRenderer,
++    scale: f64,
++    mode: Mode,
++    show_pointer: bool,
++    style: &GlassStyle,
++) -> anyhow::Result<TextureBuffer<GlesTexture>> {
++    let _span = tracy_client::span!("screenshot_ui::render_panel");
++
++    let size = PanelLayout::size();
++    let width = (size.w * scale).ceil() as i32;
++    let height = (size.h * scale).ceil() as i32;
++    let surface = ImageSurface::create(cairo::Format::ARgb32, width, height)?;
++    let cr = cairo::Context::new(&surface)?;
++    cr.scale(scale, scale);
++
++    let (ir, ig, ib) = rgb(&style.ink);
++    let (cr_, cg, cb) = rgb(&style.chip);
++    let (lr, lg, lb) = rgb(&style.lit_ink);
++
++    // The card.
++    squircle(&cr, 0., 0., size.w, size.h, CARD_RADIUS);
++    cr.set_source_rgba(0., 0., 0., style.card_smoke);
++    cr.fill_preserve()?;
++    cr.set_source_rgba(1., 1., 1., style.card_milk);
++    cr.fill_preserve()?;
++    let (dr, dg, db) = rgb(&style.dusk);
++    let (pr, pg, pb) = rgb(&style.deep);
++    let gradient = cairo::LinearGradient::new(0., 0., size.w, size.h);
++    gradient.add_color_stop_rgba(0., dr, dg, db, style.card_alpha);
++    gradient.add_color_stop_rgba(1., pr, pg, pb, style.card_alpha);
++    cr.set_source(&gradient)?;
+     cr.fill()?;
+ 
++    // A control lit by its state: the island's soft light, pearl to lilac.
++    let fill = |cr: &cairo::Context, lit: bool| -> anyhow::Result<()> {
++        if lit {
++            let (x0, y0, x1, y1) = cr.fill_extents()?;
++            let (a, b) = (rgb(&style.soft_l), rgb(&style.soft_s));
++            let alpha = style.ctrl_fill + style.ctrl_lit;
++            let gradient = cairo::LinearGradient::new(x0, y0, x1, y1);
++            gradient.add_color_stop_rgba(0., a.0, a.1, a.2, alpha);
++            gradient.add_color_stop_rgba(1., b.0, b.1, b.2, alpha);
++            cr.set_source(&gradient)?;
++        } else {
++            cr.set_source_rgba(cr_, cg, cb, style.ctrl_fill);
++        }
++        cr.fill()?;
++        Ok(())
++    };
++
++    // The modes.
++    for i in 0..3 {
++        let r = PanelLayout::segment(i);
++        squircle(&cr, r.loc.x, r.loc.y, r.size.w, r.size.h, r.size.h / 2.);
++        let lit = i == mode.index();
++        fill(&cr, lit)?;
++        let markup = format!(
++            "{}  <span alpha='45%' face='SF Mono'>{}</span>",
++            MODE_NAMES[i], MODE_KEYS[i]
++        );
++        if lit {
++            cr.set_source_rgb(lr, lg, lb);
++        } else {
++            cr.set_source_rgb(ir, ig, ib);
++        }
++        show_centred(&cr, &text_layout(&cr, LABEL_FONT, &markup), r);
++    }
++
++    // The pointer button: an arrow, lit when the pointer is in the shot.
++    let r = PanelLayout::pointer();
++    circle(&cr, r, 0.);
++    fill(&cr, show_pointer)?;
++    let (x0, y0) = (r.loc.x + 13.5, r.loc.y + 9.5);
+     cr.new_sub_path();
+-    cr.arc(padding + r, yc, r - circle_stroke, 0., TAU);
+-    cr.set_source_rgb(0.1, 0.1, 0.1);
++    for (x, y) in [
++        (0., 0.),
++        (0., 15.),
++        (3.8, 11.4),
++        (6.4, 17.),
++        (8.8, 16.),
++        (6.3, 10.4),
++        (11.2, 10.4),
++    ] {
++        cr.line_to(x0 + x, y0 + y);
++    }
++    cr.close_path();
++    if show_pointer {
++        cr.set_source_rgb(lr, lg, lb);
++    } else {
++        cr.set_source_rgb(ir, ig, ib);
++    }
+     cr.fill()?;
+ 
+-    cr.new_sub_path();
+-    cr.arc(padding + r, yc, r - circle_stroke * 2., 0., TAU);
+-    cr.set_source_rgb(1., 1., 1.);
++    // The capture button: a shutter.
++    let r = PanelLayout::capture();
++    circle(&cr, r, 0.);
++    fill(&cr, false)?;
++    cr.set_source_rgb(ir, ig, ib);
++    cr.set_line_width(1.6);
++    circle(&cr, r, 8.);
++    cr.stroke()?;
++    circle(&cr, r, 11.);
+     cr.fill()?;
+ 
+-    cr.move_to(padding + r * 2. + padding - half_border_width, padding);
++    // What the keys do, in this mode.
++    let key = |k: &str, what: &str| format!("<span alpha='100%' weight='600'>{k}</span> {what}");
++    let mut hints = match mode {
++        Mode::Area => vec![key("hjkl", "move"), key("⇧hjkl", "resize")],
++        Mode::Window => vec![key("hjkl", "next window")],
++        Mode::Screen => vec![],
++    };
++    hints.extend([
++        key("y", "copy"),
++        key("⏎", "save"),
++        key("p", if show_pointer { "hide pointer" } else { "pointer" }),
++        key("esc", "cancel"),
++    ]);
++    let markup = format!("<span alpha='60%'>{}</span>", hints.join("    "));
++    cr.set_source_rgb(ir, ig, ib);
++    show_centred(&cr, &text_layout(&cr, HINT_FONT, &markup), PanelLayout::hints());
+ 
+-    let layout = pangocairo::functions::create_layout(&cr);
+-    layout.context().set_round_glyph_positions(false);
+-    layout.set_font_description(Some(&font));
+-    layout.set_alignment(Alignment::Left);
+-    layout.set_markup(text);
+-    layout.set_spacing(spacing);
+-
+-    cr.set_source_rgb(1., 1., 1.);
+-    pangocairo::functions::show_layout(&cr, &layout);
+-
+-    cr.move_to(0., 0.);
+-    cr.line_to(width.into(), 0.);
+-    cr.line_to(width.into(), height.into());
+-    cr.line_to(0., height.into());
+-    cr.line_to(0., 0.);
+-    cr.set_source_rgb(0.3, 0.3, 0.3);
+-    cr.set_line_width(border_width);
+-    cr.stroke()?;
+     drop(cr);
+-
+     let data = surface.take_data().unwrap();
+     let buffer = TextureBuffer::from_memory(
+         renderer,
+@@ -1200,6 +1726,106 @@ fn render_panel(
+         Transform::Normal,
+         Vec::new(),
+     )?;
+-
+     Ok(buffer)
+ }
++
++fn set_rect(
++    selection: &mut (Output, Point<i32, Physical>, Point<i32, Physical>),
++    rect: Rectangle<i32, Physical>,
++) {
++    selection.1 = rect.loc;
++    selection.2 = rect.loc + rect.size - Size::from((1, 1));
++}
++
++/// The window nearest `from` in the direction (dx, dy), as vim moves: ahead
++/// that way, the closest, preferring ones in line.
++fn window_towards(
++    windows: &[Rectangle<i32, Physical>],
++    from: Rectangle<i32, Physical>,
++    dx: i8,
++    dy: i8,
++) -> Option<usize> {
++    let centre = |r: &Rectangle<i32, Physical>| {
++        (
++            f64::from(r.loc.x) + f64::from(r.size.w) / 2.,
++            f64::from(r.loc.y) + f64::from(r.size.h) / 2.,
++        )
++    };
++    let (cx, cy) = centre(&from);
++    let (dx, dy) = (f64::from(dx.signum()), f64::from(dy.signum()));
++    windows
++        .iter()
++        .enumerate()
++        .filter(|(_, w)| **w != from)
++        .filter_map(|(i, w)| {
++            let (wx, wy) = centre(w);
++            let ahead = (wx - cx) * dx + (wy - cy) * dy;
++            let aside = ((wx - cx) * dy).abs() + ((wy - cy) * dx).abs();
++            (ahead > 1.).then_some((i, ahead + 2. * aside))
++        })
++        .min_by(|a, b| a.1.total_cmp(&b.1))
++        .map(|(i, _)| i)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Physical> {
++        Rectangle::new(Point::from((x, y)), Size::from((w, h)))
++    }
++
++    #[test]
++    fn vim_keys() {
++        let none = ModifiersState::default();
++        let shift = ModifiersState {
++            shift: true,
++            ..Default::default()
++        };
++        assert_eq!(action(Keysym::w, none), Some(Action::ScreenshotSetMode(1)));
++        assert_eq!(action(Keysym::l, none), Some(Action::ScreenshotNudge(1, 0)));
++        assert_eq!(action(Keysym::k, none), Some(Action::ScreenshotNudge(0, -1)));
++        assert_eq!(action(Keysym::L, shift), Some(Action::ScreenshotGrow(1, 0)));
++        assert_eq!(action(Keysym::h, shift), Some(Action::ScreenshotGrow(-1, 0)));
++        assert_eq!(
++            action(Keysym::y, none),
++            Some(Action::ConfirmScreenshot {
++                write_to_disk: false
++            })
++        );
++        assert_eq!(action(Keysym::q, none), Some(Action::CancelScreenshot));
++        assert_eq!(action(Keysym::x, none), None);
++    }
++
++    #[test]
++    fn window_jumps() {
++        // Two columns side by side, the right one split in two.
++        let windows = [
++            rect(0, 0, 100, 200),
++            rect(110, 0, 100, 95),
++            rect(110, 105, 100, 95),
++        ];
++        assert_eq!(window_towards(&windows, windows[0], 1, 0), Some(1));
++        assert_eq!(window_towards(&windows, windows[1], 0, 1), Some(2));
++        assert_eq!(window_towards(&windows, windows[2], 0, -1), Some(1));
++        assert_eq!(window_towards(&windows, windows[2], -1, 0), Some(0));
++        assert_eq!(window_towards(&windows, windows[0], -1, 0), None);
++    }
++
++    #[test]
++    fn panel_hits() {
++        let layout = PanelLayout {
++            card: Rectangle::new(Point::from((100., 500.)), PanelLayout::size()),
++            scale: 2.,
++        };
++        let at = |r: Rectangle<f64, Logical>| {
++            let c = layout.card.loc + r.loc + r.size.downscale(2.).to_point();
++            Point::<f64, Logical>::from((c.x, c.y)).to_physical(2.).to_i32_round()
++        };
++        assert_eq!(layout.hit(at(PanelLayout::segment(2))), Some(Hit::Mode(2)));
++        assert_eq!(layout.hit(at(PanelLayout::capture())), Some(Hit::Capture));
++        assert_eq!(layout.hit(at(PanelLayout::pointer())), Some(Hit::Pointer));
++        assert_eq!(layout.hit(at(PanelLayout::hints())), Some(Hit::Card));
++        assert_eq!(layout.hit(Point::from((0, 0))), None);
++    }
++}

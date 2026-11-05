@@ -6,6 +6,7 @@
 # compositor's autostart relaunches them: browsers reopen their tabs, Ghostty
 # reattaches to tmux. Restore only acts right after a switch (switch-grace.sh)
 # and skips what the autostart already starts.
+source "$(dirname "${BASH_SOURCE[0]}")/niri-socket.sh"   # a niri restarted under us: its live socket
 set -uo pipefail
 RUN=${XDG_RUNTIME_DIR:-/run/user/$UID}
 LIST=$RUN/lumen-switch-apps

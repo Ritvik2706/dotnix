@@ -53,11 +53,12 @@ user_pref("mousewheel.default.delta_multiplier_y", 275);
 user_pref("zen.theme.content-element-separation", 0);
 
 // ─────────────────────────────────────────────────────────────
-// Colours stay Zen's own. These two put back the defaults after an
+// Colours stay Zen's own. These put back the defaults after an
 // earlier lilac accent / transparent frame (Zen keeps a removed
 // user_pref in prefs.js, so it has to be set back once).
 // ─────────────────────────────────────────────────────────────
 user_pref("zen.theme.accent-color", "AccentColor");
+user_pref("browser.tabs.allow_transparent_browser", false);
 user_pref("zen.widget.linux.transparency", false);
 
 // CSS continuous corners (corner-shape: squircle), so the compact sidebar

@@ -50,7 +50,7 @@ part Bluetooth {
                 opacity: grow
                 zone box fgt { from: 44, 50; size: 84, 28; corner: 10 continuous; cursor: pointer; label: "Forget"; active: r.menu }
                 body {
-                    color: mix(rose, #7c3d4d, fgt.hover); glass: 25%; blur: 0%; light: 4%, 50, 14; shadow: 0, 1.2 + fgt.hover, 4.9, 20%
+                    color: mix(rose, #7c3d4d, fgt.hover); material: control; opacity: 45%
                     box { from: 44, 50; size: 84, 28; corner: 14 continuous }
                 }
                 text "Forget" { at: 86, 64; anchor: center; size: 11.5; weight: 500; family: "SF Pro Display"; color: rose_ink }

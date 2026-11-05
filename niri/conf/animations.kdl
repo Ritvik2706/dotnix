@@ -1,0 +1,25 @@
+// animations.kdl — niri's own springs (interruptible, they follow the
+// trackpad), with Apple's easing kept only for windows appearing and going.
+// Mod+F12 (scripts/mode.sh perf) turns them all off.
+
+animations {
+    window-open {
+        duration-ms 220
+        curve "cubic-bezier" 0.32 0.72 0 1
+    }
+    window-close {
+        duration-ms 160
+        curve "cubic-bezier" 0.32 0.72 0 1
+    }
+
+    // Swipes: springs keep the speed your fingers let go at, and settle in
+    // ~0.3s without overshoot, the glide of macOS Spaces (niri's defaults,
+    // 1000 / 800, stop in ~0.15s, abruptly). The patched niri also commits
+    // a swipe once it is 15% of the way (momentum included), like Hyprland.
+    workspace-switch {
+        spring damping-ratio=1.0 stiffness=450 epsilon=0.0001
+    }
+    horizontal-view-movement {
+        spring damping-ratio=1.0 stiffness=500 epsilon=0.0001
+    }
+}

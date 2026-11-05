@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # project.sh — one workspace per project, the niri way.
 #   project.sh pick        (Mod+A) a floating fzf picker over `sesh list`
-#   project.sh open <sel>  jump to the project's workspace, or make it: the
-#                          next empty workspace, named after the project, with
-#                          a terminal attached to its tmux session (sesh)
+#   project.sh open <sel>  the terminal it is attached in, if it is; else the
+#                          terminal already on tmux switches to it (sesh
+#                          --switch); else a new terminal attached to it
 #   project.sh list        for a picker (the lumen island): one project per line,
 #                          TSV: name, what to pass to `open`, kind (tmux, config,
 #                          zoxide), path, 1 if it has a workspace open now
@@ -20,6 +20,35 @@ name_of() {
 	local n=${1%/}
 	n=${n##*/}
 	printf '%s' "${n:-$1}"
+}
+
+HOMES='^(browser|terminal|docs|tools|media|TV [7890])$'
+
+# The niri window a tmux session is attached in (its client's terminal), or nothing: a
+# client's process, up its parents, to the one a window belongs to.
+window_of() {
+	local wins=$1 sess=$2 p id
+	for p in $(tmux list-clients -t "$sess" -F '#{client_pid}' 2>/dev/null); do
+		for _ in 1 2 3 4 5 6 7 8; do
+			p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+			[[ -z $p || $p == 1 ]] && break
+			id=$(jq -r --argjson p "$p" '[.[] | select(.pid == $p)] | first | .id // empty' <<<"$wins")
+			if [[ -n $id ]]; then
+				printf '%s' "$id"
+				return
+			fi
+		done
+	done
+}
+
+# A project's workspace whose terminal was closed keeps its name (niri keeps named
+# workspaces): its name goes, and niri drops it once it is empty like any other.
+tidy() {
+	local spaces=$1 wins=$2 n
+	jq -r --argjson w "$wins" --arg homes "$HOMES" '
+		.[] | select(.name != null and (.name | test($homes) | not) and (.is_focused | not))
+		| select(.id as $i | all($w[]; .workspace_id != $i)) | .name' <<<"$spaces" |
+		while read -r n; do niri msg action unset-workspace-name "$n" >/dev/null 2>&1 || true; done
 }
 
 case ${1:-pick} in
@@ -40,39 +69,48 @@ pick)
 	"
 	;;
 list)
+	spaces=$(niri msg -j workspaces)
+	wins=$(niri msg -j windows)
+	tidy "$spaces" "$wins"
+	# Open: a workspace of its name with windows on it, or its tmux session attached in a terminal.
+	open=$(jq -c --argjson w "$wins" '[.[] | select(.name != null) | select(.id as $i | any($w[]; .workspace_id == $i)) | .name]' <<<"$spaces")
+	attached=$(tmux list-clients -F '#{session_name}' 2>/dev/null | sort -u | jq -R . | jq -sc .)
 	# Same naming as `open` (name_of), done in jq: the last path component.
-	open=$(niri msg -j workspaces | jq -c '[.[] | .name // empty]')
-	sesh list --json | jq -r --argjson open "$open" '
+	sesh list --json | jq -r --argjson open "$open" --argjson att "${attached:-[]}" '
 		.[] | (.Name | rtrimstr("/") | split("/") | last) as $n
-		| [$n, .Name, .Src, (.Path // ""), (if ($open | index($n)) then 1 else 0 end)] | @tsv'
+		| [$n, .Name, .Src, (.Path // ""), (if (($open | index($n)) or ($att | index($n))) then 1 else 0 end)] | @tsv'
 	;;
 open)
 	sel=$2
 	name=$(name_of "$sel")
 	spaces=$(niri msg -j workspaces)
+	wins=$(niri msg -j windows)
 
-	if jq -e --arg n "$name" 'any(.[]; .name == $n)' <<<"$spaces" >/dev/null; then
-		niri msg action focus-workspace "$name"
+	# Its session already attached in a terminal (the one on "terminal", say): that window.
+	win=$(window_of "$wins" "$name")
+	if [[ -n $win ]]; then
+		niri msg action focus-window --id "$win"
 		exit 0
 	fi
 
-	# niri always keeps one empty workspace at the bottom of each monitor:
-	# claim the focused monitor's.
-	out=$(niri msg -j focused-output | jq -r '.name')
-	wins=$(niri msg -j windows)
-	idx=$(jq -r --arg o "$out" --argjson w "$wins" '
-		[.[] | select(.output == $o and .name == null) | select(.id as $i | all($w[]; .workspace_id != $i))]
-		| max_by(.idx) | .idx // empty' <<<"$spaces")
-	[[ -z $idx ]] && idx=$(jq -r --arg o "$out" '[.[] | select(.output == $o)] | max_by(.idx) | .idx + 1' <<<"$spaces")
+	# Otherwise the terminal already on tmux (the one used last: the one on "terminal") switches
+	# to it, as sesh does inside tmux, and gets the focus: no new window, no new workspace. The
+	# session it leaves keeps running.
+	last=$(tmux list-clients -F '#{client_activity} #{session_name}' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+	if [[ -n $last ]]; then
+		cwin=$(window_of "$wins" "$last")
+		sesh connect --switch "$sel" >/dev/null 2>&1
+		[[ -n $cwin ]] && niri msg action focus-window --id "$cwin"
+		exit 0
+	fi
 
-	niri msg action focus-workspace "$idx"
-	niri msg action set-workspace-name "$name"
+	# No terminal on tmux at all: a terminal attached to it (the window rules put it on "terminal").
 	setsid -f ghostty -e sesh connect "$sel" >/dev/null 2>&1
-	notify-send -a Niri -t 1500 "Project" "$name"
 	;;
 close)
 	name=$(niri msg -j workspaces | jq -r '.[] | select(.is_focused) | .name // ""')
-	if [[ -z $name ]]; then
+	# The fixed homes (conf/workspaces.kdl) keep their names.
+	if [[ -z $name || $name =~ $HOMES ]]; then
 		exit 0
 	fi
 	niri msg action unset-workspace-name

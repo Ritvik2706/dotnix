@@ -1,0 +1,120 @@
+From 1492b6aebecbb300da5486488d122bae53c70dab Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 27 Oct 2026 21:06:36 +0400
+Subject: [PATCH 02/38] layout: touchpad swipes commit at 15% of the way, like
+ macOS
+
+Workspace and view gestures go to the next workspace / snapping point once
+the swipe (momentum included) is 15% of the way there, instead of rounding
+to the closest one.
+---
+ src/layout/monitor.rs   | 21 +++++++++++++++++++--
+ src/layout/scrolling.rs | 37 ++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 55 insertions(+), 3 deletions(-)
+
+diff --git a/src/layout/monitor.rs b/src/layout/monitor.rs
+index 53c06069..216e7823 100644
+--- a/src/layout/monitor.rs
++++ b/src/layout/monitor.rs
+@@ -35,6 +35,10 @@ use crate::utils::{
+ /// Amount of touchpad movement to scroll the height of one workspace.
+ const WORKSPACE_GESTURE_MOVEMENT: f64 = 300.;
+ 
++/// How far into the next workspace a touchpad swipe must get (momentum included) to
++/// switch to it, as a fraction of one workspace (Hyprland's workspace_swipe_cancel_ratio).
++const WORKSPACE_GESTURE_COMMIT: f64 = 0.15;
++
+ const WORKSPACE_GESTURE_RUBBER_BAND: RubberBand = RubberBand {
+     stiffness: 0.5,
+     limit: 0.05,
+@@ -2000,9 +2004,22 @@ impl<W: LayoutElement> Monitor<W> {
+         let pos = gesture.tracker.projected_end_pos() / total_height;
+ 
+         let (min, max) = gesture.min_max(self.workspaces.len());
+-        let new_idx = gesture.start_idx + pos;
+ 
+-        let new_idx = new_idx.clamp(min, max);
++        // Commit like macOS Spaces: measured from the workspace the swipe began on,
++        // once the swipe (with the momentum it carries) is past WORKSPACE_GESTURE_COMMIT
++        // of the next one, go there, instead of rounding to the nearest. A short,
++        // deliberate swipe then switches rather than snapping back; a flick still
++        // travels as far as its momentum takes it.
++        let base = gesture.start_idx.round();
++        let moved = gesture.start_idx + pos - base;
++        let whole = moved.trunc();
++        let rest = moved - whole;
++        let step = if rest.abs() >= WORKSPACE_GESTURE_COMMIT {
++            rest.signum()
++        } else {
++            0.
++        };
++        let new_idx = (base + whole + step).clamp(min, max);
+         let new_idx = new_idx.round() as usize;
+ 
+         velocity *= rubber_band.clamp_derivative(min, max, gesture.start_idx + current_pos);
+diff --git a/src/layout/scrolling.rs b/src/layout/scrolling.rs
+index 007bcaf5..931d963a 100644
+--- a/src/layout/scrolling.rs
++++ b/src/layout/scrolling.rs
+@@ -30,6 +30,10 @@ use crate::window::ResolvedWindowRules;
+ /// Amount of touchpad movement to scroll the view for the width of one working area.
+ const VIEW_GESTURE_WORKING_AREA_MOVEMENT: f64 = 1200.;
+ 
++/// How far toward the next snapping point a touchpad swipe of the strip must get (momentum
++/// included) to settle there, as a fraction of the way.
++const VIEW_GESTURE_COMMIT: f64 = 0.15;
++
+ /// A scrollable-tiling space for windows.
+ #[derive(Debug)]
+ pub struct ScrollingSpace<W: LayoutElement> {
+@@ -3193,6 +3197,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+         // Figure out where the gesture would stop after deceleration.
+         let end_pos = gesture.tracker.projected_end_pos() * norm_factor;
+         let target_view_offset = end_pos + gesture.delta_from_tracker;
++        // Where the view was when the swipe began (the tracker starts at 0).
++        let start_view_offset = gesture.delta_from_tracker;
+ 
+         // Compute the snapping points. These are where the view aligns with column boundaries on
+         // either side.
+@@ -3382,11 +3388,40 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+ 
+         let active_col_x = self.column_x(self.active_column_idx);
+         let target_view_pos = active_col_x + target_view_offset;
+-        let target_snap = snapping_points
++        let closest_snap = snapping_points
+             .iter()
+             .min_by_key(|snap| NotNan::new((snap.view_pos - target_view_pos).abs()).unwrap())
+             .unwrap();
+ 
++        // Commit like macOS: once the swipe (momentum included) is VIEW_GESTURE_COMMIT of the
++        // way to the next snapping point in its direction, go there, rather than to whichever
++        // point is closest; a short deliberate swipe then moves on instead of snapping back.
++        let start_view_pos = active_col_x + start_view_offset;
++        let moved = target_view_pos - start_view_pos;
++        let next_snap = if moved > 0. {
++            snapping_points
++                .iter()
++                .find(|snap| snap.view_pos > start_view_pos + 1.)
++        } else if moved < 0. {
++            snapping_points
++                .iter()
++                .rev()
++                .find(|snap| snap.view_pos < start_view_pos - 1.)
++        } else {
++            None
++        };
++        let target_snap = match next_snap {
++            Some(next) => {
++                let span = (next.view_pos - start_view_pos).abs();
++                if moved.abs() < span && moved.abs() >= VIEW_GESTURE_COMMIT * span {
++                    next
++                } else {
++                    closest_snap
++                }
++            }
++            None => closest_snap,
++        };
++
+         let mut new_col_idx = target_snap.col_idx;
+ 
+         if !self.is_centering_focused_column() {

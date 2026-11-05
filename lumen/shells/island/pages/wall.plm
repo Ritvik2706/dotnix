@@ -50,7 +50,7 @@ part Wall {
             move: ex0 + 16, 44
             zone ellipse wb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
             body {
-                color: mix(chip, chip_hi, wb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * wb.hover - wb.pressed, 4.2, 21%
+                color: mix(chip, chip_hi, wb.hover); material: control
                 ellipse { at: 16, 18; radius: 16 - 0.6 * wb.pressed }
             }
             path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * wb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }

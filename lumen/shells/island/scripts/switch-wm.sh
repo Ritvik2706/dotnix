@@ -5,6 +5,7 @@
 # argument, whichever one isn't running. Refused while the screen is locked.
 set -uo pipefail
 RUN=${XDG_RUNTIME_DIR:-/run/user/$UID}
+source "$(dirname "${BASH_SOURCE[0]}")/niri-socket.sh"   # a niri restarted under us: its live socket
 
 if [[ -n ${NIRI_SOCKET:-} && -S $NIRI_SOCKET ]]; then cur=niri; else cur=hyprland; fi
 to=${1:-$([[ $cur == niri ]] && echo hyprland || echo niri)}

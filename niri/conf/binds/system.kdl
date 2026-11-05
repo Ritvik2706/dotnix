@@ -1,0 +1,40 @@
+// binds/system.kdl — session, look toggles, screenshots, volume, brightness.
+binds {
+    // ── Session ──
+    Mod+Escape hotkey-overlay-title="Lock" { spawn "systemctl" "--user" "start" "hyprlock.service"; }
+    Mod+Shift+C hotkey-overlay-title="Reload config" { spawn "niri" "msg" "action" "load-config-file"; }
+    Mod+Shift+E { quit; }
+    Mod+Shift+B hotkey-overlay-title="Screens off" { power-off-monitors; }
+    Mod+Ctrl+I hotkey-overlay-title="Caffeine" { spawn-sh "~/.config/niri/scripts/caffeine.sh"; }
+    Mod+N hotkey-overlay-title="Night light" { spawn-sh "~/.config/custom_scripts/toggle_wlsunset.sh"; }
+    // Lock-screen escape hatch and face-unlock rescan: see the notes in
+    // hypr/lua/keybinds/power_notifications.lua.
+    Mod+Ctrl+Alt+L allow-when-locked=true { spawn "systemctl" "--user" "restart" "hyprlock.service"; }
+    Mod+Ctrl+Alt+F allow-when-locked=true { spawn-sh "~/.config/hypr/scripts/face-unlock.sh rearm"; }
+
+    // ── Look toggles (scripts/mode.sh writes ../mode.kdl) ──
+    Mod+Shift+Space hotkey-overlay-title="Opaque mode" { spawn-sh "~/.config/niri/scripts/mode.sh opaque"; }
+    Mod+F12 hotkey-overlay-title="Performance mode" { spawn-sh "~/.config/niri/scripts/mode.sh perf"; }
+
+    // ── Screenshots ──
+    // Mod+V: niri's own screenshot UI (patched: a glass panel, a/w/s = area,
+    // window, screen; hjkl move or jump between windows, Shift+hjkl resize;
+    // y copies, Enter saves and copies, p pointer, q/Esc cancel).
+    // The only one: the island's Screenshot control does the rest.
+    Mod+V hotkey-overlay-title="Screenshot (niri UI)" { screenshot; }
+
+    // ── Media and brightness ──
+    // F1-F3 / F8-F11: the Razer's bare function row.
+    XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+; ~/.local/bin/lumen --say island 'emit vol_key 1' >/dev/null 2>&1"; }
+    F3 allow-when-locked=true { spawn-sh "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+; ~/.local/bin/lumen --say island 'emit vol_key 1' >/dev/null 2>&1"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-; ~/.local/bin/lumen --say island 'emit vol_key -1' >/dev/null 2>&1"; }
+    F2 allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-; ~/.local/bin/lumen --say island 'emit vol_key -1' >/dev/null 2>&1"; }
+    XF86AudioMute allow-when-locked=true repeat=false { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    F1 allow-when-locked=true repeat=false { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    XF86MonBrightnessUp allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh up"; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh down"; }
+    F9 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh up"; }
+    F8 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/brightness.sh down"; }
+    F10 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/kbd-backlight.sh down"; }
+    F11 allow-when-locked=true { spawn-sh "~/.config/custom_scripts/kbd-backlight.sh up"; }
+}

@@ -1,0 +1,96 @@
+From 9ab6b7963edd372c8c48ee96bc9042702ffc483e Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 19:13:46 +0400
+Subject: [PATCH 30/38] liquid glass: the rim's squeezed backdrop is averaged
+ over each pixel's footprint
+
+The lens shifts the backdrop by many backdrop pixels per screen pixel at
+the rim, and one sample a pixel stepped and sparkled there (minification
+with no filter): pixelly edges, worst over a detailed wallpaper. Each
+pixel now averages as many samples across the edge as it spans (up to 8),
+one where nothing is squeezed, so the middle costs what it did.
+---
+ src/render_helpers/shaders/liquid_glass.frag | 55 +++++++++++++++-----
+ 1 file changed, 42 insertions(+), 13 deletions(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 6a221894..17e154fe 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -241,6 +241,21 @@ vec4 backdrop(vec2 c, float clear) {
+     return clear > 0.0 ? mix(frosted, texture2D(tex_sharp, c), clear) : frosted;
+ }
+ 
++// The shift through the bezel at `tt` px in from the edge (edge direction g):
++// Snell through the convex squircle's slope there.
++vec2 refraction_at(float tt, vec2 g, float bz, float thickness) {
++    float u = clamp(tt / bz, 0.0, 1.0);
++    float om = 1.0 - u;
++    float om4 = om * om * om * om;
++    float slope = min((om * om * om) / pow(max(1.0 - om4, 1e-3), 0.75), 7.0);
++    vec3 n = normalize(vec3(g * slope, 1.0));
++    vec3 rd = refract(vec3(0.0, 0.0, -1.0), n, 1.0 / 1.5);
++    return rd.xy / max(-rd.z, 0.2) * thickness * 1.35;
++}
++
++// Up to this many backdrop samples a pixel where the rim squeezes it.
++#define LENS_TAPS 8
++
+ void main() {
+     vec2 p = (input_to_geo * vec3(v_coords, 1.0)).xy * geo_size;
+ 
+@@ -317,16 +332,8 @@ void main() {
+     if (shape_sharp > 0.5 && abs(s[0].z - s[0].w) > 1.0)
+         sharp_k = 1.0 - smoothstep(0.5 * bz, 1.3 * bz, t);
+ 
+-    // The bezel -> surface normal.
+-    float u = clamp(t / bz, 0.0, 1.0);
+-    float om = 1.0 - u;
+-    float om4 = om * om * om * om;
+-    float slope = min((om * om * om) / pow(max(1.0 - om4, 1e-3), 0.75), 7.0);
+-    vec3 n = normalize(vec3(g * slope, 1.0));
+-
+-    // Refraction: glass n~1.5, the ray enters straight down.
+-    vec3 rd = refract(vec3(0.0, 0.0, -1.0), n, 1.0 / 1.5);
+-    vec2 disp = rd.xy / max(-rd.z, 0.2) * thickness * 1.35;
++    // Refraction: glass n~1.5, the ray enters straight down, bent by the bezel.
++    vec2 disp = refraction_at(t, g, bz, thickness);
+ 
+     // The whole slab is a gentle vertical lens.
+     vec2 centre = s[0].xy + s[0].zw * 0.5;
+@@ -339,10 +346,32 @@ void main() {
+     float clear = 1.0 - smoothstep(0.0, 0.02, frost);
+     float disperse = dispersion * 0.6;
+     vec2 base = v_coords + inv * ((ps - p) / geo_size);
+-    vec2 dv = inv * (disp / geo_size);
+-    vec4 gs = backdrop(base + dv, clear);
+-    vec3 col = vec3(backdrop(base + dv * (1.0 + disperse), clear).r, gs.g,
++
++    // At the rim the lens squeezes the backdrop: one screen pixel spans many
++    // backdrop pixels across the edge, and a single sample per pixel steps and
++    // sparkles (minification with no filter). So the pixel's footprint across
++    // the edge is averaged, with as many samples as it spans backdrop pixels
++    // (one where nothing is squeezed: the middle costs what it did). The
++    // backdrop it bends is the frosted one where the glass asks for frost, so
++    // together it is the blurred, smoothly lensed rim of Apple's glass.
++    float dev = 1.0 / max(niri_scale, 0.5);                    // one device pixel, logical px
++    vec2 step_in = -g * dev;                                   // a device pixel inward
++    float spread = length(step_in + refraction_at(t + dev, g, bz, thickness) - disp) / dev;
++    float taps = (length(g) > 0.5 && t < bz) ? clamp(ceil(spread), 1.0, float(LENS_TAPS)) : 1.0;
++    vec4 gs = vec4(0.0);
++    vec3 col = vec3(0.0);
++    for (int k = 0; k < LENS_TAPS; k++) {
++        if (float(k) >= taps) break;
++        float o = taps > 1.0 ? (float(k) + 0.5) / taps - 0.5 : 0.0;   // -0.5 .. 0.5 of a pixel
++        vec2 dk = (taps > 1.0 ? refraction_at(max(t + o * dev, 0.0), g, bz, thickness) : disp) + step_in * o;
++        vec2 dv = inv * (dk / geo_size);
++        vec4 sk = backdrop(base + dv, clear);
++        gs += sk;
++        col += vec3(backdrop(base + dv * (1.0 + disperse), clear).r, sk.g,
+                     backdrop(base + dv * (1.0 - disperse), clear).b);
++    }
++    gs /= taps;
++    col /= taps;
+     float aa = max(gs.a, 0.001);
+     col /= aa;   // straight colour for the grading, premultiplied again at the end
+ 

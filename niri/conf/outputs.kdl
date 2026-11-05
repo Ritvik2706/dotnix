@@ -1,0 +1,22 @@
+// outputs.kdl — the laptop panel and the TV (was lua/monitors.lua).
+
+// Razer Blade 15 panel: QHD@240. Hyprland's scale "auto" came out at 1.6
+// (2560x1440 -> 1600x900 logical, whole pixels both ways).
+output "eDP-2" {
+    mode "2560x1440@240"
+    scale 1.6
+    position x=160 y=1080
+    variable-refresh-rate
+}
+
+// Hisense TV over HDMI, above the laptop and centred on it. Scale 2 makes it
+// 1920x1080 logical: the island and windows keep the laptop's proportions, at
+// a whole-number scale. 4K60 needs the TV's enhanced HDMI format on for this
+// input and an 18 Gbps cable (a lesser cable: no picture, though the link looks
+// up from here). With enhanced off it isn't offered and niri falls back to 4K30.
+// Keep xfconf's `displays` profile in step (xfsettingsd).
+output "HDMI-A-1" {
+    mode "3840x2160@60"
+    scale 2
+    position x=0 y=0
+}

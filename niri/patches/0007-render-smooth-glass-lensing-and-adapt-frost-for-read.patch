@@ -1,0 +1,116 @@
+From d75aeecd379e3d7cf32d8ff5ed0fdb7538779474 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 27 Oct 2026 22:40:17 +0400
+Subject: [PATCH 07/38] render: smooth glass lensing and adapt frost for
+ readability
+
+---
+ src/render_helpers/liquid_glass.rs           |  4 ++-
+ src/render_helpers/shaders/liquid_glass.frag | 34 +++++++++++++-------
+ 2 files changed, 25 insertions(+), 13 deletions(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 4db0cdc2..a7faa4cf 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -83,7 +83,7 @@ pub fn render_for_surface(
+                     s.dispersion,
+                     s.bevel,
+                     s.specular,
+-                    0.,
++                    state.frost,
+                     0.,
+                     0.,
+                 ]
+@@ -93,6 +93,8 @@ pub fn render_for_surface(
+         let frosted = state.frost > 0. && !blur_config.off;
+         let blur = frosted.then(|| {
+             let mut options = BlurOptions::from(blur_config);
++            // Low frost must not retain the full downsampling pyramid.
++            options.passes = ((options.passes as f32 * state.frost).ceil() as u8).max(1);
+             options.offset *= state.frost as f64;
+             options
+         });
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 6ab5f316..a5b46ddc 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -31,7 +31,7 @@ uniform vec2 geo_size;
+ uniform mat3 input_to_geo;
+ 
+ // Per shape, columns: (x, y, w, h), radii (tl, tr, br, bl),
+-// (corner, refraction, dispersion, bevel), (specular, -, -, -).
++// (corner, refraction, dispersion, bevel), (specular, frost, -, -).
+ // Coordinates in logical px from the bounding box's top-left.
+ uniform mat4 glass_shapes[8];
+ uniform float glass_count;
+@@ -130,7 +130,8 @@ void main() {
+     mat4 s = shape_at(idx);
+     float refraction = s[2].y;
+     float dispersion = s[2].z;
+-    float bevel = s[2].w;
++    float bevel = min(s[2].w, min(s[0].z, s[0].w) * 0.5);
++    float frost = clamp(s[3].y, 0.0, 1.0);
+     float specular = s[3].x;
+ 
+     // Outward normal of the (merged) outline.
+@@ -140,11 +141,11 @@ void main() {
+                      glass_sdf(p + vec2(0.0, h), ignore) - glass_sdf(p - vec2(0.0, h), ignore));
+     vec2 n = length(grad) > 1e-5 ? normalize(grad) : vec2(0.0);
+ 
+-    // Across the bevel: 0 where the glass turns flat, 1 at the rim. A circular
+-    // profile, so it bends gently inside and sharply at the very edge.
++    // Bounded slope through the bevel: the former circular profile had an
++    // infinite rim derivative and folded the sampled background over itself.
+     float depth = -d;
+     float t = bevel > 0.0 ? clamp(1.0 - depth / bevel, 0.0, 1.0) : 0.0;
+-    float bend = 1.0 - sqrt(max(1.0 - t * t, 0.0));
++    float bend = t * t * (3.0 - 2.0 * t);
+ 
+     // A shallow lens spans the whole body, rather than a flat pane with
+     // only a refracting border. Its smooth radial mapping avoids the SDF
+@@ -156,12 +157,14 @@ void main() {
+     vec2 unit = local / half_size;
+     float radius2 = clamp(dot(unit, unit) * 0.5, 0.0, 1.0);
+     float lens_strength = clamp(refraction / max(40.0, min(half_size.x, half_size.y) * 0.4), 0.0, 1.0);
+-    float magnification = lens_strength * (0.18 + 0.08 * radius2);
++    float magnification = lens_strength * (0.08 + 0.02 * radius2);
+     vec2 body_off = -local * magnification;
+-    // Fade the body mapping into the rim mapping to keep small capsules
+-    // from stacking two large displacements at their silhouette.
+-    vec2 edge_off = -n * refraction * bend;
+-    vec2 off = body_off * (1.0 - bend) + edge_off;
++    // The extra rim displacement has derivative at most 0.3 along a flat
++    // edge (smoothstep peaks at 1.5). Keep the body mapping continuous rather
++    // than replacing it at the rim, which created a second visible band.
++    float edge_strength = min(max(refraction, 0.0), bevel * 0.2);
++    vec2 edge_off = -n * edge_strength * bend;
++    vec2 off = body_off + edge_off;
+     // From logical px to texture coordinates (inverse of input_to_geo's linear part).
+     mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
+     float det = a[0][0] * a[1][1] - a[1][0] * a[0][1];
+@@ -182,6 +185,13 @@ void main() {
+     color.a = 1.0;
+ #endif
+ 
++    // Lumen's light foreground needs separation from bright backgrounds.
++    // Compress background brightness proportionally to its local luminance;
++    // preserve hue and leave dark areas quieter instead of adding a white veil.
++    float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722)) / max(color.a, 0.001);
++    float contrast = frost * smoothstep(0.08, 0.8, luminance);
++    color.rgb *= 1.0 - 0.55 * contrast;
++
+     if (saturation != 1.0)
+         color.rgb = saturate(color.rgb, saturation);
+     if (noise > 0.0)
+@@ -192,8 +202,8 @@ void main() {
+     vec2 key = vec2(-0.5547, -0.8321);
+     float facing = max(dot(n, key), 0.0);
+     float back = max(dot(n, -key), 0.0);
+-    float rim = 1.0 - smoothstep(0.0, 1.6, depth);
+-    float lit = specular * (rim * (0.35 + 0.65 * facing + 0.45 * back) + 0.3 * bend * bend * facing);
++    float rim = 1.0 - smoothstep(0.0, 1.0, depth);
++    float lit = specular * (rim * (0.2 + 0.5 * facing + 0.2 * back) + 0.06 * bend * bend * facing);
+     color.rgb = mix(color.rgb, vec3(color.a), clamp(lit, 0.0, 1.0));
+ 
+     color *= cover * alpha;

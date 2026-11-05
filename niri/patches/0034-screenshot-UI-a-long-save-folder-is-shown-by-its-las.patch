@@ -1,0 +1,54 @@
+From 2a57c8410808a21f08633d5bed9aa514372721e9 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Thu, 29 Oct 2026 01:49:40 +0400
+Subject: [PATCH 34/38] screenshot UI: a long save folder is shown by its last
+ two folders
+
+---
+ src/ui/screenshot_ui.rs | 22 +++++++++++++++++-----
+ 1 file changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/src/ui/screenshot_ui.rs b/src/ui/screenshot_ui.rs
+index 3e31347d..ac2d1e8d 100644
+--- a/src/ui/screenshot_ui.rs
++++ b/src/ui/screenshot_ui.rs
+@@ -1622,15 +1622,20 @@ fn save_folders(config: &Config) -> Vec<PathBuf> {
+     folders
+ }
+ 
+-/// A folder as the panel says it: ~ for home.
++/// A folder as the panel says it: ~ for home, and a long one by its last two
++/// folders, so the line fits.
+ fn short_path(path: &Path) -> String {
+-    let home = std::env::var_os("HOME")
+-        .map(PathBuf::from)
+-        .unwrap_or_default();
+-    match path.strip_prefix(&home) {
++    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
++    let full = match path.strip_prefix(&home) {
+         Ok(rel) if !home.as_os_str().is_empty() => format!("~/{}", rel.display()),
+         _ => path.display().to_string(),
++    };
++    if full.chars().count() <= 32 {
++        return full;
+     }
++    let parts: Vec<_> = path.components().rev().take(2).collect();
++    let tail: PathBuf = parts.into_iter().rev().collect();
++    format!("…/{}", tail.display())
+ }
+ 
+ /// A point on the screen as the drawing keeps it: from the selection's corner, logical.
+@@ -2473,6 +2478,13 @@ mod tests {
+         assert_eq!(layout.hit(Point::from((0, 0))), None);
+     }
+ 
++    #[test]
++    fn long_folders_are_shortened() {
++        let long = Path::new("/srv/very/long/share/with/many/levels/screens/2026");
++        assert_eq!(short_path(long), "…/screens/2026");
++        assert_eq!(short_path(Path::new("/tmp")), "/tmp");
++    }
++
+     #[test]
+     fn draw_panel_hits() {
+         let layout = PanelLayout {

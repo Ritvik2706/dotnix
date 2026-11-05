@@ -8,7 +8,7 @@ part Mixer {
         zone box o { from: 0, 0; size: 114, 34; corner: 17 continuous; cursor: pointer; label: "{r.name}"; selected: r.on }
         body {
             gradient: 0, 0 to 114, 34, mix(mix(chip, chip_hi, o.hover), lilac, 0.16 * r.on), mix(mix(chip, chip_hi, o.hover), sunset, 0.13 * r.on)
-            glass: 25%; blur: 0%; light: 4%, 0, 17; shadow: 0, 1.5, 5, 20%
+            material: control; opacity: lgc_fill + 10% * r.on
             box { from: 0, 0; size: 114, 34; corner: 17 continuous }
         }
         ellipse { at: 15, 17; radius: 3; color: tint_ink; opacity: if(r.on, 100%, 0) }
@@ -36,7 +36,7 @@ part Mixer {
         zone ellipse mb { at: 334, 26; radius: 14; cursor: pointer; label: "Mute {name}"; role: toggle; checked: muted }
         body {
             gradient: 320, 12 to 348, 40, mix(mix(chip, chip_hi, mb.hover), soft_l, if(muted, 1, 0)), mix(mix(chip, chip_hi, mb.hover), soft_s, if(muted, 1, 0))
-            glass: 25%; blur: 0%; light: 4%, 12, 14; shadow: 0, 1.2, 4, 20%
+            material: control; opacity: lgc_fill + 55% * if(muted, 1, 0)
             ellipse { at: 334, 26; radius: 13 - 0.5 * mb.pressed }
         }
         image ic_speaker_s { at: 327, 19; size: 14, 14; tint: ink; opacity: 85%; show: not muted }
@@ -58,7 +58,7 @@ part Mixer {
             move: ex0 + 16, 44
             zone ellipse mxb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
             body {
-                color: mix(chip, chip_hi, mxb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * mxb.hover - mxb.pressed, 4.2, 21%
+                color: mix(chip, chip_hi, mxb.hover); material: control
                 ellipse { at: 16, 18; radius: 16 - 0.6 * mxb.pressed }
             }
             path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * mxb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }

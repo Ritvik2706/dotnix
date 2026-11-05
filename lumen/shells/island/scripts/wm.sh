@@ -7,12 +7,19 @@
 #   wm.sh active-geom        the focused window as WxH+X+Y, in layout pixels
 #   wm.sh monitor            the focused monitor's name
 set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/niri-socket.sh"   # a niri restarted under us: its live socket
 
 if [[ -n ${NIRI_SOCKET:-} && -S $NIRI_SOCKET ]]; then
 	case ${1:-} in
 		windows)
-			# By position, the number on their Mod+N key (a project's named workspace too).
-			niri msg -j workspaces | jq -c 'map({key: (.id|tostring), value: (.idx|tostring)}) | from_entries' >"${XDG_RUNTIME_DIR:-/tmp}/wm-ws.json"
+			# The number on their Mod+N key: fixed homes by name; the rest, laptop first,
+			# are 6, then 11 up. Keep in step with wsl.numbers in island.luau.
+			niri msg -j workspaces | jq -c '
+				{browser: 1, terminal: 2, docs: 3, media: 4, tools: 5, "tv 7": 7, "tv 8": 8, "tv 9": 9, "tv 0": 10} as $f
+				| (map(select($f[(.name // "") | ascii_downcase] == null))
+					| sort_by((.output | startswith("eDP") | not), .idx) | to_entries
+					| map({key: (.value.id | tostring), value: (if .key == 0 then 6 else .key + 10 end)}) | from_entries) as $p
+				| map({key: (.id | tostring), value: (($f[(.name // "") | ascii_downcase] // $p[.id | tostring]) | tostring)}) | from_entries' >"${XDG_RUNTIME_DIR:-/tmp}/wm-ws.json"
 			niri msg -j windows | jq -r --slurpfile ws "${XDG_RUNTIME_DIR:-/tmp}/wm-ws.json" '
 				sort_by(-(.focus_timestamp.secs // 0), -(.focus_timestamp.nanos // 0)) | .[]
 				| [(.id|tostring), ($ws[0][(.workspace_id|tostring)] // "?"), (.app_id // ""), (.title // "")] | @tsv' ;;

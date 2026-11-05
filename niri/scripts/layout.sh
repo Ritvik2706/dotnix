@@ -15,10 +15,12 @@ set -uo pipefail
 
 FILE=${XDG_RUNTIME_DIR:-/tmp}/niri-layout.json
 MAX_AGE=120
-# From config.kdl's layout: struts left + right, gaps, border width. niri sizes
+# From niri/conf/layout.kdl: struts left + right, gaps, border width. niri sizes
 # a column at proportion p as p * (screen - struts - gap) - gap, border
 # included, which is what turns a window's pixels back into the p it was at.
 STRUTS=32 GAP=8 BORDER=2
+# The patched niri's CLI (the one on niri's PATH is stock, without auto-fit).
+AUTOFIT_NIRI=$HOME/.local/bin/niri
 
 case ${1:-} in
 save)
@@ -64,6 +66,15 @@ restore)
 			  else . end)
 		| .out')
 
+	# The TV's fixed workspaces go back by name, in saved order; the numbering
+	# below is the laptop's alone (idx restarts on each monitor).
+	jq -r '.[] | select((.name // "") | test("^TV [7890]$")) | [.id, .name] | @tsv' <<<"$plan" |
+		while IFS=$'\t' read -r id name; do
+			niri msg action move-window-to-workspace --window-id "$id" --focus false "$name"
+		done
+	plan=$(jq -c 'map(select((.name // "") | test("^TV [7890]$") | not))' <<<"$plan")
+	niri msg action focus-monitor eDP-2 2>/dev/null || true
+
 	# Saved workspaces, in order, become 1, 2, ...
 	order=$(jq -r '[.[].idx] | unique | .[]' <<<"$plan")
 	target=1
@@ -97,6 +108,12 @@ restore)
 				niri msg action set-column-width "$(jq -r .width <<<"$w")%"
 			fi
 		done <"$FILE.ws"
+
+		# With auto-fit (patched niri), the widths just set count as sized by
+		# hand and would stay pinned: hand the workspace (focused, from the
+		# loop above) back to auto-fit. Stock niri rejects the action; the
+		# restored widths then stay, as before.
+		"$AUTOFIT_NIRI" msg action auto-fit-columns >/dev/null 2>&1
 
 		[[ -n $name ]] && niri msg action set-workspace-name --workspace "$target" "$name"
 		target=$((target + 1))

@@ -1,0 +1,75 @@
+From d51a217f50024c301434b4df4ca42bd518c7e22d Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 02:43:06 +0400
+Subject: [PATCH 17/38] render: liquid glass edges show what is just outside,
+ bent in
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Matching an iOS reference (rings crossing a glass edge): lines bend toward
+the inside of the shape as they cross the rim, so the rim samples OUTWARD —
+the content just outside the glass, pulled in and squeezed. Outward
+sampling only compresses, so it never folds; the shift is
+min(thickness*(ior-1), bevel) * (1-x)^2. The traced Snell variant stays
+behind LENS_TRACED (off).
+---
+ src/render_helpers/shaders/liquid_glass.frag | 32 ++++++++++++++------
+ 1 file changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 450a2b33..8c02d151 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -147,17 +147,29 @@ float edge_slope(float u, float bevel, float thickness) {
+ 
+ // How far (px, inward) the backdrop shifts at `u` px in from the edge. A ray
+ // through glass of index `ior` this thick shifts about thickness * (ior - 1)
+-// at the rim. The shift falls off as (1 - x)^LENS_POWER across the bevel:
+-// content bends hard right at the rim and eases off inward, so it stays
+-// recognisable (a nearly linear falloff smeared the whole band into streaks),
+-// capped at LENS_CAP x bevel so the squeeze never reverses into a mirror
+-// image: its steepest slope, LENS_POWER * LENS_CAP, stays below 1.
+-#define LENS_POWER 1.6
+-#define LENS_CAP 0.6
++// at the rim, capped at LENS_CAP x bevel. The shift falls off as
++// (1 - x)^LENS_POWER across the bevel. It is taken OUTWARD (see main): the
++// rim shows what lies just outside the glass, pulled in and squeezed, so lines
++// crossing the edge bend toward the inside of the shape, as on Apple's glass;
++// outward sampling only compresses, so it never folds into mirror images.
++#define LENS_POWER 2.0
++#define LENS_CAP 1.0
++#define LENS_TRACED 0
+ float displacement(float u, float bevel, float thickness, float ior) {
+     float x = clamp(u / bevel, 0.0, 1.0);
++#if LENS_TRACED
++    // The physical trace: a ray straight down through the squircle surface
++    // refracts by Snell's law and lands h * tan(θ1 - θ2) further in. Nearest
++    // the rim it folds the backdrop over, which is the bright mirrored sliver
++    // of content running along the edge on Apple's glass.
++    float slope = edge_slope(u, bevel, thickness);
++    float t1 = atan(slope);
++    float t2 = asin(sin(t1) / ior);
++    return profile(max(x, 1e-3)) * thickness * tan(t1 - t2);
++#else
+     float peak = min(thickness * (ior - 1.0), LENS_CAP * bevel);
+     return peak * pow(1.0 - x, LENS_POWER);
++#endif
+ }
+ 
+ // The backdrop at c: frosted, or crisp by `clear` (0..1).
+@@ -217,10 +229,12 @@ void main() {
+     vec4 color;
+     float rim = 0.0;
+     if (bevel > 0.5 && thickness > 0.0 && u < bevel) {
+-        // Convex: rays converge, so each pixel shows what lies further in.
++        // The rim shows what lies just OUTSIDE the glass, pulled in and squeezed
++        // (Apple's edges bend lines toward the inside of the shape). Sampling
++        // outward only ever compresses, so it can't fold into mirror images.
+         slope = edge_slope(u, bevel, thickness);
+         float dg = displacement(u, bevel, thickness, 1.5);
+-        vec2 dir = inv * (-n / geo_size);
++        vec2 dir = inv * (n / geo_size);
+         // One material: the rim bends the same (frosted or clear) backdrop the
+         // middle shows. A crisp rim around a frosted middle reads as a seam,
+         // not as glass; Apple's edge is only a subtle optical shift.

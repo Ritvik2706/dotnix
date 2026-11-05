@@ -276,7 +276,7 @@ keybind = super+r=reload_config
 # 
 # On macOS, changing this configuration requires restarting Ghostty completely.
 # Smoked glass: niri frosts the wallpaper behind it (window rule in
-# niri/config.kdl), so the glow matches the borders and the island, while the
+# niri/conf/rules/look.kdl), so the glow matches the borders and the island, while the
 # near-black tint keeps code readable. Cells with their own background (tmux
 # pills, selections) stay opaque: a pill's rounded caps are glyphs, always
 # drawn opaque, so a translucent pill body wouldn't match its own ends.

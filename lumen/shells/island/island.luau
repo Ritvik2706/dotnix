@@ -94,17 +94,82 @@ local active_ws = 1
 -- (One table: the logic is at Luau's limit of 200 locals.)
 local wsl = { niri = sys.ask("env", "NIRI_SOCKET") ~= nil, armed = false, last = nil }
 after(500, function() fact.ws_vertical = wsl.niri; wsl.armed = true end)
+-- niri numbers workspaces per monitor; the rail shows the number on their Mod+N key,
+-- across both: fixed homes by name (0 is slot 10), the rest, laptop first, 6 then 11 up.
+-- Keep in step with `windows` in scripts/wm.sh.
+wsl.fixed = { browser = 1, terminal = 2, docs = 3, media = 4, tools = 5, ["tv 7"] = 7, ["tv 8"] = 8, ["tv 9"] = 9, ["tv 0"] = 10 }
+function wsl.numbers(list)
+    local plain = {}
+    for _, d in ipairs(list) do
+        d.n = wsl.fixed[string.lower(d.name or "")]
+        if not d.n then plain[#plain + 1] = d end
+    end
+    local function laptop(d) return string.sub(d.monitor or "", 1, 3) == "eDP" end
+    table.sort(plain, function(a, b)
+        if laptop(a) ~= laptop(b) then return laptop(a) end
+        return a.id < b.id
+    end)
+    for i, d in ipairs(plain) do d.n = i == 1 and 6 or i + 10 - 1 end
+end
+-- The island is on one monitor at a time, the one in use: it is one scene with one width
+-- and one state, so that is what makes it fit each screen and open only where you are. It
+-- goes where the focus goes, or where a strip calls it, and never out from under an open
+-- card or app: it waits for them to close. The other monitor shows its strip.
+wsl.LAPTOP = "eDP-2"
+function wsl.sizes()
+    run("niri", { "msg", "-j", "outputs" }, function(out)
+        local ok, o = pcall(json.decode, out or "")
+        if not ok or type(o) ~= "table" then return end
+        for name, m in pairs(o) do
+            local w = m.logical and m.logical.width
+            if w then
+                if name == wsl.LAPTOP then fact.st_lap_w = w else fact.st_tv_w = w end
+            end
+        end
+    end)
+end
+function wsl.hop(m)
+    if pcall(sys.call, "screens.only", m) then
+        wsl.mon = m
+        fact.isl_tv = m ~= wsl.LAPTOP
+        wsl.sizes()
+    end
+end
+function wsl.place()
+    if not wsl.want or wsl.want == wsl.mon then return end
+    if fact.expanded or fact.app ~= "none" then return end
+    wsl.hop(wsl.want)
+end
+on("fact:expanded", function() wsl.place() end)
+on("fact:app", function() wsl.place() end)
+on("isl_lap", function() wsl.want = wsl.LAPTOP; wsl.place() end)
+on("isl_tv_here", function() wsl.want = "HDMI-A-1"; wsl.place() end)
 sys.watch("workspaces", function(w)
-    local busy = {}
+    if wsl.niri then wsl.numbers(w.list) end
+    local busy, at, here = {}, {}, nil
     for _, d in ipairs(w.list) do
-        if d.windows > 0 then busy[d.id] = true end
+        local n = d.n or d.id
+        at[n] = d
+        if d.windows > 0 then busy[n] = true end
+        if d.focused then w.active = n; here = d.monitor end
+        if d.active and wsl.niri then
+            if d.monitor == wsl.LAPTOP then fact.st_lap_ws = n else fact.st_tv_ws = n end
+        end
+    end
+    wsl.at = at
+    if here and here ~= wsl.seen then
+        wsl.seen = here
+        wsl.want = here
+        -- A card left open behind you can't be reached (its keyboard stays on the other monitor).
+        if fact.expanded and fact.panel ~= "auth" and fact.app == "none" then fact.expanded = false end
+        wsl.place()
     end
     active_ws = w.active
     fact.ws_active = w.active
     if wsl.niri and wsl.armed and wsl.last and w.active ~= wsl.last and wsl.landed then wsl.landed(w) end
     wsl.last = w.active
     local count = 0
-    for i = 1, 10 do
+    for i = 1, 14 do
         local visible = busy[i] or i == w.active
         fact["ws." .. i .. ".there"] = visible
         if i == w.active then fact.ws_slot = count end
@@ -113,16 +178,21 @@ sys.watch("workspaces", function(w)
     fact.ws_count = math.max(1, count)
 end)
 
-on("go", function(i) sys.call("workspaces.focus", i) end)
--- The wheel over the workspaces walks them, one notch a step, within 1..10.
+function wsl.go(i)
+    local d = wsl.niri and wsl.at and wsl.at[i]
+    if d then sys.call("workspaces.focus_id", d.wid) else sys.call("workspaces.focus", i) end
+end
+on("go", wsl.go)
+-- The wheel over the workspaces walks them, one notch a step: to the next there is on niri.
 on("ws_step", function(notches)
-    local to = math.clamp(active_ws + (notches > 0 and 1 or -1), 1, 10)
-    if to ~= active_ws then sys.call("workspaces.focus", to) end
+    local step = notches > 0 and 1 or -1
+    local to = math.clamp(active_ws + step, 1, 14)
+    while wsl.niri and wsl.at and not wsl.at[to] and to > 1 and to < 14 do to += step end
+    if to ~= active_ws and (not wsl.niri or (wsl.at and wsl.at[to])) then wsl.go(to) end
 end)
 
 -- ── volume ──────────────────────────────────────────────────────────
 on("vol_step", function(notches) sys.call("audio.step", -0.05 * notches) end)
-on("mixer", function() run("pavucontrol", {}, nil, { output = false }) end)
 
 -- ── cpu and memory: no service for these, so /proc, every 5 s (waybar's pace),
 -- and only while the card that shows them is open (sampled again as it opens)
@@ -149,9 +219,16 @@ local function sample()
         end
     end)
 end
+-- The temperatures go with them, so the dGPU is only asked about while the card is open.
+function wsl.temps()
+    run(sys.ask("env", "HOME") .. "/.config/lumen/shells/island/scripts/temps.sh", {}, function(out)
+        local c, g = string.match(out or "", "(-?%d+)%s+(-?%d+)")
+        if c then fact.cpu_t = tonumber(c); fact.gpu_t = tonumber(g) end
+    end)
+end
 sample()
-every(5000, function() if fact.expanded then sample() end end)
-on("fact:expanded", function(e) if e then sample() end end)
+every(5000, function() if fact.expanded then sample(); wsl.temps() end end)
+on("fact:expanded", function(e) if e then sample(); wsl.temps() end end)
 
 -- ── Wi-Fi ───────────────────────────────────────────────────────────
 -- The page's rows, in order: the network in use first, then iwd's (strongest
@@ -220,10 +297,24 @@ sys.watch("network", function(n)
         end
     end
 
-    if n.wifi == false then text.wifi_label = "Off"
-    elseif active then text.wifi_label = active.ssid
-    elseif n.kind == "wired" and n.online then text.wifi_label = "Wired"
-    else text.wifi_label = "No network" end
+    -- The cable: whether there is one, and whether it is the way out now (it is, when it is
+    -- connected: it is preferred over the wifi). The home pill says what is in use.
+    local w = n.wired or "none"
+    fact.eth = (w == "unplugged" and 1) or (w == "off" and 2) or (w == "on" and 3) or 0
+    fact.eth_used = n.kind == "wired" and n.online == true
+    text.eth_name = (n.wired_name or "") ~= "" and n.wired_name or "Ethernet"
+    text.net_page = fact.eth > 0 and "Internet" or "Wi-Fi"
+    text.eth_state = fact.eth == 1 and "No cable" or (fact.eth == 2 and "Off · using Wi-Fi")
+        or (fact.eth == 3 and (fact.eth_used and "Connected" or "Connected · not in use")) or ""
+    if fact.eth_used then
+        text.net_title = text.eth_name == "USB Ethernet" and "USB LAN" or "Ethernet"
+        text.wifi_label = "Connected"
+    else
+        text.net_title = "Wi-Fi"
+        if n.wifi == false then text.wifi_label = "Off"
+        elseif active then text.wifi_label = active.ssid
+        else text.wifi_label = "No network" end
+    end
     show_nets()
 end)
 
@@ -285,6 +376,21 @@ on("wifi_forget", function(i)
     show_nets()
 end)
 on("wifi_power", function() pcall(sys.call, "network.wifi", not fact.wifi_on) end)
+-- The cable on or off: off, the wifi is the way out (turned on if it was not).
+on("eth_toggle", function()
+    local off = fact.eth == 3
+    if off and not fact.wifi_on then pcall(sys.call, "network.wifi", true) end
+    pcall(sys.call, "network.wired", not off)
+end)
+-- The home pill's bead: off goes the connection in use (the cable: to the wifi).
+on("net_power", function()
+    if fact.eth_used then
+        if not fact.wifi_on then pcall(sys.call, "network.wifi", true) end
+        pcall(sys.call, "network.wired", false)
+    else
+        pcall(sys.call, "network.wifi", not fact.wifi_on)
+    end
+end)
 on("wifi_scan", function()
     if not fact.wifi_on then return end
     pcall(sys.call, "network.scan")
@@ -598,13 +704,14 @@ on("clip_scroll", function(w)
     clip_show()
 end)
 
--- Something chosen in a tool beside a large view goes into it: WhatsApp's field (a picture as a
--- file to send), the mail's reply; elsewhere it is only copied. Then the tool closes, the view stays.
+-- Something chosen in the pill's card (the clipboard, the emoji) while an app is up goes into it:
+-- WhatsApp's field (a picture as a file to send), the mail's reply; elsewhere it is only copied.
+-- Then the card closes, and the app has the keys again.
 local function side_put(words, picture)
-    if fact.panel == "wa" and fact.wa_open then
+    if fact.app == "wa" and fact.wa_open then
         if picture then wa_hook.stage(picture) else wa_hook.insert(words) end
         return true
-    elseif fact.panel == "mailx" and fact.mr_rep and words then
+    elseif fact.app == "mailx" and fact.mr_rep and words then
         text.mr_in = (text.mr_in or "") .. words
         return true
     end
@@ -614,11 +721,9 @@ local function clip_take(i)
     local c = clip_hits[i + 1]
     if not c then return end
     pcall(sys.call, "clipboard.pick", c.id)
-    if fact.side then
+    if fact.app ~= "none" then
         local words = c.kind ~= "image" and (clip_full[c.id] or c.text) or nil
         side_put(words and string.gsub(words, "[\r\n\t]+", " ") or nil, c.kind == "image" and c.image or nil)
-        fact.side = false
-        return
     end
     fact.expanded = false
 end
@@ -633,13 +738,17 @@ on("clip_del_row", function(i) clip_forget(clip_off + i) end)
 on("clip_clear", function() pcall(sys.call, "clipboard.clear") end)
 
 -- ── launcher ────────────────────────────────────────────────────────
--- Apps by name, ranked the way the eye expects (a name that starts with what
+-- Super+D: a search pill. Nothing shows until something is typed; then the
+-- system's switches (Do Not Disturb, Night Light, Keep Awake, the keyboard's
+-- light, the power mode, mute, brightness/volume with a number, Wi-Fi and
+-- Bluetooth, and the session: lock, sleep, restart, shut down, log out, firmware
+-- setup, switch compositor; the Trash, and emptying it) answer alongside the apps. Apps by name, ranked the way the eye expects (a name that starts with what
 -- was typed, then a word in it that does, then anywhere, then the letters in
 -- order) and nudged by how often each was launched. A leading space searches
 -- files under home with fd instead; Tab goes into a folder, Shift+Tab out.
 -- Like the clipboard, the scene only ever gets the five rows in sight.
 local HOME = sys.ask("env", "HOME") or ""
-local LAUNCH_ROWS = 5
+local LAUNCH_ROWS = 6
 local apps_all, launch_hits = {}, {}
 local launch_sel, launch_off = 0, 0
 -- What it learns, kept in the scene's folder: when each app was launched (the
@@ -650,6 +759,9 @@ store.queries = store.queries or {}
 store.files = store.files or {}
 local function save_store() pcall(sys.call, "files.write", "launches.json", store) end
 
+-- (scoped: the logic sits at Luau's limit of 200 top-level locals)
+local frecency
+do
 local DAY = 86400
 local function hour_of(t)
     local ok, d = pcall(os.date, "*t", t)
@@ -658,7 +770,7 @@ end
 -- How much an app is "yours" right now: every launch counts, the recent ones
 -- more (a week fades it to a third), and those made near this hour of the day
 -- more again, so the morning's apps lead in the morning.
-local function frecency(key)
+frecency = function(key)
     local times = store.apps[key]
     if not times then return 0 end
     local now, hour, f = os.time(), hour_of(os.time()), 0
@@ -668,6 +780,7 @@ local function frecency(key)
         f += math.exp(-(now - t) / (6 * DAY)) * (dh <= 2 and 1.6 or 1)
     end
     return f
+end
 end
 -- What past searches say about this one: an app picked after typing something
 -- that begins the same way as what is typed now.
@@ -698,7 +811,8 @@ local function launch_show()
     local rows = {}
     for i = launch_off + 1, math.min(launch_off + LAUNCH_ROWS, n) do
         local h = launch_hits[i]
-        rows[#rows + 1] = { kind = h.kind, name = h.name, sub = h.sub or "", has_sub = (h.sub or "") ~= "", icon = h.icon or "", sel = (i - 1) == launch_sel }
+        rows[#rows + 1] = { kind = h.kind, name = h.name, sub = h.sub or "", has_sub = (h.sub or "") ~= "", icon = h.icon or "", sel = (i - 1) == launch_sel,
+            sk = h.sk or 0, on = h.on == true, val = h.val or "" }
     end
     model.hits = rows
     fact.launch_total = n
@@ -722,19 +836,250 @@ local function score(low, q)
     return 20 - #low * 0.1
 end
 
+-- The system, as results. Each: its name, more words that find it, and its
+-- symbol in the row (`sk`, pages/launcher.plm). A switch flips in place and the
+-- search stays open, so several can be set in a row; Esc closes.
+-- (one table: the logic is at Luau's limit of 200 top-level locals)
+local lx = { act = {} }     -- act: handlers the launcher calls (a logic's own emit never reaches its own on())
+lx.audio_muted = false
+sys.watch("audio", function(a) if a then lx.audio_muted = a.muted == true end end)
+lx.SETTINGS = {
+    { sk = 1, name = "Do Not Disturb", words = { "focus", "dnd", "silence", "notifications", "quiet" } },
+    { sk = 2, name = "Night Light", words = { "warm", "blue light", "night shift", "filter" } },
+    { sk = 3, name = "Keep Awake", words = { "caffeine", "amphetamine", "sleep", "inhibit", "awake" } },
+    { sk = 4, name = "Keyboard Light", words = { "backlight", "keyboard", "kbd" } },
+    { sk = 5, name = "Power Saver", words = { "power mode", "battery", "saver", "low power", "profile" } },
+    { sk = 6, name = "Balanced", words = { "power mode", "profile" } },
+    { sk = 7, name = "Performance", words = { "power mode", "boost", "profile", "turbo" } },
+    { sk = 27, name = "Automatic Mode", words = { "laptop mode", "fans", "follow charger", "default" } },
+    { sk = 28, name = "Silent Mode", words = { "laptop mode", "fans", "quiet", "public", "library", "noise", "cool" } },
+    { sk = 29, name = "Balanced Mode", words = { "laptop mode", "fans" } },
+    { sk = 30, name = "Gaming Mode", words = { "laptop mode", "fans", "full power", "fast", "max" } },
+    { sk = 8, name = "Mute", words = { "sound", "audio", "silent", "unmute" } },
+    { sk = 9, name = "Brightness", words = { "screen", "display", "bright" } },
+    { sk = 10, name = "Volume", words = { "sound", "audio", "vol", "loudness" } },
+    { sk = 11, name = "Wi-Fi", words = { "wifi", "network", "internet", "wireless" } },
+    { sk = 12, name = "Bluetooth", words = { "bt", "headphones", "devices", "pair" } },
+    { sk = 13, name = "Lock Screen", words = { "lock", "away" } },
+    { sk = 14, name = "Sleep", words = { "suspend", "sleep" } },
+    { sk = 15, name = "Restart", words = { "reboot" } },
+    { sk = 16, name = "Shut Down", words = { "shutdown", "poweroff", "power off", "turn off", "halt" } },
+    { sk = 17, name = "Log Out", words = { "logout", "sign out", "exit", "end session" } },
+    { sk = 18, name = "Firmware Setup", words = { "bios", "uefi", "reboot to firmware" } },
+    { sk = 19, name = "Switch Compositor", words = { "niri", "hyprland", "wm", "window manager" } },
+    { sk = 25, name = "Trash", words = { "bin", "recycle", "rubbish", "deleted files", "restore" } },
+    { sk = 26, name = "Empty Trash", words = { "empty bin", "clear trash" } },
+}
+-- What ends the session, or cannot be undone, asks twice, as the card's buttons want a hold: a word half
+-- typed and Enter must not restart the computer. The first press arms the row (lit,
+-- saying so), the second acts; moving, typing, closing or a few seconds disarm it.
+lx.SESSION = {
+    [15] = { verb = "restart", sub = "Restart the computer", go = function() pcall(sys.call, "session.reboot") end },
+    [16] = { verb = "shut down", sub = "Turn the computer off", go = function() pcall(sys.call, "session.poweroff") end },
+    [17] = { verb = "log out", sub = "End this session", go = function() pcall(sys.call, "session.logout") end },
+    [18] = { verb = "restart into firmware", sub = "Restart into the BIOS", go = function() run("systemctl", { "reboot", "--firmware-setup" }, nil, { output = false }) end },
+    [19] = { verb = "switch", sub = "Hyprland ⇄ niri · windows close and come back", go = function() run(HOME .. "/.config/lumen/shells/island/scripts/switch-wm.sh", {}, nil, { output = false }) end },
+    [26] = { verb = "delete it all for good", sub = "Delete what is in it for good", go = function() run("gio", { "trash", "--empty" }, nil, { output = false }) end },
+}
+lx.armed, lx.arm_gen = nil, 0
+-- Sites a prefix searches, in the default browser: `yt cats`.
+lx.SITES = {
+    { p = "yt", name = "YouTube", url = "https://www.youtube.com/results?search_query=%s" },
+    { p = "g", name = "Google", url = "https://www.google.com/search?q=%s" },
+    { p = "ddg", name = "DuckDuckGo", url = "https://duckduckgo.com/?q=%s" },
+    { p = "gh", name = "GitHub", url = "https://github.com/search?q=%s&type=repositories" },
+    { p = "w", name = "Wikipedia", url = "https://en.wikipedia.org/w/index.php?search=%s" },
+    { p = "r", name = "Reddit", url = "https://www.reddit.com/search/?q=%s" },
+    { p = "aw", name = "Arch Wiki", url = "https://wiki.archlinux.org/index.php?search=%s" },
+    { p = "aur", name = "AUR", url = "https://aur.archlinux.org/packages?K=%s" },
+    { p = "maps", name = "Google Maps", url = "https://www.google.com/maps/search/%s" },
+    { p = "tr", name = "Translate", url = "https://translate.google.com/?sl=auto&tl=en&text=%s" },
+    { p = "npm", name = "npm", url = "https://www.npmjs.com/search?q=%s" },
+    { p = "crates", name = "crates.io", url = "https://crates.io/search?q=%s" },
+    { p = "amz", name = "Amazon", url = "https://www.amazon.com/s?k=%s" },
+    { p = "img", name = "Google Images", url = "https://www.google.com/search?tbm=isch&q=%s" },
+}
+lx.SITE_BY = {}
+-- The default browser's window class (zen.desktop → zen), to bring it forward after opening.
+lx.browser = "zen"
+run("xdg-settings", { "get", "default-web-browser" }, function(out)
+    local id = string.match(out or "", "^%s*(.-)%.desktop")
+    if id and id ~= "" then lx.browser = id end
+end)
+for _, st in ipairs(lx.SITES) do lx.SITE_BY[st.p] = st end
+lx.urlencode = function(str)
+    return (string.gsub(str, "[^%w%-_%.~]", function(c) return string.format("%%%02X", string.byte(c)) end))
+end
+-- A sum, read by hand (the sandbox has no `load`): + - * / % ^, brackets, pi.
+lx.calc = function(expr)
+    local e = string.gsub(string.gsub(expr, "%s+", ""), "×", "*")
+    e = string.gsub(e, "pi", "(3.14159265358979)")
+    if e == "" or string.find(e, "[^%d%.%+%-%*/%%%^%(%)]") then return nil end
+    if not string.find(e, "[%+%-%*/%%%^]") then return nil end    -- a bare number is not a sum
+    local i = 1
+    local expr_
+    local function num()
+        local m = string.match(e, "^%d*%.?%d+", i)
+        if not m then return nil end
+        i += #m
+        return tonumber(m)
+    end
+    local function atom()
+        local c = string.sub(e, i, i)
+        if c == "(" then
+            i += 1
+            local v = expr_()
+            if string.sub(e, i, i) ~= ")" then return nil end
+            i += 1
+            return v
+        elseif c == "-" then i += 1; local v = atom(); return v and -v
+        elseif c == "+" then i += 1; return atom()
+        end
+        return num()
+    end
+    local function power()
+        local b = atom()
+        if b == nil then return nil end
+        if string.sub(e, i, i) == "^" then
+            i += 1
+            local x = power()
+            if x == nil then return nil end
+            return b ^ x
+        end
+        return b
+    end
+    local function term()
+        local v = power()
+        while v ~= nil do
+            local c = string.sub(e, i, i)
+            if c ~= "*" and c ~= "/" and c ~= "%" then break end
+            i += 1
+            local r = power()
+            if r == nil then return nil end
+            v = c == "*" and v * r or (c == "/" and v / r or v % r)
+        end
+        return v
+    end
+    expr_ = function()
+        local v = term()
+        while v ~= nil do
+            local c = string.sub(e, i, i)
+            if c ~= "+" and c ~= "-" then break end
+            i += 1
+            local r = term()
+            if r == nil then return nil end
+            v = c == "+" and v + r or v - r
+        end
+        return v
+    end
+    local ok, v = pcall(expr_)
+    if not ok or v == nil or i <= #e or v ~= v or v == math.huge or v == -math.huge then return nil end
+    if math.abs(v - math.floor(v + 0.5)) < 1e-9 then return string.format("%d", math.floor(v + 0.5)) end
+    return (string.gsub(string.format("%.8f", v), "%.?0+$", ""))
+end
+-- What the typed text asks for besides apps and settings: a site's search, a sum,
+-- an address, a command. Each a row (kind 3) that knows what Enter does.
+lx.search_specials = function(raw)
+    local rows = {}
+    local q = string.gsub(raw, "^%s+", "")
+    -- `?`: the prefixes there are; Enter or Tab writes one into the field.
+    if q == "?" then
+        for _, st in ipairs(lx.SITES) do
+            rows[#rows + 1] = { kind = 3, sk = 20, name = st.name, sub = "Search " .. st.name, val = st.p, fill = st.p .. " " }
+        end
+        return rows, true
+    end
+    local p, rest = string.match(q, "^(%S+)%s+(.+)$")
+    local site = p and lx.SITE_BY[string.lower(p)]
+    if site then
+        rows[#rows + 1] = { kind = 3, sk = 20, name = rest, sub = "Search " .. site.name, val = site.p, url = string.format(site.url, lx.urlencode(rest)) }
+        return rows, true
+    end
+    if not p and lx.SITE_BY[string.lower(q)] then
+        local st = lx.SITE_BY[string.lower(q)]
+        rows[#rows + 1] = { kind = 3, sk = 20, name = st.name, sub = "Type what to search after “" .. st.p .. " ”  ·  Tab", val = st.p, fill = st.p .. " " }
+    end
+    local sum = lx.calc(string.gsub(q, "^=", ""))
+    if sum then
+        rows[#rows + 1] = { kind = 3, sk = 21, name = sum, sub = (string.gsub(q, "^=%s*", "")) .. "  ·  Enter copies", val = "", copy = sum }
+        return rows, true
+    end
+    if string.sub(q, 1, 1) == ">" then
+        local cmd = string.gsub(string.sub(q, 2), "^%s+", "")
+        if cmd ~= "" then rows[#rows + 1] = { kind = 3, sk = 22, name = cmd, sub = "Run in the background", val = "", cmd = cmd } end
+        return rows, true
+    end
+    -- An address: something.tld, maybe with a path, or a full URL.
+    if string.match(q, "^https?://%S+$") or string.match(q, "^[%w%-]+%.[%w%-%.]*%a%a+[/%S]*$") then
+        local url = string.match(q, "^https?://") and q or ("https://" .. q)
+        rows[#rows + 1] = { kind = 3, sk = 23, name = q, sub = "Open in the browser", val = "", url = url }
+    end
+    return rows, false
+end
+for _, st in ipairs(lx.SETTINGS) do st.low = string.lower(st.name) end
+lx.PROFILES = { [5] = "saver", [6] = "balanced", [7] = "performance" }
+-- The laptop's mode is razer-fan.py's (dotnix/razer): silent, gaming and so on, or
+-- automatic, following the charger. Its note says which is pinned; no note, none is.
+lx.MODES = { [27] = "auto", [28] = "silent", [29] = "balanced", [30] = "gaming" }
+lx.mode_read = function()
+    run("cat", { sys.ask("env", "XDG_RUNTIME_DIR") .. "/razer-fan.json" }, function(out)
+        lx.laptop_mode = string.match(out or "", '"mode": "(%a+)"') or "auto"
+    end)
+end
+lx.mode_set = function(m)
+    lx.laptop_mode = m
+    run(sys.ask("env", "HOME") .. "/github/config/dotnix/razer/razer-fan.py", { "mode", m }, nil, { output = false })
+end
+-- What its row says: on (lit, its switch on) and what stands at its right.
+lx.setting_row = function(st, n)
+    local on, sub, val = false, "", ""
+    if st.sk == 1 then on = fact.dnd == true; sub = on and "On · banners held" or "Off"
+    elseif st.sk == 2 then on = fact.night == true; sub = on and "On" or "Off"
+    elseif st.sk == 3 then on = fact.awake == true; sub = on and (text.awake_left or "On") or "Off · choose how long"
+    elseif st.sk == 4 then on = (fact.kbd or 0) > 0.01; val = tostring(math.floor((fact.kbd or 0) * 100 + 0.5)) .. "%"; sub = "Off, half, full"
+    elseif lx.PROFILES[st.sk] then on = fact.profile == lx.PROFILES[st.sk]; sub = on and "Power mode · current" or "Power mode"
+    elseif lx.MODES[st.sk] then on = lx.laptop_mode == lx.MODES[st.sk]; sub = on and "Laptop mode · current" or "Laptop mode"
+    elseif st.sk == 8 then on = lx.audio_muted; sub = on and "Sound is off" or "Sound is on"
+    elseif st.sk == 9 or st.sk == 10 then
+        local cur = st.sk == 9 and (fact.bright or 0) or nil
+        if n then sub = "Set to " .. n .. "%"; val = n .. "%"
+        else sub = "Add a number: " .. (st.sk == 9 and "brightness 60" or "volume 40")
+            if cur then val = tostring(math.floor(cur * 100 + 0.5)) .. "%" end
+        end
+    elseif st.sk == 11 or st.sk == 12 then sub = "Open"
+    elseif st.sk == 13 then sub = "Lock now"
+    elseif st.sk == 14 then sub = "Suspend the computer"
+    elseif st.sk == 25 then sub = "Open in the file manager"
+    elseif lx.SESSION[st.sk] then
+        on = lx.armed == st.sk
+        sub = on and ("Press again to " .. lx.SESSION[st.sk].verb) or lx.SESSION[st.sk].sub
+    end
+    return { kind = 3, sk = st.sk, on = on, name = st.name, sub = sub, val = val, num = n }
+end
+lx.search_settings = function(q)
+    local found = {}
+    -- "brightness 40", "vol 30": a level with its number.
+    local word, num = string.match(q, "^(%a+)%s*(%d+)%%?$")
+    num = num and math.min(100, tonumber(num)) or nil
+    for _, st in ipairs(lx.SETTINGS) do
+        local best = score(st.low, word and num and word or q)
+        for _, w in ipairs(st.words) do best = math.max(best, score(w, word and num and word or q) - 8) end
+        if num and st.sk ~= 9 and st.sk ~= 10 then best = 0 end
+        if best > 0 then found[#found + 1] = { s = best + 2, row = lx.setting_row(st, num) } end
+    end
+    return found
+end
+
 local function search_apps(q)
     local scored = {}
+    -- Nothing typed: nothing shown, the pill alone.
     if q == "" then
-        -- Nothing typed: suggestions, the apps that are most yours right now.
-        for _, a in ipairs(apps_all) do
-            local f = frecency(a.key)
-            if f > 0.05 then scored[#scored + 1] = { a = a, s = f } end
-        end
-        -- Until it has learned anything, everything, by name.
-        if #scored == 0 then
-            for _, a in ipairs(apps_all) do scored[#scored + 1] = { a = a, s = 0 } end
-        end
-    else
+        launch_hits = {}
+        fact.launch_state = 0
+        launch_show()
+        return
+    end
+    do
         for _, a in ipairs(apps_all) do
             local s = score(a.low, q)
             if s > 0 then
@@ -745,10 +1090,23 @@ local function search_apps(q)
             end
         end
     end
-    table.sort(scored, function(x, y) if x.s ~= y.s then return x.s > y.s end return x.a.low < y.a.low end)
+    for _, x in ipairs(lx.search_settings(q)) do scored[#scored + 1] = x end
+    local raw = text.launch_q or ""
+    local specials, only = lx.search_specials(raw)
+    if only then scored = {} end
+    table.sort(scored, function(x, y)
+        if x.s ~= y.s then return x.s > y.s end
+        return (x.row and x.row.name or x.a.low) < (y.row and y.row.name or y.a.low)
+    end)
     launch_hits = {}
+    for _, r in ipairs(specials) do launch_hits[#launch_hits + 1] = r end
     for _, x in ipairs(scored) do
-        launch_hits[#launch_hits + 1] = { kind = 0, name = x.a.name, icon = x.a.icon, app = x.a }
+        launch_hits[#launch_hits + 1] = x.row or { kind = 0, name = x.a.name, icon = x.a.icon, app = x.a }
+    end
+    -- Whatever it is, it can still be looked up on the web: the last row.
+    if not only then
+        local t = string.gsub(raw, "^%s+", "")
+        launch_hits[#launch_hits + 1] = { kind = 3, sk = 24, name = "Search the web for “" .. t .. "”", sub = "Google", val = "", url = string.format(lx.SITE_BY.g.url, lx.urlencode(t)) }
     end
     fact.launch_state = #launch_hits == 0 and 1 or 0
     launch_show()
@@ -842,25 +1200,104 @@ sys.watch("apps", function(list)
     if fact.panel == "launch" then launch_refresh() end
 end)
 
-on("text:launch_q", function() launch_sel, launch_off = 0, 0; launch_refresh() end)
+lx.disarm = function()
+    if lx.armed then lx.armed = nil; launch_refresh() end
+end
+on("text:launch_q", function() lx.armed = nil; launch_sel, launch_off = 0, 0; launch_refresh() end)
+on("fact:expanded", function(e) if not e then lx.armed = nil end end)
+on("fact:panel", function(p) if p == "launch" then lx.mode_read() end end)
+-- A switch changed (here, or by its key elsewhere): the rows say so.
+for _, f in ipairs({ "dnd", "night", "awake", "kbd", "profile", "bright" }) do
+    on("fact:" .. f, function() if fact.panel == "launch" and fact.expanded and (text.launch_q or "") ~= "" then launch_refresh() end end)
+end
 on("fact:panel", function(p)
     if p == "launch" then
         browse = nil
         text.launch_q = ""
+        lx.armed = nil
         launch_sel, launch_off = 0, 0
         launch_refresh()
     end
 end)
-on("launch_move", function(d) launch_sel += d; launch_show() end)
+on("launch_move", function(d) launch_sel += d; lx.disarm(); launch_show() end)
 on("launch_scroll", function(w)
     launch_off = math.clamp(launch_off + (w > 0 and -1 or 1), 0, math.max(0, #launch_hits - LAUNCH_ROWS))
     launch_sel = math.clamp(launch_sel, launch_off, launch_off + LAUNCH_ROWS - 1)
+    lx.disarm()
     launch_show()
 end)
 
 local function launch_take(i)
     local h = launch_hits[i + 1]
     if not h then return end
+    if h.kind == 3 and h.fill then
+        text.launch_q = h.fill
+        return
+    end
+    if h.kind == 3 and h.url then
+        run("xdg-open", { h.url }, nil, { output = false })
+        fact.expanded = false
+        -- …and over to the browser: the tab opens in its window, which does not come forward by
+        -- itself. Again a moment later, once the tab has landed (or a new window has opened).
+        local wm = HOME .. "/.config/lumen/shells/island/scripts/wm.sh"
+        run(wm, { "focus-class", lx.browser }, nil, { output = false })
+        after(450, function() run(wm, { "focus-class", lx.browser }, nil, { output = false }) end)
+        return
+    end
+    if h.kind == 3 and h.copy then
+        run("wl-copy", { h.copy }, nil, { output = false })
+        fact.expanded = false
+        return
+    end
+    if h.kind == 3 and h.cmd then
+        run("sh", { "-c", h.cmd }, nil, { output = false })
+        fact.expanded = false
+        return
+    end
+    if h.kind == 3 and lx.SESSION[h.sk] then
+        if lx.armed ~= h.sk then
+            lx.armed = h.sk
+            lx.arm_gen += 1
+            local gen = lx.arm_gen
+            after(4000, function() if gen == lx.arm_gen then lx.disarm() end end)
+            launch_refresh()
+            return
+        end
+        lx.armed = nil
+        fact.expanded = false
+        lx.SESSION[h.sk].go()
+        return
+    end
+    if h.kind == 3 and h.sk == 25 then
+        fact.expanded = false
+        run("thunar", { "trash:///" }, nil, { output = false })
+        return
+    end
+    if h.kind == 3 and (h.sk == 13 or h.sk == 14) then
+        fact.expanded = false
+        if h.sk == 13 then run("systemctl", { "--user", "start", "hyprlock.service" }, nil, { output = false })
+        else run("systemctl", { "suspend" }, nil, { output = false }) end
+        return
+    end
+    if h.kind == 3 then
+        -- A setting: it acts, the search stays (the row shows what it is now).
+        local k = h.sk
+        if k == 1 then lx.act.dnd_toggle()
+        elseif k == 2 then lx.act.night_toggle()
+        elseif k == 3 then emit("awake_tap"); return
+        elseif k == 4 then lx.act.kbd_cycle()
+        elseif lx.PROFILES[k] then lx.act.profile_set(k - 5)
+        elseif lx.MODES[k] then lx.mode_set(lx.MODES[k])
+        elseif k == 8 then pcall(sys.call, "audio.mute")
+        elseif k == 9 and h.num then lx.act.cc_bright(h.num / 100)
+        elseif k == 10 and h.num then lx.act.cc_vol(h.num / 100)
+        elseif k == 11 then fact.panel = "wifi"; return
+        elseif k == 12 then fact.panel = "bt"; return
+        end
+        -- Its new state takes a moment to come back (a command, a service): look again then.
+        after(250, function() if fact.panel == "launch" and fact.expanded then launch_refresh() end end)
+        return
+    end
     if h.kind == 0 then
         if pcall(sys.call, "apps.launch", h.app.exec) then
             local key = h.app.key
@@ -894,6 +1331,7 @@ on("launch_pick_row", function(i) launch_take(launch_off + i) end)
 -- Into the chosen folder, and back out (never above home).
 on("launch_into", function()
     local h = launch_hits[launch_sel + 1]
+    if h and h.fill then text.launch_q = h.fill; return end
     if not h or h.kind ~= 2 then return end
     browse = h.path
     launch_sel, launch_off = 0, 0
@@ -908,6 +1346,838 @@ on("launch_up", function()
     text.launch_q = " "
     launch_refresh()
 end)
+
+-- ── projects (Mod+A): sesh's list —tmux sessions, configs, zoxide's folders— ──
+-- niri's scripts/project.sh lists them (TSV: name, what to open, kind, path, 1 if
+-- it has a workspace) and opens one: its workspace, or a new one with a terminal
+-- on its tmux session. Typed letters narrow the list (all of them, in order, as
+-- fzf: the closest first); the chosen one shows on the right (sesh preview).
+;(function()
+    local ROWS = 8
+    local PROJECT = HOME .. "/.config/niri/scripts/project.sh"
+    local KIND = { tmux = 0, config = 1, zoxide = 2 }
+    local all, hits, sel, off = {}, {}, 0, 0
+    local pv_gen, pv_for = 0, nil
+    local function home(p) return (string.gsub(p or "", "^" .. string.gsub(HOME, "%p", "%%%0"), "~")) end
+    -- How well a query fits a name: 0 not at all; a prefix best, then a word in it, then the
+    -- letters in order with the fewest gaps.
+    local function score(name, q)
+        if q == "" then return 1 end
+        local n = string.lower(name)
+        if string.sub(n, 1, #q) == q then return 1000 - #n end
+        local at = string.find(n, q, 1, true)
+        if at then return 500 - at end
+        local i, gaps, last = 1, 0, 0
+        for c in string.gmatch(q, ".") do
+            local j = string.find(n, c, i, true)
+            if not j then return 0 end
+            if last > 0 then gaps += j - last - 1 end
+            last, i = j, j + 1
+        end
+        return math.max(1, 200 - gaps)
+    end
+    local function preview()
+        local h = hits[sel + 1]
+        if not h then
+            text.proj_pv_name, text.proj_pv_meta, text.proj_pv = "", "", ""
+            return
+        end
+        if pv_for == h.target then return end
+        pv_for = h.target
+        text.proj_pv_name = h.name
+        text.proj_pv_meta = (h.kind == 0 and "tmux session" or (h.kind == 1 and "Config" or "Folder"))
+            .. (h.path ~= "" and (" · " .. home(h.path)) or "") .. (h.open and " · open" or "")
+        pv_gen += 1
+        local gen = pv_gen
+        -- A moment after the choice settles: running through the list with ↓ does not run sesh each step.
+        after(120, function()
+            if gen ~= pv_gen then return end
+            run("sesh", { "preview", h.target }, function(out)
+                if gen ~= pv_gen then return end
+                out = string.gsub(out or "", "\27%[[%d;?]*[A-Za-z]", "")
+                local lines, n = {}, 0
+                for l in string.gmatch(out, "([^\n]*)\n?") do
+                    n += 1
+                    if n > 30 then break end
+                    lines[#lines + 1] = l
+                end
+                text.proj_pv = table.concat(lines, "\n")
+            end)
+        end)
+    end
+    local function show(dir)
+        local n = #hits
+        sel = math.clamp(sel, 0, math.max(0, n - 1))
+        -- A section's title is not chosen: past it, the way the choice was going.
+        local step = dir or 1
+        while hits[sel + 1] and hits[sel + 1].head do
+            if sel + step < 0 or sel + step >= n then step = -step end
+            sel += step
+            if sel < 0 or sel >= n then sel = 0; break end
+        end
+        if sel < off then off = sel end
+        if sel >= off + ROWS then off = sel - ROWS + 1 end
+        off = math.clamp(off, 0, math.max(0, n - ROWS))
+        local rows = {}
+        for i = off + 1, math.min(off + ROWS, n) do
+            local h = hits[i]
+            if h.head then
+                rows[#rows + 1] = { kind = 0, name = h.name, sub = "", open = false, cur = false, head = true, sel = false }
+            else
+                rows[#rows + 1] = { kind = h.kind, name = h.name, sub = h.info or (h.path ~= "" and home(h.path) or h.target),
+                    open = h.open and not h.cur, cur = h.cur == true, head = false, sel = (i - 1) == sel }
+            end
+        end
+        model.projs = rows
+        fact.proj_state = n == 0 and (#all == 0 and 2 or 1) or 0
+        if hits[sel + 1] and hits[sel + 1].head then return end
+        preview()
+    end
+    local function filter()
+        local q = string.lower(text.proj_q or "")
+        fact.proj_q_empty = q == ""
+        local tab = fact.proj_tab
+        local scored = {}
+        for k, p in ipairs(all) do
+            if tab == 0 or p.kind == tab - 1 then
+                local sc = score(p.name, q)
+                if sc == 0 and q ~= "" then sc = score(p.path, q) * 0.5 end
+                if sc > 0 then scored[#scored + 1] = { p = p, sc = sc, k = k } end
+            end
+        end
+        -- With a query, the closest first; without, as sesh lists them (sessions, configs, then by use).
+        if q ~= "" then table.sort(scored, function(a, b) if a.sc ~= b.sc then return a.sc > b.sc end return a.k < b.k end) end
+        hits = {}
+        if q == "" and tab == 0 then
+            -- Grouped, as iOS lists are: the sessions running (the latest first), then the rest.
+            local active, rest = {}, {}
+            for _, x in ipairs(scored) do
+                if x.p.kind == 0 then active[#active + 1] = x.p else rest[#rest + 1] = x.p end
+            end
+            table.sort(active, function(a, b) return (a.used or 0) > (b.used or 0) end)
+            if #active > 0 then hits[#hits + 1] = { head = true, name = "Active sessions" } end
+            for _, p in ipairs(active) do hits[#hits + 1] = p end
+            if #rest > 0 then hits[#hits + 1] = { head = true, name = "Projects" } end
+            for _, p in ipairs(rest) do hits[#hits + 1] = p end
+        else
+            for _, x in ipairs(scored) do hits[#hits + 1] = x.p end
+        end
+        sel, off = 0, 0
+        pv_for = nil
+        show()
+    end
+    local function load()
+        fact.proj_state = 2
+        run(PROJECT, { "list" }, function(out)
+            all = {}
+            local seen = {}
+            for line in string.gmatch(out or "", "[^\n]+") do
+                local name, target, kind, path, open = string.match(line, "^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)$")
+                -- zoxide repeats what is already a session or a config: once is enough.
+                if name and not seen[path ~= "" and path or target] then
+                    seen[path ~= "" and path or target] = true
+                    all[#all + 1] = { name = name, target = target, kind = KIND[kind] or 2, path = path, open = open == "1" }
+                end
+            end
+            -- What tmux says of the sessions running: windows, attached, when last used.
+            run("tmux", { "list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}" }, function(tout)
+                local now = os.time()
+                for line in string.gmatch(tout or "", "[^\n]+") do
+                    local sn, wn, att, act = string.match(line, "^([^\t]*)\t(%d+)\t(%d+)\t(%d+)$")
+                    for _, p in ipairs(all) do
+                        if sn and p.kind == 0 and (p.name == sn or p.target == sn) then
+                            local w = tonumber(wn)
+                            local ago = now - tonumber(act)
+                            local when = tonumber(att) > 0 and "attached"
+                                or (ago < 60 and "just now" or (ago < 3600 and (ago // 60) .. " min ago" or (ago < 86400 and (ago // 3600) .. " h ago" or (ago // 86400) .. " d ago")))
+                            p.info = w .. (w == 1 and " window · " or " windows · ") .. when
+                            p.used = tonumber(act)
+                            p.cur = tonumber(att) > 0
+                        end
+                    end
+                end
+                filter()
+            end)
+        end)
+    end
+    on("fact:panel", function(p)
+        if p == "proj" then
+            text.proj_q = ""
+            fact.proj_tab = 0
+            load()
+        end
+    end)
+    on("text:proj_q", filter)
+    -- (A fact set here does not call this logic's own handlers: filtered at once.)
+    on("proj_tab_at", function(k) fact.proj_tab = math.clamp(k, 0, 3); filter() end)
+    on("proj_tab_step", function(d) fact.proj_tab = (fact.proj_tab + d) % 4; filter() end)
+    on("proj_clear", function() text.proj_q = "" end)
+    on("proj_move", function(d) sel += d; show(d > 0 and 1 or -1) end)
+    on("proj_scroll", function(w) local d = w > 0 and -1 or 1; sel += d; show(d) end)
+    local function take(i)
+        local h = hits[i + 1]
+        if not h then return end
+        run(PROJECT, { "open", h.target }, nil, { output = false })
+        fact.expanded = false
+        fact.app = "none"
+    end
+    on("proj_pick", function() take(sel) end)
+    on("proj_pick_row", function(i) take(off + i) end)
+end)()
+
+-- ── storage (Controls → Storage, Mod+B): where the disk went, what can go ──
+-- scripts/storage.py does the measuring (gdu: about a second) and the cleaning;
+-- this only shows it. The page scans each time it opens and lets go of all of it
+-- when it closes: nothing runs, and nothing is kept, while it is not up.
+;(function()
+    local ROWS = 7
+    local SCRIPT = HOME .. "/.config/lumen/shells/island/scripts/storage.py"
+    local CLEAN_HUE = { trash = 4, pkg = 7, aur = 2, snap = 10, orphans = 8, journal = 9, cores = 4, dev = 3, thumbs = 5, olddl = 6 }
+    local data, stale = nil, false
+    local stack, list = {}, {}       -- the folders opened (each { title, items, path, hue, status }); the rows showing
+    local base = {}                  -- the rows of this level before the search narrows them
+    local bigdata = nil              -- the large files, once asked for (until the page closes or rescans)
+    local off, armed, sel = 0, -1, 0  -- sel: the row the keys are on (in `list`)
+    local sgen, lgen = 0, 0          -- a newer scan / folder makes an older answer moot
+    local rev_id = nil
+    local up = false                 -- the page is showing
+
+    local function home(p) return (string.gsub(p or "", "^" .. string.gsub(HOME, "%p", "%%%0"), "~")) end
+    local function call(args, cb)
+        run(SCRIPT, args, function(out, code)
+            local ok, t = pcall(json.decode, out or "")
+            if not ok or type(t) ~= "table" then t = { ok = false, msg = "storage.py failed (" .. tostring(code) .. ")" } end
+            cb(t)
+        end)
+    end
+
+    -- The search narrows whatever level shows: by name, or by what is under it.
+    local function refilter()
+        local q = string.lower(text.stor_q or "")
+        if q == "" then list = base; return end
+        list = {}
+        for _, it in ipairs(base) do
+            if string.find(string.lower(it.name or ""), q, 1, true) or string.find(string.lower(it.sub or ""), q, 1, true) then
+                list[#list + 1] = it
+            end
+        end
+    end
+
+    local function render(follow)
+        local n = #list
+        sel = math.clamp(sel, 0, math.max(0, n - 1))
+        -- The keys move the window to keep the chosen row in it; the wheel moves the window
+        -- and the chosen row comes along inside it.
+        if follow then
+            if sel < off then off = sel end
+            if sel >= off + ROWS then off = sel - ROWS + 1 end
+        end
+        off = math.clamp(off, 0, math.max(0, n - ROWS))
+        if not follow then sel = math.clamp(sel, off, math.max(off, math.min(n - 1, off + ROWS - 1))) end
+        local top = 1
+        for _, it in ipairs(list) do if (it.bytes or 0) > top then top = it.bytes end end
+        local rows = {}
+        for i = off + 1, math.min(off + ROWS, n) do
+            local it = list[i]
+            rows[#rows + 1] = { name = it.name, sub = it.sub or "", size = it.size or "", frac = (it.bytes or 0) / top,
+                hue = it.hue or 0, dir = it.dir == true, can_trash = it.trash == true, armed = (i - 1) == armed, root = it.root == true,
+                sel = (i - 1) == sel }
+        end
+        model.strows = rows
+    end
+
+    local load_big
+    -- The three tabs, at the top level.
+    local function overview()
+        base = {}
+        if fact.stor_tab == 2 then
+            if not bigdata then load_big(); return end
+            for _, f in ipairs(bigdata.items) do
+                base[#base + 1] = { name = f.name, sub = f.sub, size = f.size, bytes = f.bytes, hue = 7, dir = true, trash = f.trash, path = f.path, reveal = f.dir_path }
+            end
+            text.stor_status = bigdata.count .. " files of 100 MB or more · " .. bigdata.total .. " · a row opens its folder"
+            return
+        end
+        if not data then return end
+        if fact.stor_tab == 0 then
+            for _, c in ipairs(data.cats) do
+                base[#base + 1] = { name = c.name, sub = c.sub, size = c.size, bytes = c.bytes, hue = c.hue, dir = true, cat = c }
+            end
+            text.stor_status = "Press a category to see what's in it"
+        else
+            local snap = false
+            for _, c in ipairs(data.clean) do
+                snap = snap or c.id == "snap"
+                base[#base + 1] = { name = c.name, sub = c.sub, size = c.size, bytes = c.bytes, hue = CLEAN_HUE[c.id] or 0, dir = true, root = c.root, id = c.id }
+            end
+            text.stor_status = #base == 0 and "Nothing to clean up" or ("About " .. data.can_free .. " can be freed" .. (snap and ", plus old snapshots" or ""))
+        end
+    end
+
+    local function show_level()
+        local lv = stack[#stack]
+        fact.stor_depth = #stack
+        armed, off, sel = -1, 0, 0
+        fact.stor_can_open = lv ~= nil and lv.path ~= nil
+        if lv then
+            text.stor_crumb = lv.title
+            base = lv.items
+            text.stor_status = lv.status or ""
+        else
+            overview()
+        end
+        refilter()
+        render()
+    end
+
+    load_big = function()
+        if not up then return end
+        fact.stor_state = 1
+        text.stor_status = "Looking for large files…"
+        call({ "big" }, function(t)
+            if not up then return end
+            fact.stor_state = 0
+            if not t.items then text.stor_status = t.msg or "Couldn't look"; return end
+            bigdata = t
+            if #stack == 0 and fact.stor_tab == 2 and not fact.stor_rev then show_level() end
+        end)
+    end
+
+    local function scan(keep_status)
+        sgen += 1
+        local g = sgen
+        if not data then fact.stor_state = 1 end
+        call({ "scan" }, function(t)
+            if g ~= sgen or not up then return end
+            if not t.cats then
+                fact.stor_state = 3
+                text.stor_status = t.msg or ""
+                return
+            end
+            data, stale = t, false
+            fact.stor_state = #t.cats == 0 and 2 or 0
+            text.stor_used = t.used_h .. " used"
+            text.stor_free = t.free_h .. " free of " .. t.total_h
+            local segs = {}
+            for _, c in ipairs(t.cats) do segs[#segs + 1] = { w = 352 * c.bytes / math.max(1, t.total), hue = c.hue } end
+            model.stseg = segs
+            if #stack == 0 and not fact.stor_rev and fact.stor_tab ~= 2 then
+                local st = text.stor_status
+                overview()
+                refilter()
+                render()
+                if keep_status then text.stor_status = st end
+            end
+        end)
+    end
+
+    local function open_path(path, hue)
+        lgen += 1
+        local g = lgen
+        fact.stor_state = 1
+        call({ "ls", path }, function(t)
+            if g ~= lgen or not up then return end
+            fact.stor_state = 0
+            if not t.items then text.stor_status = t.msg or "Couldn't open that"; return end
+            local items = {}
+            for _, it in ipairs(t.items) do
+                local pct = t.bytes > 0 and math.floor(100 * it.bytes / t.bytes + 0.5) or 0
+                items[#items + 1] = { name = it.name, sub = (it.dir and "Folder" or "File") .. " · " .. pct .. "%", size = it.size,
+                    bytes = it.bytes, hue = hue, dir = it.dir, trash = it.trash, path = it.path }
+            end
+            stack[#stack + 1] = { title = t.shown, items = items, path = path, hue = hue, status = t.size .. " in " .. t.shown }
+            show_level()
+        end)
+    end
+
+    local function review(id)
+        local c
+        for _, x in ipairs(data and data.clean or {}) do if x.id == id then c = x end end
+        if not c then return end
+        rev_id = id
+        text.stor_rev_title = c.name
+        text.stor_rev_size = c.size
+        text.stor_rev_about = ""
+        text.stor_rev_text = "Looking…"
+        text.stor_rev_btn = "Clean up"
+        text.stor_crumb = "Clean up · review"
+        fact.stor_rev_root = c.root == true
+        fact.stor_rev = true
+        call({ "details", id }, function(t)
+            if rev_id ~= id then return end
+            text.stor_rev_about = t.about or t.msg or ""
+            text.stor_rev_text = t.text or ""
+            text.stor_rev_btn = t.button or "Clean up"
+        end)
+    end
+
+    -- Up: start from the top, scan. Closed: let go of everything.
+    local function enter()
+        if up then return end
+        up = true
+        if fact.stor_busy then return end   -- back from the password prompt: the review is still waiting
+        stack, list, base, armed, off, rev_id, bigdata = {}, {}, {}, -1, 0, nil, nil
+        fact.stor_depth, fact.stor_rev, fact.stor_state, fact.stor_can_open = 0, false, 0, false
+        text.stor_status, text.stor_q = "", ""
+        fact.stor_q_empty = true
+        if fact.stor_tab == 2 then load_big() end
+        render()
+        scan()
+    end
+    local function leave()
+        if not up then return end
+        up = false
+        if fact.stor_busy then return end
+        sgen += 1
+        lgen += 1
+        data, stack, list, base, rev_id, bigdata = nil, {}, {}, {}, nil, nil
+        model.strows, model.stseg = {}, {}
+        text.stor_rev_text, text.stor_used, text.stor_free = "", "", ""
+        fact.stor_depth, fact.stor_rev = 0, false
+    end
+    local function track()
+        if fact.expanded and fact.panel == "stor" then enter() else leave() end
+    end
+    on("fact:panel", track)
+    on("fact:expanded", track)
+
+    on("stor_tab_at", function(k)
+        fact.stor_tab = math.clamp(k, 0, 2)
+        show_level()
+    end)
+    on("stor_scroll", function(w)
+        off += w > 0 and -1 or 1
+        render(false)
+    end)
+    on("stor_up", function()
+        table.remove(stack)
+        show_level()
+        if #stack == 0 and stale then scan() end
+    end)
+    on("stor_rescan", function()
+        local lv = stack[#stack]
+        if lv and lv.path then
+            table.remove(stack)
+            open_path(lv.path, lv.hue)
+        end
+        if #stack == 0 and fact.stor_tab == 2 then bigdata = nil; load_big() end
+        scan(lv ~= nil)
+    end)
+    -- Typed: the list narrows (each letter; it is a list of a few hundred at most).
+    on("text:stor_q", function()
+        fact.stor_q_empty = (text.stor_q or "") == ""
+        off, armed, sel = 0, -1, 0
+        refilter()
+        render()
+    end)
+    on("stor_clear", function()
+        text.stor_q = ""
+        fact.stor_q_empty = true
+        off, armed, sel = 0, -1, 0
+        refilter()
+        render()
+    end)
+    -- The folder showing, or a large file's, in the file manager.
+    local function reveal(path)
+        if path then run("xdg-open", { path }, nil, { output = false }) end
+    end
+    -- o: the folder showing; at the top, the chosen large file's folder or the chosen folder.
+    on("stor_files", function()
+        local lv = stack[#stack]
+        if lv and lv.path then reveal(lv.path); return end
+        local it = list[sel + 1]
+        if it then reveal(it.reveal or (it.dir and it.path) or nil) end
+    end)
+    on("stor_move", function(d)
+        sel += d
+        render(true)
+    end)
+    on("stor_tab_step", function(d)
+        fact.stor_tab = (fact.stor_tab + d) % 3
+        show_level()
+    end)
+
+    local function pick_at(k)
+        local it = list[k + 1]
+        if not it then return end
+        if it.id then review(it.id); return end
+        if it.reveal then reveal(it.reveal); return end
+        local c = it.cat
+        if c then
+            if #c.members == 0 then
+                -- What the scan can't see is mostly snapshots: their clean-up.
+                if c.id == "hidden" then fact.stor_tab = 1; show_level(); review("snap") end
+                return
+            end
+            if #c.members == 1 and c.members[1].dir then open_path(c.members[1].path, c.hue); return end
+            local items = {}
+            for _, m in ipairs(c.members) do
+                items[#items + 1] = { name = m.name, sub = home(m.path), size = m.size, bytes = m.bytes, hue = c.hue, dir = m.dir, trash = m.trash, path = m.path }
+            end
+            stack[#stack + 1] = { title = c.name, items = items, hue = c.hue, status = c.size .. " · " .. c.sub }
+            show_level()
+        elseif it.dir and it.path then
+            open_path(it.path, it.hue)
+        end
+    end
+    on("stor_row", function(i) sel = off + i; pick_at(off + i) end)
+    on("stor_pick", function() pick_at(sel) end)
+
+    -- The Trash bead: the first press arms it (for three seconds), the second moves it.
+    local function trash_at(k, sure)
+        local it = list[k + 1]
+        if not it or not it.trash then return end
+        if armed ~= k and not sure then
+            armed = k
+            render()
+            after(3000, function() if armed == k then armed = -1; render() end end)
+            return
+        end
+        armed = -1
+        call({ "trash", it.path }, function(t)
+            text.stor_status = t.msg or ""
+            if t.ok then
+                for j, x in ipairs(base) do if x == it then table.remove(base, j) break end end
+                if it.reveal and bigdata then
+                    for j, f in ipairs(bigdata.items) do if f.path == it.path then table.remove(bigdata.items, j) break end end
+                end
+                stale = true
+                refilter()
+            end
+            render(true)
+        end)
+    end
+    -- The bead: press, then press again. dd: the second d is the confirmation.
+    on("stor_trash", function(i) trash_at(off + i, false) end)
+    on("stor_del", function() trash_at(sel, true) end)
+
+    on("stor_rev_cancel", function()
+        if fact.stor_busy then return end
+        fact.stor_rev, rev_id = false, nil
+        show_level()
+    end)
+    on("stor_rev_go", function()
+        if not rev_id or fact.stor_busy then return end
+        local id = rev_id
+        fact.stor_busy = true
+        call({ "clean", id }, function(t)
+            fact.stor_busy = false
+            fact.stor_rev, rev_id = false, nil
+            if not up then return end
+            show_level()
+            text.stor_status = t.msg or (t.ok and "Done" or "That didn't work")
+            scan(true)
+        end)
+    end)
+end)()
+
+-- ── activity (Controls → Activity, Mod+X): a task manager ──
+-- lumen's `processes` (src/platform/procs.rs) reads /proc when asked: every 2 s
+-- while the page is up, never otherwise. niri says which process owns each window
+-- (`niri msg -j windows`, every 10 s), and a window's process tree is one app.
+-- A terminal's is not: what runs inside one shows as itself.
+;(function()
+    local POLL, ROWS, SPARK = 2000, 7, 44
+    local TERMINALS = { ghostty = true, kitty = true, foot = true, alacritty = true, wezterm = true, ["wezterm-gui"] = true,
+        konsole = true, ["gnome-terminal-"] = true, ["xwayland-satell"] = true }
+    -- What the session stands on: shown, never with a quit bead (quitting niri ends the session).
+    local ESSENTIAL = { niri = true, lumen = true, systemd = true, ["(sd-pam)"] = true, ["dbus-broker"] = true,
+        ["dbus-broker-lau"] = true, ["dbus-daemon"] = true, pipewire = true, ["pipewire-pulse"] = true, wireplumber = true,
+        ["xwayland-satell"] = true, Xwayland = true, ["xdg-desktop-por"] = true, ["xdg-document-po"] = true,
+        ["xdg-permission-"] = true, ["gnome-keyring-d"] = true, hyprlock = true, hypridle = true, ["at-spi-bus-laun"] = true,
+        ["at-spi2-registr"] = true, ["polkitd"] = true, ["niri-launch.sh"] = true }
+    local up, gen, ticks = false, 0, 0
+    local wins = {}            -- pid -> app id, of the processes with windows
+    local groups, list = {}, {}
+    local hist = {}
+    local depth_key = nil      -- the group opened
+    local sel_key, sel_i = nil, 0  -- the row the keys are on: by what it is (the list re-sorts every tick)
+    local follow = false       -- the next render brings the chosen row into the window
+    local off, armed = 0, nil  -- armed: the key whose quit bead was pressed once
+    local asked = {}           -- key -> when it was asked to quit (then the bead forces)
+    local snap = nil
+
+    local function human(b)
+        if b >= 1e9 then return string.format("%.1f GB", b / 1e9) end
+        if b >= 1e6 then return string.format("%.0f MB", b / 1e6) end
+        return string.format("%.0f KB", b / 1e3)
+    end
+    local function pct(c) return c >= 10 and string.format("%.0f%%", c) or string.format("%.1f%%", c) end
+    local function pretty(id)
+        local last = string.match(id or "", "([^%.]+)$") or id or "?"
+        last = string.gsub(last, "[-_]", " ")
+        return (string.gsub(last, "^%l", string.upper))
+    end
+
+    local function windows()
+        run("niri", { "msg", "-j", "windows" }, function(out)
+            local ok, t = pcall(json.decode, out or "")
+            if not ok or type(t) ~= "table" then return end
+            local w = {}
+            for _, x in ipairs(t) do if x.pid then w[x.pid] = x.app_id or "" end end
+            wins = w
+        end)
+    end
+
+    -- Every process into a group: the window it hangs from, or its own name.
+    local function regroup()
+        local by = {}
+        for _, p in ipairs(snap.list) do by[p.pid] = p end
+        local root = {}
+        local function rootof(p)
+            local q, steps = p, 0
+            while q and steps < 64 do
+                if root[q.pid] ~= nil then return root[q.pid] end
+                if wins[q.pid] and (q == p or not TERMINALS[q.name]) then return q.pid end
+                q, steps = by[q.ppid], steps + 1
+            end
+            return false
+        end
+        local g = {}
+        for _, p in ipairs(snap.list) do
+            local r = rootof(p)
+            root[p.pid] = r
+            local key, name, app
+            if r then
+                key, name, app = "w" .. r, pretty(wins[r]), true
+            else
+                key, name, app = "n" .. p.name, p.name, false
+            end
+            local x = g[key]
+            if not x then
+                x = { key = key, name = name, app = app, cpu = 0, mem = 0, procs = {}, mine = true, root = r }
+                g[key] = x
+            end
+            x.cpu += p.cpu
+            x.mem += p.mem
+            x.mine = x.mine and p.mine and not ESSENTIAL[p.name]
+            x.procs[#x.procs + 1] = p
+        end
+        groups = g
+    end
+
+    -- By CPU, memory or name; `act_desc` turns it round (the first two biggest first, a name A to Z).
+    local function sorter(a, b)
+        local t, desc = fact.act_tab, fact.act_desc
+        if t == 2 then
+            local x, y = string.lower(a.name), string.lower(b.name)
+            if x ~= y then if desc then return x < y else return x > y end end
+            return a.mem > b.mem
+        end
+        local ka, kb = (t == 1 and a.mem or a.cpu), (t == 1 and b.mem or b.cpu)
+        local close = t == 1 and ka == kb or math.abs(ka - kb) <= 0.05
+        if not close then if desc then return ka > kb else return ka < kb end end
+        return a.mem > b.mem
+    end
+    -- The search: an app's name, any of its processes' names, or a pid.
+    local function matches(it, q)
+        if q == "" then return true end
+        if string.find(string.lower(it.name), q, 1, true) then return true end
+        for _, p in ipairs(it.all or {}) do
+            if string.find(string.lower(p.name), q, 1, true) or tostring(p.pid) == q then return true end
+        end
+        return it.pid ~= nil and tostring(it.pid) == q
+    end
+
+    local function render()
+        list = {}
+        local g = depth_key and groups[depth_key]
+        if depth_key and not g then depth_key = nil end   -- it quit
+        fact.act_depth = depth_key and 1 or 0
+        if g then
+            for _, p in ipairs(g.procs) do
+                list[#list + 1] = { key = "p" .. p.pid, pid = p.pid, name = p.name, sub = "pid " .. p.pid .. " · " .. p.threads .. (p.threads == 1 and " thread" or " threads"),
+                    cpu = p.cpu, mem = p.mem, mine = p.mine and not ESSENTIAL[p.name], app = false, group = false, pids = { p.pid }, all = { p } }
+            end
+            text.act_crumb = g.name .. " · " .. #g.procs .. (#g.procs == 1 and " process" or " processes")
+        else
+            for _, x in pairs(groups) do
+                local n = #x.procs
+                local pids = {}
+                -- An app is asked to quit through its main process (it closes its own children);
+                -- a group of loose processes, each of them.
+                if x.root then pids = { x.root } else for _, p in ipairs(x.procs) do pids[#pids + 1] = p.pid end end
+                list[#list + 1] = { key = x.key, name = x.name, sub = n == 1 and ("pid " .. x.procs[1].pid) or (n .. " processes"),
+                    cpu = x.cpu, mem = x.mem, mine = x.mine, app = x.app, group = n > 1 or x.app, pids = pids, all = x.procs }
+            end
+        end
+        local q = string.lower(text.act_q or "")
+        if q ~= "" then
+            local keep = {}
+            for _, it in ipairs(list) do if matches(it, q) then keep[#keep + 1] = it end end
+            list = keep
+        end
+        table.sort(list, sorter)
+        -- Where the chosen one is now; gone (it quit, or the search left it out), the same place.
+        local found = nil
+        for i, it in ipairs(list) do if it.key == sel_key then found = i - 1 break end end
+        sel_i = math.clamp(found or sel_i, 0, math.max(0, #list - 1))
+        sel_key = list[sel_i + 1] and list[sel_i + 1].key or nil
+        if follow then
+            if sel_i < off then off = sel_i end
+            if sel_i >= off + ROWS then off = sel_i - ROWS + 1 end
+            follow = false
+        end
+        off = math.clamp(off, 0, math.max(0, #list - ROWS))
+        local now = os.time()
+        local rows = {}
+        for i = off + 1, math.min(off + ROWS, #list) do
+            local it = list[i]
+            rows[#rows + 1] = { name = it.name, sub = it.sub, initial = string.upper(string.sub(it.name, 1, 1)), cpu = pct(it.cpu), mem = human(it.mem),
+                app = it.app, group = it.group, can_kill = it.mine, armed = armed == it.key,
+                force = asked[it.key] ~= nil and now - asked[it.key] >= 2, sel = it.key == sel_key }
+        end
+        model.acts = rows
+    end
+
+    local function machine()
+        text.act_cpu = string.format("%.0f%%", snap.cpu)
+        local k = snap.mem_total > 0 and snap.mem_used / snap.mem_total or 0
+        fact.act_mem_k = k
+        text.act_mem = human(snap.mem_used) .. " of " .. human(snap.mem_total)
+        local gpu = snap.gpu == "active" and "RTX awake" or (snap.gpu == "suspended" and "RTX asleep" or nil)
+        text.act_info = "Memory " .. string.format("%.0f%%", 100 * k)
+            .. (snap.swap_total > 0 and (" · Swap " .. human(snap.swap_used)) or "")
+            .. " · " .. snap.cores .. " threads" .. (gpu and (" · " .. gpu) or "")
+        text.act_count = snap.count .. " processes"
+        hist[#hist + 1] = snap.cpu / 100
+        while #hist > SPARK do table.remove(hist, 1) end
+        local s = {}
+        for i = 1, SPARK - #hist do s[i] = { h = 0 } end
+        for _, h in ipairs(hist) do s[#s + 1] = { h = h } end
+        model.actspark = s
+    end
+
+    local function tick(g)
+        if not up or g ~= gen then return end
+        local ok, t = pcall(sys.ask, "processes")
+        if ok and type(t) == "table" and t.list then
+            snap = t
+            if ticks % 5 == 0 then windows() end
+            ticks += 1
+            regroup()
+            machine()
+            -- Asked to quit and gone: forget it.
+            for k in pairs(asked) do if not groups[k] and not string.match(k, "^p") then asked[k] = nil end end
+            render()
+        else
+            text.act_status = "Can't read processes: " .. tostring(t)
+        end
+        -- The first answer has no CPU yet (it measures since the one before): the second comes sooner.
+        after(ticks <= 1 and 700 or POLL, function() tick(g) end)
+    end
+
+    local function enter()
+        if up then return end
+        up = true
+        gen += 1
+        ticks, off, armed, depth_key, asked, hist, sel_key, sel_i = 0, 0, nil, nil, {}, {}, nil, 0
+        fact.act_depth = 0
+        text.act_q = ""
+        fact.act_q_empty = true
+        text.act_status = "Updates every 2 seconds"
+        pcall(sys.call, "processes.reset")
+        windows()
+        tick(gen)
+    end
+    local function leave()
+        if not up then return end
+        up = false
+        gen += 1
+        snap, groups, list, hist, wins, asked = nil, {}, {}, {}, {}, {}
+        model.acts, model.actspark = {}, {}
+        pcall(sys.call, "processes.reset")
+    end
+    local function track()
+        if fact.expanded and fact.panel == "act" then enter() else leave() end
+    end
+    on("fact:panel", track)
+    on("fact:expanded", track)
+
+    on("act_tab_at", function(k)
+        k = math.clamp(k, 0, 2)
+        if fact.act_tab == k then fact.act_desc = not fact.act_desc else fact.act_tab, fact.act_desc = k, true end
+        off = 0
+        if snap then render() end
+    end)
+    on("text:act_q", function()
+        fact.act_q_empty = (text.act_q or "") == ""
+        off, armed, sel_key, sel_i = 0, nil, nil, 0
+        if snap then render() end
+    end)
+    on("act_clear", function()
+        text.act_q = ""
+        fact.act_q_empty = true
+        off = 0
+        if snap then render() end
+    end)
+    on("act_scroll", function(w)
+        off += w > 0 and -1 or 1
+        off = math.clamp(off, 0, math.max(0, #list - ROWS))
+        -- The chosen row comes along inside the window.
+        local i = math.clamp(sel_i, off, math.max(off, math.min(#list - 1, off + ROWS - 1)))
+        if list[i + 1] then sel_key, sel_i = list[i + 1].key, i end
+        render()
+    end)
+    on("act_up", function()
+        sel_key = depth_key            -- back on the app that was opened
+        depth_key, off, armed, follow = nil, 0, nil, true
+        render()
+    end)
+    local function open_at(k)
+        local it = list[k + 1]
+        if not it or not it.group or depth_key then return end
+        depth_key, off, armed, sel_key, sel_i = it.key, 0, nil, nil, 0
+        render()
+    end
+    on("act_row", function(i) local it = list[off + i + 1]; if it then sel_key, sel_i = it.key, off + i end; open_at(off + i) end)
+    on("act_pick", function() open_at(sel_i) end)
+    on("act_move", function(d)
+        if #list == 0 then return end
+        sel_i = math.clamp(sel_i + d, 0, #list - 1)
+        sel_key, follow = list[sel_i + 1].key, true
+        render()
+    end)
+    on("act_tab_step", function(d)
+        fact.act_tab, fact.act_desc = (fact.act_tab + d) % 3, true
+        off, follow = 0, true
+        if snap then render() end
+    end)
+    on("act_reverse", function()
+        fact.act_desc = not fact.act_desc
+        follow = true
+        if snap then render() end
+    end)
+    -- Quit: the bead armed then pressed, or dd (the second d is the confirmation); force: the
+    -- bead once the app was asked and is still there, or D.
+    local function quit(it, sure, force_now)
+        if not it or not it.mine then return end
+        local key = it.key
+        local force = force_now or (asked[key] ~= nil and os.time() - asked[key] >= 2)
+        if armed ~= key and not force and not sure then
+            armed = key
+            render()
+            after(3000, function() if armed == key then armed = nil; render() end end)
+            return
+        end
+        armed = nil
+        local args = { force and "-KILL" or "-TERM" }
+        local pids = force and it.all and {} or it.pids
+        if force and it.all then for _, p in ipairs(it.all) do pids[#pids + 1] = p.pid end end
+        for _, pid in ipairs(pids) do args[#args + 1] = tostring(pid) end
+        run("kill", args, nil, { output = false })
+        if force then
+            asked[key] = nil
+            text.act_status = "Forced " .. it.name .. " to quit"
+        else
+            asked[key] = os.time()
+            text.act_status = "Asked " .. it.name .. " to quit · press again (or D) to force it"
+        end
+        render()
+    end
+    on("act_quit", function(i) quit(list[off + i + 1], false, false) end)
+    on("act_del", function(f) quit(list[sel_i + 1], true, f == 1) end)
+end)()
 
 -- ── notifications ───────────────────────────────────────────────────
 -- The island is the desktop's notification server. Nothing expires by itself
@@ -930,11 +2200,12 @@ local batch = {}           -- the others that arrived while this banner showed
 -- Mute, remembered between runs.
 local settings = sys.ask("files.read", "settings.json", "json") or {}
 fact.dnd = settings.dnd == true
-on("dnd_toggle", function()
+lx.act.dnd_toggle = function()
     settings.dnd = not fact.dnd
     fact.dnd = settings.dnd
     pcall(sys.call, "files.write", "settings.json", settings)
-end)
+end
+on("dnd_toggle", lx.act.dnd_toggle)
 
 -- What apps send can carry a little markup (<b>, <a href>, &amp;): text only here.
 local function plain(s)
@@ -1026,7 +2297,8 @@ sys.watch("notifications", function(list)
         for _, n in ipairs(notes_all) do if n.id > seen_id then fresh[#fresh + 1] = n end end
         seen_id = newest.id
         local urgent = (newest.urgency or 1) >= 2
-        if not fact.expanded and (not fact.dnd or urgent) then
+        -- (With the card open, the banner shows at the top right; not over its own list of them.)
+        if not (fact.expanded and fact.panel == "notes") and (not fact.dnd or urgent) then
             if fact.banner and banner_note then batch[#batch + 1] = banner_note end
             for k = 2, #fresh do batch[#batch + 1] = fresh[k] end
             show_banner(newest)
@@ -1064,6 +2336,7 @@ local function open_note(n)
     pcall(sys.call, "notifications.dismiss", n.id)
 end
 on("note_open", function()
+    wsl.want = wsl.LAPTOP; wsl.place()   -- clicked on the laptop: it opens there
     if banner_note and banner_note.wa then wa_hook.open(banner_note.jid)
     elseif banner_note and banner_note.mail then mail_hook.open(banner_note.uid) else open_note(banner_note) end
     fact.banner = false
@@ -1277,10 +2550,10 @@ local function emo_take(i)
     table.insert(emo_recent, 1, h.e)
     while #emo_recent > 16 do table.remove(emo_recent) end
     pcall(sys.call, "files.write", "emoji.json", { recent = emo_recent })
-    -- Beside a large view: into its field, or copied.
-    if fact.side then
+    -- Over an app: into its field, or copied.
+    if fact.app ~= "none" then
         if not side_put(h.e) then pcall(sys.call, "clipboard.set", h.e) end
-        fact.side = false
+        fact.expanded = false
         return
     end
     pcall(sys.call, "clipboard.set", h.e)
@@ -1320,6 +2593,13 @@ end)
 on("kbd_step", function(notches) set_kbd(fact.kbd - 0.1 * notches) end)
 on("osd_mute", function() pcall(sys.call, "audio.mute") end)
 on("bright_step", function(notches) set_bright(fact.bright - 0.05 * notches) end)
+-- The controls under the calendar: their levels, and the keyboard light's dial.
+lx.act.cc_bright = function(v) set_bright(v) end
+on("cc_bright", lx.act.cc_bright)
+lx.act.cc_vol = function(v) pcall(sys.call, "audio.volume", v) end
+on("cc_vol", lx.act.cc_vol)
+lx.act.kbd_cycle = function() set_kbd(fact.kbd < 0.25 and 0.5 or (fact.kbd < 0.75 and 1 or 0)) end
+on("kbd_cycle", lx.act.kbd_cycle)
 
 -- ── wallpapers ──────────────────────────────────────────────────
 -- The pictures in the wallpapers folder, handed over nine at a time. Each gets
@@ -1580,9 +2860,11 @@ local SCRIPTS = HOME .. "/.config/lumen/shells/island/scripts/"
 function wsl.landed(w)
     local name = ""
     for _, d in ipairs(w.list) do
-        if d.id == w.active then name = d.name or "" end
+        if (d.n or d.id) == w.active then name = d.name or "" end
     end
-    local key = name ~= "" and ("special:" .. name) or tostring(math.floor(w.active))
+    -- niri lists windows by the workspace's number, named or not (wm.sh);
+    -- Hyprland's named ones are its special workspaces.
+    local key = (name ~= "" and not wsl.niri) and ("special:" .. name) or tostring(math.floor(w.active))
     run(SCRIPTS .. "windows.sh", {}, function(out)
         local icons, seen = {}, {}
         for line in string.gmatch(out or "", "[^\n]+") do
@@ -1599,7 +2881,7 @@ function wsl.landed(w)
         end
         for i = 1, 4 do text["ld_a" .. i] = icons[i] or "" end
         fact.ld_n = #icons
-        text.ld_name = name ~= "" and (string.upper(string.sub(name, 1, 1)) .. string.sub(name, 2)) or ("Desktop " .. math.floor(w.active))
+        text.ld_name = name ~= "" and (string.upper(string.sub(name, 1, 1)) .. string.sub(name, 2)) or ("Desktop " .. (w.active == 10 and 0 or math.floor(w.active)))
         fact.ld_seq = fact.ld_seq + 1
     end)
 end
@@ -1822,13 +3104,14 @@ end)
 
 -- ── toggles: night light, keep awake, power mode ────────────────
 local night_id, awake_id = nil, nil
-on("night_toggle", function()
+lx.act.night_toggle = function()
     if night_id then kill(night_id); night_id = nil; fact.night = false; return end
     -- hyprsunset speaks Hyprland's own protocol; elsewhere (niri) wlsunset, held at 4500 K.
     local night = sys.ask("env", "HYPRLAND_INSTANCE_SIGNATURE") and { "hyprsunset", { "-t", "4500" } } or { "wlsunset", { "-t", "4500", "-T", "4501" } }
     night_id = spawn(night[1], night[2], function() end, function() night_id = nil; fact.night = false end)
     fact.night = true
-end)
+end
+on("night_toggle", lx.act.night_toggle)
 -- Keep Awake: an inhibitor held by `sleep`, for as long as was chosen (or
 -- until turned off); the button counts down what is left, a minute at a time.
 local awake_until, awake_gen = 0, 0
@@ -1872,7 +3155,16 @@ on("profile_next", function()
     local to = PROFILE_NEXT[fact.profile] or "balanced"
     run("powerprofilesctl", { "set", to }, function() profile_read() end)
 end)
+
 on("fact:expanded", function(v) if v then profile_read() end end)
+on("fact:cal", function(v) if v then profile_read() end end)
+lx.act.profile_set = function(i)
+    local to = ({ "power-saver", "balanced", "performance" })[i + 1]
+    if not to then return end
+    fact.profile = PROFILE_IN[to]
+    run("powerprofilesctl", { "set", to }, function() profile_read() end)
+end
+on("profile_set", lx.act.profile_set)
 
 -- ── privacy: who is listening or watching, every 3 s ────────────
 every(3000, function()
@@ -1905,6 +3197,8 @@ local function front_show()
     fact.front_has = path ~= ""
 end
 sys.watch("window", function(w)
+    -- A fullscreen window covers the island: the level gauge comes on its own then (surface hud).
+    fact.fs = (w and w.fullscreen) == true
     front_class = (w and w.class ~= "" and w.class) or nil
     front_show()
     -- The apps service may not have spoken yet at startup.
@@ -2713,14 +4007,17 @@ fnd_preview = function(e)
                 local total = #tiles
                 -- As icons the last place counts what did not fit; as a list that is said under it.
                 local as_list = fact.pvd_list
-                local room = (total > 24 and not as_list) and 23 or 24
+                -- A narrower preview (the pill's card beside the files): one column of twelve, or four icons a row.
+                local narrow = VW < 564
+                local cap = narrow and (as_list and 12 or 16) or 24
+                local room = (total > cap and not as_list) and cap - 1 or cap
                 local grid = {}
                 for k = 1, math.min(room, total) do
                     local t = tiles[k]
                     grid[k] = { name = t.name, dir = t.dir, ic = ficon.of(t.name, t.dir, t.name) }
                 end
                 -- A list reads down each column, as Finder's does: the grid fills by rows, so it is handed over in that order.
-                if as_list then
+                if as_list and not narrow then
                     local n, rows = #grid, math.ceil(#grid / 2)
                     local down = {}
                     for r = 1, rows do
@@ -2870,9 +4167,13 @@ local function tmux_window(dir, cmd)
         else text.fnd_toast = "No tmux session is running"; fact.fnd_toast_seq = fact.fnd_toast_seq + 1 end
     end)
 end
+-- Done with the files (something opened from them): they go —the app, or the card beside another app.
+local function fnd_done()
+    if fact.app == "fnd" then fact.app = "none" else fact.expanded = false end
+end
 local function fnd_launch(e)
     fnd_remember(e.path)
-    fact.expanded = false
+    fnd_done()
     if TEXT_EXT[ext_of(e.path)] then
         tmux_window(e.parent, { "nvim", e.path })
     else
@@ -2948,7 +4249,7 @@ on("fnd_thunar", function()
     local e = fnd_hits[fnd_sel + 1]
     local dir = e and (e.dir and e.path or e.parent) or fnd_scope or HOME
     fnd_remember(dir)
-    fact.expanded = false
+    fnd_done()
     run("thunar", { dir }, nil, { output = false })
 end)
 on("fnd_move", function(d)
@@ -3027,7 +4328,7 @@ on("fnd_tmux", function()
     local dir = e and (e.dir and e.path or e.parent) or fnd_scope
     if not dir then return end
     fnd_remember(dir)
-    fact.expanded = false
+    fnd_done()
     run("tmux", { "run-shell", "sesh connect '" .. string.gsub(dir, "'", "'\\''") .. "'" }, function(_, code)
         if code == 0 then to_terminal()
         else text.fnd_toast = "No tmux session is running"; fact.fnd_toast_seq = fact.fnd_toast_seq + 1 end
@@ -3038,7 +4339,7 @@ on("fnd_edit", function()
     local e = fnd_hits[fnd_sel + 1]
     if not e then return end
     fnd_remember(e.path)
-    fact.expanded = false
+    fnd_done()
     tmux_window(e.dir and e.path or e.parent, { "nvim", e.path })
 end)
 on("fnd_scroll", function(w)
@@ -3264,7 +4565,7 @@ on("fnd_term", function()
     local e = fnd_hits[fnd_sel + 1]
     local dir = e and (e.dir and e.path or e.parent) or fnd_scope or HOME
     fnd_remember(dir)
-    fact.expanded = false
+    fnd_done()
     tmux_window(dir)
 end)
 local HELP = table.concat({
@@ -3315,7 +4616,8 @@ local function fnd_leave()
     fnd_store.last = { scope = fnd_scope, q = text.fq or "", sel = e and e.path, at = os.time() }
     pcall(sys.call, "files.write", "finder.json", fnd_store)
 end
-on("fact:expanded", function(v) if not v then fnd_leave() end end)
+-- The files run while they show: the pill grown into them, or the card beside another app.
+local function fnd_wanted() return fact.app == "fnd" or (fact.expanded and fact.panel == "fnds") end
 local function fnd_arrive()
     fnd_is_open = true
     fnd_marked, fnd_nmarks = {}, 0
@@ -3348,23 +4650,32 @@ local function fnd_arrive()
     fnd_index(land)
 end
 -- Its own page in the centre card, or beside a large view (the right capsule's card, side_k 3).
-local function fnd_beside() return fact.side and fact.side_k == 3 end
-on("fact:panel", function(p)
-    if p == "fnd" then return fnd_arrive() end
-    if not fnd_beside() then fnd_leave() end
-end)
+-- Narrow (a smaller preview) while the pill's card is out beside the files.
+local function fnd_beside() return fact.expanded and (fact.app == "fnd" or fact.panel == "fnds") end
+local function fnd_sync()
+    local want = fnd_wanted()
+    if want and not fnd_is_open then fnd_arrive() elseif not want and fnd_is_open then fnd_leave() end
+end
+on("fact:app", fnd_sync)
+on("fact:panel", fnd_sync)
+on("fact:expanded", fnd_sync)
 local function fnd_side_changed()
     local beside = fnd_beside()
-    local w = beside and 268 or 624
+    local w = math.floor((fact.fnd_pvw or 660) - 36)
     if w ~= VW then
         VW = w
         fit_pic(pic_w, pic_h)
         pv_reset()
+        -- A folder's contents laid out again for the new width (a column, or four icons a row).
+        local e = fnd_hits and fnd_hits[fnd_sel + 1]
+        if e and fnd_is_open then fnd_preview(e) end
     end
     if beside and not fnd_is_open then fnd_arrive()
-    elseif not beside and fnd_is_open and fact.panel ~= "fnd" then fnd_leave() end
+    elseif not beside and fnd_is_open and fact.app ~= "fnd" then fnd_leave() end
 end
 on("fact:side", fnd_side_changed)
+on("fact:expanded", fnd_side_changed)
+on("fact:fnd_pvw", fnd_side_changed)
 on("fact:side_k", fnd_side_changed)
 -- zoxide's history: the folders already visited, as a head start.
 run("zoxide", { "query", "-l", "-s" }, function(out)
@@ -3829,7 +5140,7 @@ wx_fetch()
     end)
     on("news_filter", function(k) fact.news_lang = k; news_show() end)
     -- Opening the calendar (the news lives under it) with news older than ten minutes: fetch it again.
-    on("fact:cal", function(open) if open and os.time() - news_at > 600 then news_fetch() end end)
+    -- (The news left the calendar's card: not fetched any more.)
     news_fetch()
     every(20 * 60000, news_fetch)
     every(60000, function() if fact.cal then news_show() end end)   -- "12m" ages
@@ -3890,7 +5201,7 @@ end)()
     -- asked for the island's own reader; meanwhile, and for mails of plain text, the island's.
     local function show_body(uid)
         local r = renders[uid]
-        local wants = fact.panel == "mailx" and fact.mx_web and not gave_up[uid] and is_html[uid] ~= false
+        local wants = fact.app == "mailx" and fact.mx_web and not gave_up[uid] and is_html[uid] ~= false
         local web = wants and r ~= nil and r.tiles ~= nil
         -- Waiting for it: a quiet page, not the words flashing in first and then swapped away.
         fact.mr_web_wait = wants and not web
@@ -3955,11 +5266,11 @@ end)()
         fact.mr_loading = bodies[uid] == nil
         fact.mr_rep = false
         fact.mr_seq = fact.mr_seq + 1
-        fact.panel = "mailx"
-        fact.expanded = true
+        fact.app = "mailx"
+        fact.expanded = false
         -- In the large view it is rendered too, as Gmail would show it (once: then it is remembered).
-        local web = fact.panel == "mailx" and renders[uid] == nil and not gave_up[uid]
-        if not bodies[uid] or web or (fact.panel ~= "mailx" and not full[uid]) then send({ op = "body", uid = uid, web = web }) end
+        local web = renders[uid] == nil and not gave_up[uid]
+        if not bodies[uid] or web then send({ op = "body", uid = uid, web = web }) end
         -- A render that does not come within six seconds: the island's own reader after all.
         if web then
             after(6000, function()
@@ -3969,7 +5280,7 @@ end)()
         -- Read once it has been looked at a moment: stepping through the list with j/k does not.
         kept_unread[uid] = nil
         after(900, function()
-            if open_uid == uid and fact.expanded and fact.panel == "mailx" and m.unread and not kept_unread[uid] then
+            if open_uid == uid and fact.app == "mailx" and not fact.expanded and m.unread and not kept_unread[uid] then
                 m.unread = false
                 unread -= 1
                 send({ op = "seen", uid = uid, v = true })
@@ -4037,7 +5348,7 @@ end)()
                 forget(uid)
                 mail_show()
                 -- In the large view the next one takes its place, as in a mail app.
-                if was_open and fact.panel == "mailx" then choose(sel) end
+                if was_open and fact.app == "mailx" then choose(sel) end
             end)
         elseif key == "read" or key == "unread" then
             if m.unread ~= (key == "unread") then
@@ -4050,9 +5361,9 @@ end)()
             if key == "unread" then kept_unread[uid] = true end
         elseif key == "web" then
             run("xdg-open", { m.url }, nil, { output = false })
-            fact.expanded = false
+            fact.app = "none"
         elseif key == "reply" then
-            if open_uid ~= uid or fact.panel ~= "mailx" then mail_hook.open(uid) end
+            if open_uid ~= uid or fact.app ~= "mailx" then mail_hook.open(uid) end
             fact.mr_rep = true
         end
     end
@@ -4061,8 +5372,7 @@ end)()
         local at = 0
         for k, m in ipairs(msgs) do if m.uid == uid then at = k end end
         if at == 0 then return end
-        fact.expanded = true
-        if fact.panel ~= "mailx" then
+        if fact.app ~= "mailx" then
             fact.mr_rep = false
             fact.mx_focus = false
             send({ op = "warm" })
@@ -4085,7 +5395,7 @@ end)()
             if g.m.unread then unread += 1 end
             mail_show()
         end
-        if fact.panel == "mailx" and fact.expanded then choose(g.at - 1) end
+        if fact.app == "mailx" then choose(g.at - 1) end
         if g.mid then send({ op = "restore", mid = g.mid, was = g.was }) else g.wants_back = true; gone_waiting = g end
     end
     on("mail_undo_do", bring_back)
@@ -4093,7 +5403,7 @@ end)()
     -- A new mail: the pill grows into its banner, unless the card is open or
     -- notifications are muted; several at once share one, counted.
     local function announce(fresh)
-        if #fresh == 0 or fact.expanded or fact.dnd then return end
+        if #fresh == 0 or (fact.expanded and fact.panel == "notes") or fact.dnd then return end
         local m = fresh[1]
         show_banner({
             mail = true, uid = m.uid, id = -1, app = "Gmail", icon = "internet-mail",
@@ -4127,7 +5437,7 @@ end)()
             fact.mail_ok = true
             mail_show()
             -- The large view opened before the list had come: now there is something to show.
-            if fact.panel == "mailx" and fact.expanded and open_uid == nil then choose(sel) end
+            if fact.app == "mailx" and open_uid == nil then choose(sel) end
         elseif d.t == "gone" then
             if gone and gone.uid == d.uid then gone.mid = d.mid end
             if gone_waiting and gone_waiting.uid == d.uid then
@@ -4178,7 +5488,7 @@ end)()
 
     on("mail_open", function(i) local m = msgs[i + 1]; if m then mail_hook.open(m.uid) end end)
     -- The large view: opened on what was chosen last (the newest the first time), j/k through it.
-    on("fact:panel", function(p) if p == "mailx" then send({ op = "warm" }); choose(sel) end end)
+    on("fact:app", function(a) if a == "mailx" then send({ op = "warm" }); choose(sel) end end)
     -- l: focused, the mail fills the card, drawn larger (and finer, once Firefox has photographed it so).
     on("fact:mx_focus", function(f)
         if not f then fact.mx_zoom = 1; fact.mx_pan = 0 end
@@ -4195,21 +5505,21 @@ end)()
         local l = web_links[i + 1]
         if l and (string.match(l.href, "^https?://") or string.match(l.href, "^mailto:")) then
             run("xdg-open", { l.href }, nil, { output = false })
-            fact.expanded = false
+            fact.app = "none"
         end
     end)
     -- A link in a mail, or a picture that is one: in the browser.
     on("link", function(url)
         if string.match(url, "^https?://") or string.match(url, "^mailto:") then
             run("xdg-open", { url }, nil, { output = false })
-            fact.expanded = false
+            fact.app = "none"
         end
     end)
     on("mail_img", function(i)
         local b = blocks_now[i + 1]
         if b and (b.href or "") ~= "" then
             run("xdg-open", { b.href }, nil, { output = false })
-            fact.expanded = false
+            fact.app = "none"
         end
     end)
     on("mail_arch", function(i) local m = msgs[i + 1]; if m then act(m.uid, "archive") end end)
@@ -4258,17 +5568,32 @@ end)()
     local typing = {}             -- jid → while they write
     local want_open = {}          -- media id → opened once it has come
     local ql_id = nil             -- the picture Quick Look shows (its whole file replaces the small one when it comes)
+    local ql_list, ql_i = {}, 1   -- …and what h/l step through there: a stack's pictures (or that one)
+    local sync_n = 0              -- the helper catching up: its last word (a later one cancels a fade)
+    local resync = nil            -- …and the chat it is sent again for, once caught up
+    local stack_of = {}           -- the rows showing → a stack's messages (pictures sent one after another)
     local helper = nil
     local wa_state = "connecting"
     local paired_asked = false    -- a code asked for since the view opened
     local player = nil            -- a voice note playing
     local here = false
     local tmp_n = 0
+    local detached = false        -- the chat shows a part far back (a message found), not its newest
+    local X = {}                  -- the gallery, reactions, search…: filled in at the end, heard from here
     local ICON = "com.github.eneshecan.WhatsAppForLinux"   -- WhiteSur's WhatsApp
     ws_icon(ICON)             -- asked now, so the first banner already has it
 
     local function send(t) if helper then write(helper, json.encode(t) .. "\n") end end
-    local function looking() return fact.expanded and fact.panel == "wa" end
+    local function looking() return fact.app == "wa" and not fact.expanded end
+    -- What just happened, for a moment over the chat.
+    local toast_n = 0
+    local function toast(msg)
+        toast_n += 1
+        local n = toast_n
+        text.wa_toast = msg
+        fact.wa_toast_on = true
+        after(1800, function() if toast_n == n then fact.wa_toast_on = false end end)
+    end
 
     -- The first letter of the first and the last word ("Ana Sofía Pérez" → "AP").
     local function initials(name)
@@ -4365,7 +5690,8 @@ end)()
         fact.wa_has_sub = false
     end
 
-    local function row_of(m, img, from, tail)
+    local function has_file(m) return (m.file or "") ~= "" end
+    local function row_of(m, img, from, tail, stack)
         local dw, dh = 0, 0
         if img then
             local w, h = m.w or 0, m.h or 0
@@ -4381,16 +5707,27 @@ end)()
         elseif m.kind == "video" and not img then body = "🎥  Video" .. (body ~= "" and (" · " .. body) or ""); file = true
         elseif m.kind == "image" and not img then body = "📷  Photo" .. (body ~= "" and (" · " .. body) or ""); file = true
         elseif m.kind == "sticker" then body = img and "" or "Sticker"
-        elseif m.kind == "video" and img and body == "" then body = "🎥 Video" end
+        end
         local n = utf8.len(body)
+        local react = m.react or ""
         return {
             text = body, has_text = body ~= "", me = m.me,
             long = n == nil or n > 50 or string.find(body, "\n", 1, true) ~= nil,
-            from = from, has_from = from ~= "", time = os.date("%H:%M", m.ts), tail = tail,
-            faint = m.kind == "deleted" or m.failed == true, img = img, sticker = m.kind == "sticker", pic = img and m.media or "", dw = dw, dh = dh, file = file,
+            from = from, has_from = from ~= "", time = (m.edited and body ~= "" and "Edited · " or "") .. os.date("%H:%M", m.ts), tail = tail,
+            react = react, has_react = react ~= "", edited = m.edited == true,
+            -- What its menu offers besides the rest.
+            can_edit = m.me and m.kind == "text" and string.sub(m.id, 1, 4) ~= "tmp-" and os.time() - m.ts < 20 * 60,
+            can_save = string.sub(m.id, 1, 4) ~= "tmp-" and (m.kind == "image" or m.kind == "video" or m.kind == "sticker" or m.kind == "audio" or m.kind == "doc"),
+            faint = m.kind == "deleted" or m.failed == true, img = img, sticker = m.kind == "sticker", pic = img and (m.pic or "") or "", dw = dw, dh = dh, file = file,
+            video = img and m.kind == "video",
             has_q = (m.qtext or "") ~= "", qfrom = m.qfrom or "", qtext = m.qtext or "",
+            qpic = m.qpic or "", has_qpic = (m.qpic or "") ~= "",
+            -- With its picture showing, "📷 Photo" says nothing more: only a caption stays.
+            has_qtext = (m.qtext or "") ~= "" and not ((m.qpic or "") ~= "" and (m.qtext == "📷 Photo" or m.qtext == "🎥 Video" or m.qtext == "Sticker")),
+            -- Pictures sent one after another: one stack, the next two peeking out behind the first.
+            stack = stack and #stack or 1, stack_n = stack and tostring(#stack) or "", pic2 = stack and stack[2] and (stack[2].pic or "") or "", pic3 = stack and stack[3] and (stack[3].pic or "") or "",
             -- What dragging it out gives: the file itself, once it is here whole.
-            full = ((m.media or "") ~= "" and not string.find(m.media, "%-t%.jpg$")) and m.media or "",
+            full = m.file or "",
         }
     end
 
@@ -4411,7 +5748,7 @@ end)()
         local drawn = {}
         for i = #msgs, start, -1 do
             local m = msgs[i]
-            if pics_left > 0 and (m.kind == "image" or m.kind == "sticker" or m.kind == "video") and (m.media or "") ~= "" then
+            if pics_left > 0 and (m.kind == "image" or m.kind == "sticker" or m.kind == "video") and ((m.pic or "") ~= "" or m.kind ~= "sticker") then
                 drawn[i] = true
                 pics_left -= 1
             end
@@ -4428,7 +5765,15 @@ end)()
             if msgs[i].me then last_me = i; break end
         end
         local last_day = nil
+        stack_of = {}
+        -- A picture or video with nothing written on it, and not an answer: one that can join a stack.
+        local function stacks(m)
+            return m and (m.kind == "image" or m.kind == "video") and (m.text or "") == "" and (m.qtext or "") == ""
+                and string.sub(m.id, 1, 4) ~= "tmp-"
+        end
+        local skip_to = 0
         for i = start, #msgs do
+            if i <= skip_to then continue end
             local m = msgs[i]
             local d = os.date("%Y%m%d", m.ts)
             if d ~= last_day then
@@ -4438,15 +5783,26 @@ end)()
             end
             local first = not same_run(msgs[i - 1], m) or i == start
             local from = (first and not m.me and (m.from or "") ~= "") and m.from or ""
-            local r = row_of(m, drawn[i] == true, from, not same_run(m, msgs[i + 1]))
+            local stack, last = nil, i
+            if drawn[i] and stacks(m) then
+                while last < #msgs and stacks(msgs[last + 1]) and same_run(msgs[last], msgs[last + 1]) do last += 1 end
+                if last > i then
+                    stack = {}
+                    for k = i, last do stack[#stack + 1] = msgs[k] end
+                    skip_to = last
+                end
+            end
+            local r = row_of(m, drawn[i] == true, from, not same_run(msgs[last], msgs[last + 1]), stack)
             -- Under the last one sent, as iMessage says it.
-            if i == last_me then
+            if last_me and last_me >= i and last_me <= last then
+                m = msgs[last_me]
                 r.status = m.failed and "Not delivered" or (m.st >= 3 and "Read" or (m.st == 2 and "Delivered" or (m.st == 1 and "Sent" or "Sending…")))
                 r.has_status = true
                 r.tail = true
             end
             rows[#rows + 1] = r
-            rows_of[#rows] = m
+            rows_of[#rows] = msgs[i]
+            stack_of[#rows] = stack
         end
         -- A long live conversation: past the cap, the oldest go (the rows shift, once in a long while).
         if #rows > MAXROWS then
@@ -4479,8 +5835,14 @@ end)()
     end
 
     local quote = nil         -- the message being answered (r)
+    local editing = nil       -- …or one of ours being written again (c)
     local function unquote()
         quote = nil
+        if editing then
+            editing = nil
+            text.wa_in = ""
+            fact.wa_has_in = false
+        end
         fact.wa_quote = false
     end
 
@@ -4491,6 +5853,9 @@ end)()
         snap()
         fact.wa_cur = -1
         unquote()
+        if jid ~= open_jid and X.leave then X.leave() end
+        detached = false
+        fact.wa_detached = false
         open_jid = jid
         cache[jid] = cache[jid] or {}
         msgs = cache[jid]
@@ -4542,7 +5907,7 @@ end)()
 
     -- Something came in while it was not looked at: the pill grows into its banner.
     local function announce(d)
-        if fact.expanded or fact.dnd or d.muted then return end
+        if (fact.expanded and fact.panel == "notes") or fact.dnd or d.muted then return end
         if (d.msg.ts or 0) < os.time() - 120 then return end   -- what queued up while offline is not news
         local c = nil
         for _, x in ipairs(chats) do if x.jid == d.jid then c = x end end
@@ -4561,7 +5926,7 @@ end)()
             player = spawn("mpv", { "--no-video", "--really-quiet", path }, function() end, function() player = nil end)
         else
             run("xdg-open", { path }, nil, { output = false })
-            fact.expanded = false
+            fact.app = "none"
         end
     end
 
@@ -4612,12 +5977,17 @@ end)()
                     if string.sub(m.id, 1, 4) == "tmp-" then put(d.jid, m) end   -- still on its way
                 end
             end
-            if d.jid == open_jid then
+            if d.jid == open_jid and not detached then
                 local was = #msgs
                 msgs = cache[d.jid]
-                if was == 0 or #msgs < start then start = math.max(1, #msgs - FIRST + 1) end
+                -- Caught up after being away: the newest, at once, at the bottom (not every row sliding).
+                local caught = resync == d.jid
+                resync = nil
+                if was == 0 or #msgs < start or caught then start = math.max(1, #msgs - FIRST + 1) end
+                if caught then snap(); fact.wa_cur = -1 end
                 msgs_show()
                 if was == 0 then snap() end
+                if caught then fact.wa_seq = fact.wa_seq + 1 end
             end
         elseif d.t == "older" then
             loading = false
@@ -4629,7 +5999,7 @@ end)()
                 for _, m in ipairs(older) do list[#list + 1] = m end
                 for _, m in ipairs(msgs) do list[#list + 1] = m end
                 start = start + #older
-                cache[d.jid] = list
+                if not detached then cache[d.jid] = list end
                 msgs = list
                 start = math.max(1, start - MORE)
                 snap()
@@ -4638,7 +6008,12 @@ end)()
             end
         elseif d.t == "msg" then
             local more = put(d.jid, d.msg, d.tmp)
-            if d.jid == open_jid then
+            if d.jid == open_jid and detached then
+                -- Far back: only what is in sight changes (a reaction, an edit); a new one waits below.
+                for i, x in ipairs(msgs) do if x.id == d.msg.id then msgs[i] = d.msg end end
+                msgs_show()
+                if more then toast("New message below · G") end
+            elseif d.jid == open_jid then
                 msgs = cache[d.jid] or msgs
                 msgs_show()
                 -- One more at the bottom: the chat follows it down if it was there (or it is ours).
@@ -4651,15 +6026,51 @@ end)()
             if typing[d.jid] and not d.msg.me then typing[d.jid] = nil; list_show(); header() end
         elseif d.t == "media" then
             local list = cache[d.jid]
-            if list and (d.path or "") ~= "" then
-                for _, m in ipairs(list) do if m.id == d.id then m.media = d.path end end
+            local function take(m)
+                if m.id ~= d.id then return end
+                m.media, m.pic, m.file = d.path, d.pic or m.pic, d.file or d.path
             end
+            if list and (d.path or "") ~= "" then
+                for _, m in ipairs(list) do take(m) end
+                for _, m in ipairs(msgs) do take(m) end
+            end
+            if X.media then X.media(d) end
             if d.jid == open_jid then msgs_show() end
-            if ql_id == d.id and (d.path or "") ~= "" then text.wa_ql_path = d.path end
+            if ql_id == d.id then
+                if (d.path or "") ~= "" then
+                    if X.ql_came then X.ql_came(d) end
+                else
+                    text.wa_ql_cap = d.msg or "Couldn't download it"
+                end
+            end
             if want_open[d.id] then
                 local kind = want_open[d.id]
                 want_open[d.id] = nil
                 if (d.path or "") ~= "" then open_file(d.path, kind) end
+            end
+        elseif d.t == "sync" then
+            -- Catching up: how far along (an estimate: never full before it is done), then the open
+            -- chat again, whole, and a moment of "Up to date".
+            sync_n += 1
+            local n = sync_n
+            if d.on then
+                local total = math.max(1, d.total or 1)
+                fact.wa_sync_p = math.min(0.96, (d.done or 0) / total)
+                text.wa_sync_t = "Updating…"
+                fact.wa_sync_show = true
+            else
+                fact.wa_sync_p = 1
+                text.wa_sync_t = "Up to date"
+                if open_jid then
+                    resync = open_jid
+                    send({ op = "open", jid = open_jid })
+                end
+                after(1600, function()
+                    if sync_n == n then fact.wa_sync_show = false end
+                end)
+                after(1900, function()
+                    if sync_n == n then fact.wa_sync_p = 0 end
+                end)
             end
         elseif d.t == "typing" then
             if (typing[d.jid] == true) ~= (d.on == true) then
@@ -4668,8 +6079,23 @@ end)()
                 list_show()
                 if d.jid == open_jid then header() end
             end
+        elseif d.t == "gone" then
+            for _, list in ipairs({ cache[d.jid] or {}, d.jid == open_jid and msgs or {} }) do
+                for i = #list, 1, -1 do if list[i].id == d.id then table.remove(list, i) end end
+            end
+            if d.jid == open_jid then
+                snap()
+                msgs_show()
+                if X.gone then X.gone() end
+            end
+        elseif d.t == "saved" then
+            toast(d.msg or "")
+        elseif X[d.t] then
+            X[d.t](d)       -- found, around, gallery
         elseif d.t == "done" then
-            if not d.ok then
+            if d.op ~= "send" then
+                if (d.msg or "") ~= "" then toast(d.msg) end
+            elseif not d.ok then
                 local list = cache[d.jid]
                 if list then
                     for _, m in ipairs(list) do if m.id == d.tmp then m.failed = true end end
@@ -4727,21 +6153,26 @@ end)()
         off = 0
         choose(0)
     end)
-    on("fact:panel", function(p)
-        if p == "wa" then
+    on("fact:app", function(a)
+        if a == "wa" then
             paired_asked = false
             if wa_state == "pair" then paired_asked = true; send({ op = "pair" }) end
             choose(sel)
-            set_here(fact.expanded)
+            set_here(not fact.expanded)
+            if open_jid then read_soon(open_jid) end
         else
             set_here(false)
+            fact.wa_typing = false
+            fact.wa_search = false
         end
-    end)
-    on("fact:expanded", function(e)
-        set_here(e and fact.panel == "wa")
         list_show()   -- the open chat's unread hidden only while it is read
-        if not e then fact.wa_typing = false; fact.wa_search = false end
-        if e and fact.panel == "wa" and open_jid then read_soon(open_jid) end
+    end)
+    -- The pill's card over WhatsApp: not looked at meanwhile (online, reading); back, it is.
+    on("fact:expanded", function(e)
+        if fact.app ~= "wa" then return end
+        set_here(not e)
+        list_show()
+        if not e and open_jid then read_soon(open_jid) end
     end)
 
     -- Writing: they see "typing…" while there is something in the field, told once
@@ -4901,8 +6332,7 @@ end)()
         local m = rows_of[i + 1]
         if not m or not open_jid or prefetched[m.id] or string.sub(m.id, 1, 4) == "tmp-" then return end
         if m.kind ~= "image" and m.kind ~= "video" and m.kind ~= "doc" and m.kind ~= "audio" and m.kind ~= "sticker" then return end
-        local have = m.media or ""
-        if have ~= "" and not string.find(have, "%-t%.jpg$") then return end
+        if has_file(m) then return end
         prefetched[m.id] = true
         send({ op = "media", jid = open_jid, id = m.id })
     end)
@@ -4919,7 +6349,7 @@ end)()
             if f.kind == "doc" then shown_text = f.name .. (cap ~= "" and ("\n" .. cap) or "")
             elseif f.kind == "audio" then shown_text = "Audio" end
             msgs[#msgs + 1] = { id = tmp, me = true, from = "", text = shown_text, ts = os.time(), kind = f.kind,
-                media = f.kind == "image" and f.path or "", w = f.w, h = f.h, st = 0,
+                media = f.kind == "image" and f.path or "", pic = f.kind == "image" and f.path or "", w = f.w, h = f.h, st = 0,
                 qfrom = (i == 1 and q) and q.from or "", qtext = (i == 1 and q) and q.text or "" }
             send({ op = "file", jid = open_jid, path = f.path, caption = cap, tmp = tmp, quote = (i == 1 and q) and q.id or "" })
         end
@@ -4931,6 +6361,22 @@ end)()
     on("wa_send", function()
         local body = string.gsub(string.gsub(text.wa_in or "", "^%s+", ""), "%s+$", "")
         if not open_jid then return end
+        -- One of ours written again (c): it changes in place.
+        if editing then
+            local m = editing
+            unquote()
+            text.wa_in = ""
+            fact.wa_has_in = false
+            told_jid = nil
+            if body ~= "" and body ~= m.text then
+                m.text = body
+                m.edited = true
+                msgs_show()
+                send({ op = "edit", jid = open_jid, id = m.id, text = body })
+            end
+            return
+        end
+        if detached and X.newest then X.newest() end
         if #staged > 0 then
             cache[open_jid] = cache[open_jid] or msgs
             msgs = cache[open_jid]
@@ -4960,52 +6406,106 @@ end)()
         fact.wa_mine = fact.wa_mine + 1
         send({ op = "send", jid = open_jid, text = body, tmp = tmp, quote = q and q.id or "" })
     end)
-    -- A picture (whole once it has come), a voice note (played here), a video or a file.
+    -- A picture or video in the program that opens it, a voice note (played here), or a file.
     local function open_media(m)
         if not m or not open_jid then return end
-        local have = m.media or ""
-        if have ~= "" and not string.find(have, "%-t%.jpg$") then
-            open_file(have, m.kind)
+        if has_file(m) then
+            open_file(m.file, m.kind)
         else
             want_open[m.id] = m.kind
             send({ op = "media", jid = open_jid, id = m.id })
         end
     end
-    on("wa_media", function(i) open_media(rows_of[i + 1]) end)
 
-    -- Space: Quick Look. The picture whole once it is here (its small one meanwhile), fitted into 992 × 600;
-    -- j/k while it shows step the cursor, and a picture it lands on takes its place. A video plays instead.
-    local function look(m)
-        if not m or not open_jid then return false end
-        if m.kind == "video" then open_media(m); return true end
-        if m.kind ~= "image" and m.kind ~= "sticker" then return false end
-        local have = m.media or ""
-        local whole = have ~= "" and not string.find(have, "%-t%.jpg$")
-        if not whole then
-            send({ op = "media", jid = open_jid, id = m.id })
-        end
+    -- Enter (or a click on it): the picture or video large over the chat. A picture shows its preview
+    -- at once and its whole file when it has come; a video plays here (the engine's `video`: ffmpeg
+    -- hands over frames the size they are drawn at, its sound alongside). In a stack, h/l step through it.
+    local function ql_fit(m)
         local w, h = m.w or 0, m.h or 0
         if w <= 0 or h <= 0 then w, h = 4, 3 end
         local k = math.min(992 / w, 600 / h)
         fact.wa_qlw = math.floor(w * k + 0.5)
         fact.wa_qlh = math.floor(h * k + 0.5)
-        text.wa_ql_path = have
+    end
+    local function ql_play(m)
+        pcall(sys.call, "video.play", m.file, 1600, 960)
+    end
+    local function look(m, list)
+        if not m or not open_jid then return false end
+        if m.kind ~= "image" and m.kind ~= "sticker" and m.kind ~= "video" then return false end
+        if fact.wa_qlv then pcall(sys.call, "video.stop") end
+        if list then
+            ql_list = list
+            ql_i = 1
+            for k, x in ipairs(list) do if x.id == m.id then ql_i = k end end
+        elseif not fact.wa_ql or ql_list[ql_i] ~= m then
+            ql_list, ql_i = { m }, 1
+        end
+        fact.wa_ql_n = #ql_list
+        fact.wa_ql_i = ql_i
+        if not has_file(m) then
+            send({ op = "media", jid = open_jid, id = m.id })
+        end
+        ql_fit(m)
+        fact.wa_qlv = m.kind == "video"
+        text.wa_ql_path = has_file(m) and m.kind ~= "video" and m.file or (m.pic or "")
+        if m.kind == "video" and has_file(m) then ql_play(m) end
         local who = m.me and "You" or ((m.from or "") ~= "" and m.from or text.wa_name)
-        text.wa_ql_cap = who .. " · " .. os.date("%H:%M", m.ts) .. (((m.text or "") ~= "" and m.kind == "image") and (" · " .. string.match(m.text, "^[^\n]*")) or "")
+        text.wa_ql_cap = who .. " · " .. os.date("%H:%M", m.ts) .. (((m.text or "") ~= "") and (" · " .. string.match(m.text, "^[^\n]*")) or "")
+            .. (#ql_list > 1 and ("  ·  " .. ql_i .. " of " .. #ql_list) or "")
         ql_id = m.id
         fact.wa_ql = true
         return true
     end
+    X.ql_came = function(d)
+        local m = ql_list[ql_i]
+        if not m or m.id ~= d.id then return end
+        if m.kind == "video" then
+            ql_play(m)
+        else
+            text.wa_ql_path = d.file or d.path
+        end
+    end
+    -- The row's message, or its stack.
+    local function look_row(i)
+        return look(rows_of[i + 1], stack_of[i + 1])
+    end
     on("wa_look", function()
         local i = fact.wa_hov >= 0 and fact.wa_hov or fact.wa_cur
-        look(rows_of[i + 1])
+        look_row(i)
+    end)
+    on("wa_look_at", function(i) look_row(i) end)
+    -- A press on a picture or video views it here; on a voice note or file, opens it.
+    on("wa_media", function(i)
+        if not look_row(i) then open_media(rows_of[i + 1]) end
+    end)
+    on("wa_ql_step", function(n)
+        local k = ql_i + n
+        if k < 1 or k > #ql_list then return end
+        ql_i = k
+        look(ql_list[k])
+    end)
+    -- Space while it shows: a video stops and goes on; a picture closes.
+    on("wa_ql_space", function()
+        if fact.wa_qlv then pcall(sys.call, "video.toggle") else fact.wa_ql = false end
+    end)
+    on("wa_ql_seek", function(t)
+        if fact.wa_qlv then pcall(sys.call, "video.seek", math.max(0, t)) end
     end)
     on("fact:wa_cur", function(c)
-        if not fact.wa_ql then return end
         local m = rows_of[(c or -1) + 1]
-        if m and (m.kind == "image" or m.kind == "sticker") then look(m) end
+        fact.wa_cur_media = m ~= nil and m ~= false and (m.kind == "image" or m.kind == "sticker" or m.kind == "video")
+        if not fact.wa_ql then return end
+        if fact.wa_cur_media then look_row(c) end
     end)
-    on("fact:wa_ql", function(v) if not v then ql_id = nil end end)
+    on("fact:wa_ql", function(v)
+        if not v then
+            ql_id = nil
+            ql_list, ql_i = {}, 1
+            if fact.wa_qlv then pcall(sys.call, "video.stop") end
+            fact.wa_qlv = false
+        end
+    end)
 
     -- ── Vim's keys over the view ──
     -- j/k in the chat, with a count: the cursor a row at a time (each row works out its step),
@@ -5045,17 +6545,17 @@ end)()
         return m or nil
     end
     -- yy: the message under the cursor, copied (its words, or a picture's path).
-    on("wa_yank", function()
-        local m = under_cursor()
+    local function yank(m)
         if not m then return end
-        local what = (m.text or "") ~= "" and m.text or (m.media or "")
+        local what = (m.text or "") ~= "" and m.text or (has_file(m) and m.file or "")
         if what ~= "" then
             pcall(sys.call, "clipboard.set", what)
             text.wa_sub = "Copied"
             fact.wa_has_sub = true
             after(1500, header)
         end
-    end)
+    end
+    on("wa_yank", function() yank(under_cursor()) end)
     -- o: its picture, video, voice note or file; or the first link in what it says.
     on("wa_open", function()
         local m = under_cursor()
@@ -5067,12 +6567,11 @@ end)()
         local url = string.match(m.text or "", "https?://[^%s]+")
         if url then
             run("xdg-open", { url }, nil, { output = false })
-            fact.expanded = false
+            fact.app = "none"
         end
     end)
     -- r: answering it. What it answers shows over the field, and goes with the message.
-    on("wa_reply", function()
-        local m = under_cursor()
+    local function reply_to(m)
         if not m or string.sub(m.id, 1, 4) == "tmp-" then return end
         local who = m.me and "You" or ((m.from or "") ~= "" and m.from or text.wa_name)
         local line = string.match(m.text or "", "^[^\n]*") or ""
@@ -5082,8 +6581,564 @@ end)()
         text.wa_q_text = line
         fact.wa_quote = true
         fact.wa_typing = true
-    end)
+    end
+    on("wa_reply", function() reply_to(under_cursor()) end)
     on("wa_quote_clear", unquote)
+
+    -- ── more on a message, and on the chat ──
+    -- The gallery (m), reactions (e), editing (c), deleting (dd), forwarding (f), searching the
+    -- chat (/), saving a file (Ctrl+S) and voice notes (v). A function of its own: the section's
+    -- locals are many already.
+    ;(function()
+        local function real(m) return m and string.sub(m.id, 1, 4) ~= "tmp-" end
+        local function first_line(t) return string.match(t or "", "^[^\n]*") or "" end
+        local LINE = { image = "📷 Photo", video = "🎥 Video", sticker = "Sticker", audio = "🎤 Voice message", doc = "📄 Document" }
+
+        -- The chat taken: the cursor goes on its newest message, so the outline is there at once.
+        local function cursor_home()
+            after(60, function()
+                if looking() and fact.wa_focus and not fact.wa_typing and fact.wa_cur < 0 and nrows > 0 and not fact.wa_gal then
+                    emit("wa_last")
+                end
+            end)
+        end
+        on("fact:wa_focus", cursor_home)
+        on("fact:wa_typing", cursor_home)
+
+        -- Back from a part far back to the newest (G, the pill, writing something).
+        X.newest = function()
+            if not open_jid then return end
+            detached = false
+            fact.wa_detached = false
+            local jid = open_jid
+            open_jid = nil      -- so it opens again from what is kept
+            open_chat(jid)
+            header()
+        end
+        on("wa_newest", X.newest)
+
+        -- ── the gallery ──
+        local gal, gal_kind = {}, "media"    -- newest first
+        local asked = {}
+        local function whole(m) return has_file(m) or (m.pic or ""):find("%-p%.jpg$") ~= nil end
+        local function gal_show()
+            local total = #gal
+            fact.wa_gtotal = total
+            local gc = math.clamp(fact.wa_gc, 0, math.max(0, total - 1))
+            fact.wa_gc = gc
+            local per, seen, keep = 4, 4, 24       -- a row of four, four rows in sight, six held
+            if gal_kind == "files" then per, seen, keep = 1, 11, 14 end
+            local rows_all = math.ceil(total / per)
+            local top = fact.wa_grow
+            local crow = gc // per
+            if crow < top then top = crow end
+            if crow > top + seen - 1 then top = crow - seen + 1 end
+            top = math.clamp(top, 0, math.max(0, rows_all - seen))
+            fact.wa_grow = top
+            local first = math.max(0, top - 1) * per
+            fact.wa_gfirst = first
+            local recs = {}
+            for i = first + 1, math.min(first + keep, total) do
+                local m = gal[i]
+                if gal_kind == "files" then
+                    local who = m.me and "You" or ((m.from or "") ~= "" and m.from or text.wa_name)
+                    recs[#recs + 1] = {
+                        name = m.kind == "audio" and (m.text or "Audio") or first_line(m.text),
+                        sub = os.date("%d %b %Y", m.ts) .. " · " .. who, audio = m.kind == "audio",
+                    }
+                else
+                    local w, h = m.w or 0, m.h or 0
+                    if w <= 0 or h <= 0 or m.kind == "sticker" then w, h = 1, 1 end
+                    recs[#recs + 1] = {
+                        -- The picture is fitted into a square: that square enlarged until the picture fills the tile.
+                        pic = m.pic or "", cw = math.max(w / h, h / w), ch = math.max(w / h, h / w),
+                        video = m.kind == "video", sticker = m.kind == "sticker", dur = "▶  Video",
+                    }
+                    -- The thumbnail WhatsApp sends is a blur: the picture whole, for the tiles near the cursor.
+                    if not whole(m) and not asked[m.id] then
+                        asked[m.id] = true
+                        send({ op = "media", jid = open_jid, id = m.id })
+                    end
+                end
+            end
+            if gal_kind == "files" then model.wagf = recs else model.wag = recs end
+        end
+        local function gal_load(kind)
+            gal_kind = kind
+            fact.wa_gtab = kind == "files" and 1 or 0
+            gal = {}
+            fact.wa_gc = 0
+            fact.wa_grow = 0
+            gal_show()
+            send({ op = "gallery", jid = open_jid, kind = kind })
+        end
+        X.gallery = function(d)
+            if d.jid ~= open_jid or d.kind ~= gal_kind then return end
+            gal = {}
+            local items = d.items or {}
+            for i = #items, 1, -1 do gal[#gal + 1] = items[i] end
+            gal_show()
+        end
+        X.media = function(d)
+            if not fact.wa_gal or (d.path or "") == "" then return end
+            for _, m in ipairs(gal) do
+                if m.id == d.id then m.media, m.pic, m.file = d.path, d.pic or m.pic, d.file or d.path; gal_show(); return end
+            end
+        end
+        local function gal_item() return gal[fact.wa_gc + 1] end
+        on("wa_gal_open", function()
+            if not open_jid then return end
+            asked = {}      -- asked again each time: the phone may have it now
+            fact.wa_typing = false
+            fact.wa_gal = true
+            gal_load("media")
+        end)
+        on("wa_gtabs", function() gal_load(gal_kind == "files" and "media" or "files") end)
+        on("wa_gmove", function(n)
+            local per = gal_kind == "files" and 1 or 4
+            local step = n
+            if math.abs(n) == 100 then step = (n > 0 and 1 or -1) * per
+            elseif math.abs(n) == 400 then step = (n > 0 and 1 or -1) * per * 4 end
+            if gal_kind == "files" and math.abs(n) == 1 then return end
+            fact.wa_gc = math.clamp(fact.wa_gc + step, 0, math.max(0, #gal - 1))
+            gal_show()
+            local m = gal_item()
+            if fact.wa_ql and m then look(m, gal) end
+        end)
+        on("wa_gwheel", function(w)
+            local per = gal_kind == "files" and 1 or 4
+            fact.wa_gc = math.clamp(fact.wa_gc + (w > 0 and -per or per), 0, math.max(0, #gal - 1))
+            gal_show()
+        end)
+        local function gal_view()
+            local m = gal_item()
+            if not m then return end
+            if not look(m, gal) then open_media(m) end
+        end
+        on("wa_gview", gal_view)
+        on("wa_gpick", function(i)
+            fact.wa_gc = fact.wa_gfirst + i
+            gal_show()
+            gal_view()
+        end)
+        on("wa_gopen", function() local m = gal_item(); if m then open_media(m) end end)
+        on("fact:wa_gal", function(v) if not v then model.wag = {}; model.wagf = {}; gal = {} end end)
+
+        -- Ctrl+S (s in the gallery): what Quick Look shows, the one chosen in the gallery, or the one under the cursor.
+        local function save(m)
+            if not m or not real(m) or not LINE[m.kind] then toast("Nothing to save there"); return end
+            toast("Saving…")
+            send({ op = "save", jid = open_jid, id = m.id })
+        end
+        local function ql_item()
+            if not (fact.wa_ql and ql_id) then return nil end
+            for _, x in ipairs(fact.wa_gal and gal or msgs) do if x.id == ql_id then return x end end
+        end
+        on("wa_save", function()
+            local m = ql_item()
+            if not m and fact.wa_gal then m = gal_item() end
+            if not m and not fact.wa_gal then m = under_cursor() end
+            save(m)
+        end)
+        on("wa_ql_open", function()
+            local m = ql_item()
+            fact.wa_ql = false
+            if m then open_media(m) end
+        end)
+        on("wa_gsave", function(i)
+            fact.wa_gc = fact.wa_gfirst + i
+            gal_show()
+            save(gal_item())
+        end)
+
+        -- ── reactions ──
+        local EMO = { "👍", "❤️", "😂", "😮", "😢", "🙏" }
+        local rx_on = nil
+        local function rx_open(m)
+            if not real(m) or m.kind == "deleted" then return end
+            rx_on = m
+            local mine = -1
+            if (m.mine or "") ~= "" then
+                mine = 6
+                for i, e in ipairs(EMO) do if e == m.mine then mine = i - 1 end end
+            end
+            fact.wa_rx_mine = mine
+            fact.wa_rxi = (mine >= 0 and mine < 6) and mine or 0
+            fact.wa_rx = true
+        end
+        on("wa_rx_open", function() rx_open(under_cursor()) end)
+        on("wa_react", function(i)
+            local m = rx_on
+            fact.wa_rx = false
+            if not m or not open_jid then return end
+            local e = i >= 0 and EMO[i + 1] or ""
+            if e == (m.mine or "") then e = "" end      -- the same one again takes it back
+            if e == "" and (m.mine or "") == "" then return end
+            send({ op = "react", jid = open_jid, id = m.id, emoji = e })
+        end)
+
+        -- ── who reacted (E, or a press on the reactions under a message): WhatsApp's sheet, everyone and
+        -- what they gave, a tab per emoji; ours says so, and Enter (or a press) takes it back ──
+        local who_on, who_all, who_shown = nil, {}, {}
+        local who_tabs = {}         -- "" (all), then each emoji given
+        local function who_show()
+            local tab = who_tabs[fact.wa_who_tab + 1] or ""
+            who_shown = {}
+            for _, r in ipairs(who_all) do
+                if tab == "" or r.emoji == tab then who_shown[#who_shown + 1] = r end
+            end
+            local recs = {}
+            for i = 1, math.min(#who_shown, 12) do
+                local r = who_shown[i]
+                recs[i] = { name = r.name or "", init = initials(r.name or "?"), pic = r.pic or "", emoji = r.emoji or "",
+                    me = r.me == true, sub = r.me and "Press to remove" or "" }
+            end
+            model.wawho = recs
+            local tabs = {}
+            for i, t in ipairs(who_tabs) do
+                local n = 0
+                for _, r in ipairs(who_all) do if t == "" or r.emoji == t then n += 1 end end
+                tabs[i] = { label = (t == "" and "All" or t) .. " " .. n }
+            end
+            model.wawt = tabs
+            fact.wa_whi = math.clamp(fact.wa_whi, 0, math.max(0, #who_shown - 1))
+        end
+        local function who_open(m)
+            if not real(m) then return end
+            if (m.react or "") == "" then toast("No reactions on that one"); return end
+            who_on = m
+            who_all, who_tabs = {}, { "" }
+            fact.wa_who_tab = 0
+            fact.wa_whi = 0
+            who_show()
+            fact.wa_who = true
+            send({ op = "reacts", jid = open_jid, id = m.id })
+        end
+        X.reacts = function(d)
+            if not who_on or d.id ~= who_on.id then return end
+            who_all = d.list or {}
+            who_tabs = { "" }
+            local seen = {}
+            for _, r in ipairs(who_all) do
+                if not seen[r.emoji] then seen[r.emoji] = true; who_tabs[#who_tabs + 1] = r.emoji end
+            end
+            who_show()
+        end
+        on("wa_who_open", function() who_open(under_cursor()) end)
+        on("wa_who_at", function(i) who_open(rows_of[i + 1]) end)
+        on("wa_who_move", function(d) fact.wa_whi = math.clamp(fact.wa_whi + d, 0, math.max(0, #who_shown - 1)) end)
+        on("wa_who_tab", function(d)
+            fact.wa_who_tab = (fact.wa_who_tab + d) % math.max(1, #who_tabs)
+            fact.wa_whi = 0
+            who_show()
+        end)
+        on("wa_who_tab_at", function(i) fact.wa_who_tab = i; fact.wa_whi = 0; who_show() end)
+        on("wa_who_pick", function(i)
+            local r, m = who_shown[i + 1], who_on
+            if not r or not m or not r.me or not open_jid then return end
+            fact.wa_who = false
+            send({ op = "react", jid = open_jid, id = m.id, emoji = "" })
+        end)
+        on("fact:wa_who", function(v) if not v then who_on = nil; model.wawho = {}; model.wawt = {} end end)
+
+        -- ── editing one of ours (c) ──
+        local function edit(m)
+            if not real(m) then return end
+            if not m.me or m.kind ~= "text" then toast("Only your own messages can be edited"); return end
+            if os.time() - m.ts > 20 * 60 then toast("WhatsApp lets a message be edited for 20 minutes"); return end
+            quote = nil
+            editing = m
+            text.wa_q_from = "Editing"
+            text.wa_q_text = first_line(m.text)
+            fact.wa_quote = true
+            text.wa_in = m.text
+            fact.wa_has_in = true
+            fact.wa_typing = true
+        end
+        on("wa_edit", function() edit(under_cursor()) end)
+
+        -- ── deleting (dd) ──
+        local del_on = nil
+        local function del_ask(m)
+            if not real(m) then return end
+            del_on = m
+            -- Ours, for everyone, for as long as WhatsApp allows (two days); anything else only here.
+            fact.wa_del = (m.me and m.kind ~= "deleted" and os.time() - m.ts < 2 * 86400) and 1 or 2
+        end
+        on("wa_del_ask", function() del_ask(under_cursor()) end)
+        on("wa_del_do", function(how)
+            local m = del_on
+            fact.wa_del = 0
+            if not m or not open_jid then return end
+            if how == 1 then
+                m.kind, m.text, m.media, m.react, m.pic, m.file = "deleted", "You deleted this message", "", "", "", ""
+                msgs_show()
+                send({ op = "revoke", jid = open_jid, id = m.id })
+            else
+                send({ op = "forget", jid = open_jid, id = m.id })
+            end
+        end)
+        X.gone = function()
+            fact.wa_cur = -1
+            cursor_home()
+        end
+
+        -- ── forwarding (f) ──
+        local fwd_on, fwd_to = nil, {}
+        local function fwd_list()
+            local q = text.wa_fwd_q or ""
+            fwd_to = {}
+            local recs = {}
+            for _, c in ipairs(chats) do
+                if #fwd_to < 8 and matches(c.name, q) then
+                    fwd_to[#fwd_to + 1] = c
+                    recs[#recs + 1] = { name = c.name, init = initials(c.name), pic = c.pic or "" }
+                end
+            end
+            model.wafw = recs
+            fact.wa_fwi = math.clamp(fact.wa_fwi, 0, math.max(0, #fwd_to - 1))
+        end
+        local function fwd_open(m)
+            if not real(m) then return end
+            if m.kind == "deleted" or m.kind == "note" then toast("That can't be forwarded"); return end
+            fwd_on = m
+            text.wa_fwd_q = ""
+            fact.wa_fwi = 0
+            fwd_list()
+            fact.wa_fwd = true
+        end
+        on("wa_fwd_open", function() fwd_open(under_cursor()) end)
+        on("text:wa_fwd_q", function() fact.wa_fwi = 0; fwd_list() end)
+        on("wa_fwd_move", function(d) fact.wa_fwi = math.clamp(fact.wa_fwi + d, 0, math.max(0, #fwd_to - 1)) end)
+        on("wa_fwd_pick", function(i)
+            local c, m = fwd_to[i + 1], fwd_on
+            fact.wa_fwd = false
+            if not c or not m or not open_jid then return end
+            toast("Forwarding to " .. c.name .. "…")
+            send({ op = "forward", jid = open_jid, id = m.id, to = c.jid })
+        end)
+
+        -- ── searching the chat (/) ──
+        local hits, hit_i, asked_q, go_when_found = {}, 0, nil, false
+        local find_n = 0
+        local function q_now() return (string.gsub(string.gsub(text.wa_cq or "", "^%s+", ""), "%s+$", "")) end
+        on("text:wa_cq", function()
+            find_n += 1
+            local n = find_n
+            after(220, function()
+                if n ~= find_n or not open_jid then return end
+                asked_q = q_now()
+                hits = {}
+                if asked_q == "" then text.wa_cs_t = ""; return end
+                send({ op = "find", jid = open_jid, q = asked_q })
+            end)
+        end)
+        -- The row a message is drawn on (1-based), and how many messages are drawn below it.
+        local function row_of_id(id)
+            for r = 1, nrows do
+                local m = rows_of[r]
+                if m and m.id == id then
+                    local below = 0
+                    for k = r + 1, nrows do if rows_of[k] then below += 1 end end
+                    return r, below
+                end
+            end
+        end
+        local want_id = nil
+        -- The cursor to it: from the newest, a row a step (as j/k go), so the chat scrolls up to it.
+        local function step_to(id)
+            local r, below = row_of_id(id)
+            if not r then return false end
+            fact.wa_typing = false
+            fact.wa_focus = true
+            emit("wa_last")
+            for i = 1, math.min(below, 118) do
+                after(i * 24, function() emit("wa_k") end)
+            end
+            return true
+        end
+        local function go_to(id)
+            if step_to(id) then return end
+            want_id = id                -- far back: the part around it first
+            send({ op = "around", jid = open_jid, id = id })
+        end
+        X.around = function(d)
+            if d.jid ~= open_jid or d.id ~= want_id then return end
+            want_id = nil
+            msgs = d.msgs or {}
+            detached = not d.newest
+            fact.wa_detached = detached
+            if not detached then cache[d.jid] = msgs end
+            start = 1
+            snap()
+            fact.wa_cur = -1
+            msgs_show()
+            fact.wa_seq = fact.wa_seq + 1
+            after(400, function() step_to(d.id) end)
+        end
+        local function show_hit()
+            if #hits == 0 then
+                text.wa_cs_t = asked_q and asked_q ~= "" and "No results" or ""
+                return
+            end
+            text.wa_cs_t = hit_i .. " of " .. #hits
+            fact.wa_csr = true
+            go_to(hits[hit_i].id)
+        end
+        X.found = function(d)
+            if d.jid ~= open_jid or d.q ~= q_now() then return end
+            hits = d.hits or {}
+            hit_i = 0
+            text.wa_cs_t = #hits == 0 and "No results" or (#hits == 1 and "1 found" or (#hits .. " found"))
+            if go_when_found then
+                go_when_found = false
+                hit_i = #hits > 0 and 1 or 0
+                show_hit()
+            end
+        end
+        on("wa_cs_go", function(dir)
+            if q_now() == "" then fact.wa_csr = false; return end
+            -- Asked, and not answered yet (or still being written): it goes there once it is.
+            if #hits == 0 or asked_q ~= q_now() then
+                if dir == 0 then go_when_found = true end
+                return
+            end
+            if dir == 0 then hit_i = 1
+            elseif dir > 0 then hit_i = math.min(#hits, hit_i + 1)
+            else hit_i = math.max(1, hit_i - 1) end
+            show_hit()
+        end)
+        local function cs_close()
+            fact.wa_cs = false
+            fact.wa_csr = false
+            hits, hit_i, asked_q, go_when_found = {}, 0, nil, false
+            text.wa_cq = ""
+            text.wa_cs_t = ""
+        end
+        on("wa_cs_close", cs_close)
+
+        -- The pointer's: the bar beside a message, or its menu (row × 10 + what it does).
+        local ACT = { rx_open, reply_to, fwd_open, yank, save, edit, del_ask, open_media }
+        on("wa_act", function(v)
+            local m = rows_of[v // 10 + 1]
+            local f = ACT[v % 10]
+            if m and f then f(m) end
+        end)
+
+        -- Another chat: what was over this one goes.
+        X.leave = function()
+            fact.wa_menu = -1
+            fact.wa_gal = false
+            fact.wa_rx = false
+            fact.wa_del = 0
+            fact.wa_fwd = false
+            fact.wa_who = false
+            cs_close()
+            want_id = nil
+        end
+
+        -- ── voice notes (v): held, it records until let go; tapped, until Enter ──
+        local source = nil
+        local function ask_source(then_)
+            run("pactl", { "get-default-source" }, function(out, code)
+                local s = string.match(out or "", "^%s*(%S+)")
+                if code == 0 and s then source = s end
+                if then_ then then_() end
+            end)
+        end
+        ask_source()
+        local rec = nil     -- { proc, path, jid, started, long, free }
+        local rec_n = 0
+        local function rec_stop(keep)
+            local r = rec
+            if not r then return end
+            rec = nil
+            fact.wa_rec = false
+            fact.wa_rec_free = false
+            r.keep = keep
+            if r.proc then
+                write(r.proc, "q")
+                after(3000, function() if not r.done then kill(r.proc) end end)
+            end
+        end
+        local function rec_done(r)
+            r.done = true
+            local secs = os.time() - r.started
+            if not r.keep or secs < 1 then
+                run("rm", { "-f", r.path }, nil, { output = false })
+                if r.keep then toast("Hold v to record a voice note") end
+                return
+            end
+            if r.jid ~= open_jid then return end
+            if detached then X.newest() end
+            tmp_n += 1
+            local tmp = "tmp-" .. tmp_n
+            cache[r.jid] = cache[r.jid] or msgs
+            msgs = cache[r.jid]
+            msgs[#msgs + 1] = { id = tmp, me = true, from = "", text = string.format("Voice message · %d:%02d", secs // 60, secs % 60), ts = os.time(),
+                kind = "audio", media = "", w = 0, h = 0, st = 0, qfrom = "", qtext = "" }
+            msgs_show()
+            fact.wa_mine = fact.wa_mine + 1
+            send({ op = "file", jid = r.jid, path = r.path, caption = "", tmp = tmp, quote = "", ptt = true, secs = secs })
+        end
+        local function can_rec()
+            return looking() and open_jid ~= nil and wa_state == "ok" and not fact.wa_typing and not fact.wa_search
+                and not fact.wa_gal and not fact.wa_ql and not fact.wa_rx and fact.wa_del == 0 and not fact.wa_fwd and not fact.wa_who
+                and not fact.wa_cs and not (fact.side and fact.side_focus)
+        end
+        local function rec_start()
+            rec_n += 1
+            local r = { path = PASTE .. "/voice-" .. os.time() .. "-" .. rec_n .. ".ogg", jid = open_jid, started = os.time(), long = false, free = false }
+            rec = r
+            fact.wa_rec = true
+            fact.wa_rec_free = false
+            text.wa_rec_t = "0:00"
+            after(450, function() if rec == r then r.long = true end end)
+            local function go()
+                if rec ~= r and r.keep == nil then return end
+                if not source then toast("No microphone found"); rec_stop(false); return end
+                r.proc = spawn("ffmpeg", { "-hide_banner", "-loglevel", "error", "-f", "pulse", "-i", source, "-ac", "1", "-ar", "48000",
+                    "-c:a", "libopus", "-b:a", "32k", "-application", "voip", "-y", r.path },
+                    function() end, function() rec_done(r) end, { stdin = "open" })
+                if r.keep ~= nil then write(r.proc, "q") end     -- let go of already
+            end
+            if source then go() else ask_source(go) end
+        end
+        every(250, function()
+            if not rec then return end
+            local s = os.time() - rec.started
+            text.wa_rec_t = string.format("%d:%02d", s // 60, s % 60)
+            if s >= 15 * 60 then rec_stop(true) end
+        end)
+        on("key_down", function(name)
+            if name ~= "v" then return end
+            if rec then
+                if rec.free then rec_stop(true) end
+                return
+            end
+            if can_rec() then rec_start() end
+        end)
+        on("key_up", function(name)
+            if name ~= "v" or not rec or rec.free then return end
+            if rec.long then
+                rec_stop(true)
+            else
+                rec.free = true
+                fact.wa_rec_free = true
+            end
+        end)
+        on("wa_rec_tap", function()
+            if rec then rec_stop(true); return end
+            fact.wa_typing = false
+            if not can_rec() then return end
+            rec_start()
+            rec.free = true
+            fact.wa_rec_free = true
+        end)
+        on("wa_rec_send", function() rec_stop(true) end)
+        on("wa_rec_cancel", function() rec_stop(false) end)
+        on("fact:expanded", function(e) if not e then rec_stop(false) end end)
+    end)()
 
     wa_hook.stage = function(path) stage(path) end
     wa_hook.insert = function(words)
@@ -5095,8 +7150,8 @@ end)()
     wa_hook.open = function(jid)
         text.wa_find = ""
         fact.wa_focus = false
-        fact.panel = "wa"
-        fact.expanded = true
+        fact.app = "wa"
+        fact.expanded = false
         filter()
         for i, c in ipairs(shown) do if c.jid == jid then choose(i - 1) end end
     end
@@ -5110,3 +7165,50 @@ end)()
     end
     every(60000, function() if looking() then list_show() end end)   -- "Yesterday" comes at midnight
 end)()
+
+-- ── the Glass page (pages/glasstune.plm): live sliders over glass.plm ──────
+-- Index → saved value's key and its range; must match the page's rows. A
+-- slider sets the `lgo_<key>` override (the glass changes at once); Save
+-- writes every touched value into glass.plm (scripts/glass-save.py, which
+-- lumen hot-reloads), Reset drops the overrides. Globals: island.luau's top
+-- level is at Luau's 200-local limit.
+GLASS_TUNE = {
+    [0] = { "readability", 0, 1 }, { "frost_strength", 0, 1 }, { "refraction", 0, 40 },
+    { "bevel", 0, 17 }, { "card_refraction", 0, 80 }, { "card_bevel", 0, 40 },
+    { "dispersion", 0, 1 }, { "specular", 0, 1 }, { "merge", 0, 30 },
+    false, false, { "tint", 0, 0.4 },   -- 9, 10: the reading-view frost and tint, removed
+    { "card_tint", 0, 0.5 }, { "prism", 0, 0.3 }, { "card_rim", 0, 0.3 },
+    { "magnify", 0, 0.5 }, { "glass_tint", 0, 1 }, { "rim_tint", 0, 1 },
+    { "milk", 0, 0.3 },
+}
+glass_touched = {}
+on("gl_set", function(code)
+    local t = GLASS_TUNE[math.floor(code / 10000)]
+    if not t then return end
+    local v = t[2] + (t[3] - t[2]) * math.clamp((code % 10000) / 1000, 0, 1)
+    glass_touched[t[1]] = v
+    fact["lgo_" .. t[1]] = v
+    fact.gl_dirty = true
+    fact.gl_note = ""
+end)
+on("gl_save", function()
+    local args = {}
+    for k, v in pairs(glass_touched) do table.insert(args, k .. "=" .. string.format("%.4f", v)) end
+    if #args == 0 then return end
+    run(HOME .. "/.config/lumen/shells/island/scripts/glass-save.py", args, function(_, code)
+        if code == 0 then
+            glass_touched = {}
+            fact.gl_dirty = false
+            fact.gl_note = "Saved"
+            after(2500, function() fact.gl_note = "" end)
+        else
+            fact.gl_note = "Couldn't save"
+        end
+    end)
+end)
+on("gl_reset", function()
+    for _, t in pairs(GLASS_TUNE) do if t then fact["lgo_" .. t[1]] = -1 end end
+    glass_touched = {}
+    fact.gl_dirty = false
+    fact.gl_note = ""
+end)

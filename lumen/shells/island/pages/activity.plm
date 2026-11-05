@@ -1,0 +1,175 @@
+// The Activity page (Controls → Activity, or Mod+X): a task manager.
+// At the top, the machine: CPU now and over the last minute and a half (a bar
+// per sample), memory and swap, and whether the RTX card is awake. Then what
+// is running, grouped as you think of it —an app with a window is one row with
+// all its processes in it (Zen and its content processes); a terminal is not, so
+// a build inside Ghostty shows as itself—, by CPU or by memory. A row opens its
+// processes; the bead quits: one press arms it, another asks the app to quit,
+// and if it is still there the bead turns to Force quit. Sorted by CPU, memory
+// or name; pressing the sort in use again turns it round.
+// Vim, as the clipboard: normal mode on open —j k move, gg G, l or Enter opens an
+// app, h up, dd quits, D forces, Tab 1 2 3 or s the sort, r round, q closes—;
+// i or / searches (an app, a process, a pid), Esc back to normal keeping it.
+// The logic (island.luau, "activity") asks lumen's `processes` every 2 s while
+// the page is up, and nothing at all while it is not.
+part Activity {
+    component TaskRow(r: record) {
+        size: 352, 46
+        zone box row { from: 0, 0; size: if(r.can_kill, 312, 352), 46; corner: 23 continuous; cursor: pointer; label: "{r.name}, {r.cpu} CPU, {r.mem}"; active: r.group; selected: r.sel }
+        body {
+            color: chip_hi; opacity: 38% * row.hover * if(r.group, 1, 0); light: 4%, 0, 23
+            box { from: 0, 0; size: 352, 46; corner: 23 continuous }
+        }
+        body {
+            gradient: 0, 0 to 352, 46, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
+            opacity: 85%; light: 4%, 0, 23; show: r.sel
+            box { from: 0, 0; size: 352, 46; corner: 23 continuous }
+        }
+        //  An app with a window: a lilac bead with its initial; the rest, grey.
+        ellipse { at: 21, 23; radius: 13; color: if(r.app, mix(chip, lilac, 0.35), chip); opacity: 80% }
+        text r.initial { at: 21, 23.5; anchor: center; size: 12; weight: 700; family: "SF Pro Display"; color: ink; opacity: 90% }
+        text r.name {
+            at: 42, 15; anchor: left center; width: 170; lines: 1
+            size: 13; weight: 600; family: "SF Pro Display"; color: ink
+        }
+        text r.sub {
+            at: 42, 31; anchor: left center; width: 170; lines: 1
+            size: 10.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 45%
+        }
+        //  CPU and memory, the one it is sorted by brighter.
+        text r.cpu { at: 248, 23; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(act_tab == 0, 92%, 55%) }
+        text r.mem { at: 308, 23; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(act_tab == 1, 92%, 55%) }
+        group {
+            show: r.can_kill
+            zone ellipse qb { at: 334, 23; radius: 14; cursor: pointer; label: pick(if(r.force, 2, if(r.armed, 1, 0)), "Quit {r.name}", "Quit {r.name} (press again)", "Force quit {r.name}") }
+            body {
+                color: if(r.armed or r.force, mix(rose, #8a3e50, qb.hover), mix(chip, chip_hi, qb.hover)); material: control
+                opacity: if(r.force, 70%, if(r.armed, 55%, lgc_fill + 7% * qb.hover))
+                ellipse { at: 334, 23; radius: 13 - 0.5 * qb.pressed }
+            }
+            //  An ×, as the window close buttons have it.
+            path { at: 334, 23; stroke: 1.7; color: if(r.armed or r.force, rose_ink, ink); opacity: 85%; move -4, -4; line 4, 4 }
+            path { at: 334, 23; stroke: 1.7; color: if(r.armed or r.force, rose_ink, ink); opacity: 85%; move 4, -4; line -4, 4 }
+            on press qb { emit act_quit(r.index) }
+        }
+        on press row { emit act_row(r.index) }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_act)
+        move: 28 * (1 - on_act), 0
+
+        //  The header: the name; inside an app, Up before it.
+        prop atu = 0 ~240ms
+        follow atu = if(act_depth > 0, 1, 0)
+        group {
+            move: ex0 + 16, 44
+            group {
+                opacity: atu
+                zone ellipse atb { at: 16, 18; radius: 16; cursor: pointer; label: "Up"; active: act_depth > 0 }
+                body {
+                    color: mix(chip, chip_hi, atb.hover); material: control
+                    ellipse { at: 16, 18; radius: (16 - 0.6 * atb.pressed) * atu }
+                }
+                path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * atb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            }
+            //  The search, as the clipboard's: a round button that `i` stretches into the field.
+            prop asx = 0 ~300ms
+            follow asx = if(act_ins or not act_q_empty, 1, 0)
+            prop asi = 0 ~200ms
+            follow asi = if(act_ins, 1, 0)
+            let asl = 316 - (316 - 38 * atu) * asx
+            text "Activity" { at: 4 + 38 * atu - 10 * asx, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink; opacity: 1 - smooth(0, 0.5, asx) }
+            text act_count { at: 306 - 10 * asx, 18; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 50% * (1 - smooth(0, 0.5, asx)) }
+            body {
+                color: mix(chip, chip_hi, asb.hover * (1 - asx)); material: field
+                opacity: lgc_fill + 5% * (1 - asx)
+                box { from: asl, 0; size: 352 - asl, 36; corner: 18 continuous }
+            }
+            box { from: asl, 0; size: 352 - asl, 36; corner: 18 continuous; stroke: 1; color: soft_l; opacity: 45% * asi }
+            image ic_search { at: asl + 11 + 2 * asx, 11; size: 14, 14; tint: ink; opacity: 85% - 25% * asx * (1 - asi) }
+            group {
+                opacity: smooth(0.55, 1, asx)
+                input act_q { at: asl + 34, 9; width: max(10, 352 - asl - 44); size: 13; color: ink; placeholder: ""; label: "Search processes" }
+                text "An app, a process or a pid" {
+                    at: asl + 34, 18; anchor: left center; size: 13; weight: 500; family: "SF Pro Display"
+                    color: ink; opacity: 40%; show: act_q_empty
+                }
+            }
+            zone box asb { from: asl, 0; size: 352 - asl, 36; corner: 18 continuous; cursor: pointer; label: "Search (i)"; active: not act_ins }
+        }
+
+        //  The machine: CPU now and its last minute and a half; memory and swap; the card.
+        group {
+            move: ex0 + 16, 86
+            text act_cpu { at: 0, 12; anchor: left center; size: 20; weight: 700; family: "SF Pro Display"; color: ink }
+            text "CPU" { at: 62, 15; anchor: left center; size: 11; weight: 600; family: "SF Pro Display"; color: ink; opacity: 50% }
+            text act_mem { at: 352, 14; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: 70% }
+            //  A bar a sample, the newest on the right, filling up from the bottom.
+            box { from: 0, 28; size: 352, 30; corner: 8 continuous; color: well; opacity: 22% }
+            row {
+                at: 0, 28; gap: 0
+                for s in actspark {
+                    group {
+                        size: 8, 30
+                        box { from: 1.5, 29 - 27 * s.h; size: 5, max(1, 27 * s.h); corner: 1.5 continuous; color: mix(soft_l, coral, clamp((s.h - 0.6) / 0.4, 0, 1)); opacity: 85% }
+                    }
+                }
+            }
+            //  Memory, as a filling track.
+            box { from: 0, 66; size: 352, 6; corner: 3 continuous; color: well; opacity: 30% }
+            box { from: 0, 66; size: max(6, 352 * act_mem_k), 6; corner: 3 continuous; color: mix(soft_s, coral, clamp((act_mem_k - 0.75) / 0.25, 0, 1)); opacity: 90% }
+            text act_info { at: 0, 84; anchor: left center; width: 352; lines: 1; size: 10.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: 55% }
+        }
+
+        //  CPU · Memory · Name (the one in use again: the other way round); inside an app, which one.
+        prop att = 0 ~240ms
+        follow att = act_tab
+        group {
+            move: ex0 + 16, 186
+            show: act_depth == 0
+            body {
+                color: chip; material: control
+                box { from: 0, 0; size: 352, 28; corner: 14 continuous }
+            }
+            body {
+                color: chip_hi; light: 5%, 2, 12
+                box { from: 2 + 116 * att, 2; size: 116, 24; corner: 12 continuous }
+            }
+            repeat k in 0..3 {
+                zone box attz.$k { from: 2 + 116 * k, 0; size: 116, 28; corner: 14 continuous; cursor: pointer; label: "Sort"; role: tab; selected: act_tab == k }
+                on press attz.$k { emit act_tab_at(k) }
+            }
+            text pick(if(act_tab == 0, if(act_desc, 1, 2), 0), "CPU", "CPU ↓", "CPU ↑") { at: 60, 14.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * clamp(1 - abs(att - 0), 0, 1) }
+            text pick(if(act_tab == 1, if(act_desc, 1, 2), 0), "Memory", "Memory ↓", "Memory ↑") { at: 176, 14.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * clamp(1 - abs(att - 1), 0, 1) }
+            text pick(if(act_tab == 2, if(act_desc, 1, 2), 0), "Name", "Name A–Z", "Name Z–A") { at: 292, 14.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% + 45% * clamp(1 - abs(att - 2), 0, 1) }
+        }
+        group {
+            move: ex0 + 16, 186
+            show: act_depth > 0
+            body {
+                color: well; opacity: 22%
+                box { from: 0, 0; size: 352, 28; corner: 14 continuous }
+            }
+            text act_crumb { at: 12, 14.5; anchor: left center; width: 328; lines: 1; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 85% }
+        }
+
+        zone box act_list { from: ex0 + 16, 226; size: 352, 7 * 48 - 2; label: "Processes" }
+        column {
+            at: ex0 + 16, 226; gap: 2
+            for r in acts { TaskRow(r) }
+        }
+        text pick(if(act_q_empty, 0, 1), "Looking…", "Nothing matches") {
+            at: ex0 + 192, 254; anchor: center; size: 12.5; weight: 500; family: "SF Pro Display"
+            color: ink; opacity: 50%; show: acts.count == 0
+        }
+        text act_status {
+            at: ex0 + 192, 226 + 7 * 48 + 10; anchor: center; width: 352; lines: 1; align: center
+            size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink
+        }
+    }
+
+    on press atb while act_depth > 0 { emit act_up }
+    on press asb { act_ins = true; focus act_q }
+    on scroll act_list { emit act_scroll(wheel) }
+}

@@ -119,7 +119,7 @@ def hue_dist(a, b):
     return abs((a - b + 180) % 360 - 180)
 
 
-# Logical pixels, as niri lays them out (config.kdl: gaps 8, struts 16/16/-3)
+# Logical pixels, as niri lays them out (niri/conf/layout.kdl: gaps 8, struts 16/16/-3)
 # under the island (island.plm: margin 5, reserve 34; the open card is up to
 # ~400 wide).
 GEOM = {"gaps": 8, "strut_lr": 16, "strut_top": -3, "island_margin": 5, "island_reserve": 34,
@@ -442,7 +442,9 @@ def lumen_text(t):
     order = ["ink", "cool", "warm", "lilac", "sunset", "dusk", "deep", "rim_grey",
              "idle_c", "low_c", "chip", "chip_hi", "pearl", "pearl_ink",
              "shade", "stack1_t", "stack1_b", "stack2_t", "stack2_b", "well_t", "well_b"]
-    lines = [f"    let {k:<9} = {r[k]}" for k in order]
+    # The text colour is `ink_base`: island.plm makes `ink` from it, switching to
+    # dark text where niri decides the glass behind is light (lumen-glass v3).
+    lines = [f"    let {('ink_base' if k == 'ink' else k):<9} = {r[k]}" for k in order]
     lines.append(f"    let glass_alpha = {t.get('glass_alpha', 38)}%")
     return ("// Written by theme/wallpaper-theme.py for " + Path(t["source"]).name +
             f" (theme: {t['name']}): the island's colours, from what is behind it. Don't edit.\n"
@@ -457,20 +459,38 @@ def glass_niri():
     (the patched one, possibly an older build of it still running after a
     newer was installed): each is tried on that very process's binary, since
     an unknown one would make niri reject the whole config."""
-    try:
-        socks = sorted(Path(os.environ["XDG_RUNTIME_DIR"]).glob("niri.wayland-*.sock"),
-                       key=lambda p: p.stat().st_mtime, reverse=True)
-        exe = f"/proc/{socks[0].name.split('.')[-2]}/exe"
-    except (OSError, KeyError, IndexError):
-        return set()
+    # WALLTHEME_NIRI_EXE: the niri about to start, when none is running yet
+    # (niri/scripts/niri-launch.sh, before falling back to stock niri).
+    exe = os.environ.get("WALLTHEME_NIRI_EXE")
+    if not exe:
+        try:
+            socks = sorted(Path(os.environ["XDG_RUNTIME_DIR"]).glob("niri.wayland-*.sock"),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+            exe = f"/proc/{socks[0].name.split('.')[-2]}/exe"
+        except (OSError, KeyError, IndexError):
+            return set()
     known = set()
     CACHE.mkdir(parents=True, exist_ok=True)
     probe = CACHE / "glass-probe.kdl"
-    for key in GLASS_KEYS:
-        probe.write_text(f"blur {{ {key} 0.5; }}\n")
+    probes = {key: f"blur {{ {key} 0.5; }}\n" for key in GLASS_KEYS}
+    # Not glass, but the same kind of key: only the patched niri has it (columns that
+    # size themselves, niri patch 0036), and stock niri must never be shown it.
+    probes["auto-fit-columns"] = "layout { auto-fit-columns true; }\n"
+    for key, text in probes.items():
+        probe.write_text(text)
         if subprocess.run([exe, "validate", "-c", str(probe)], capture_output=True).returncode == 0:
             known.add(key)
     return known
+
+
+def niri_layout_extra(known):
+    """Layout lines only the patched niri understands."""
+    if "auto-fit-columns" in known:
+        return ("    // Columns size themselves as windows come and go (patched niri; see\n"
+                "    // niri/conf/rules/apps.kdl). Written here, not in conf/, so stock niri\n"
+                "    // (the fallback) never sees it.\n"
+                "    auto-fit-columns true\n")
+    return ""
 
 
 GLASS_SAT = 1.8  # border-glass: how vivid the frost under a border is
@@ -484,7 +504,7 @@ def niri_text(t):
         # A niri without glass borders: nothing shows what is behind, so the
         # island's own light (from what is behind it) stands in until a restart.
         c = t["roles"]["lilac"].upper()
-        return (head + "layout {\n"
+        return (head + "layout {\n" + niri_layout_extra(known) +
                 f"    border {{ active-gradient from=\"{c}\" to=\"#FFFFFFCC\" angle=120; inactive-color \"#FFFFFF1F\"; }}\n"
                 f"    insert-hint {{ color \"{c}40\"; }}\n"
                 f"    tab-indicator {{ active-color \"{c}\"; }}\n"
@@ -503,7 +523,7 @@ def niri_text(t):
             "// hairline at its silhouette (border-shade), faint sheen on the focused one;\n"
             "// unfocused windows' glass is quieter and in shade (border-inactive).\n"
             f"blur {{ {'; '.join(blur)}; }}\n"
-            "layout {\n"
+            "layout {\n" + niri_layout_extra(known) +
             f"    border {{ active-gradient from=\"{n['from']}\" to=\"{n['to']}\" angle=120; inactive-color \"{n['inactive']}\"; }}\n"
             "    insert-hint { color \"#FFFFFF33\"; }\n"
             "    tab-indicator { active-color \"#FFFFFFB3\"; inactive-color \"#FFFFFF33\"; }\n"
@@ -740,6 +760,19 @@ def current_wallpaper():
     sys.exit("awww shows no image")
 
 
+def notify_keyboard():
+    """Tell razer-fx the wallpaper changed (SIGHUP), so its battery look —
+    the keys as a reflection of the wallpaper — follows without polling."""
+    import signal
+    pidfile = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "razer-fx.pid"
+    try:
+        pid = int(pidfile.read_text().strip())
+        if b"razer-fx" in Path(f"/proc/{pid}/cmdline").read_bytes():
+            os.kill(pid, signal.SIGHUP)
+    except (OSError, ValueError):
+        pass
+
+
 def apply(path):
     t = theme_for(path)
     changed = []
@@ -749,7 +782,10 @@ def apply(path):
         changed.append("niri")
         subprocess.run(["niri", "msg", "action", "load-config-file"], capture_output=True)
     changed += apply_term(t)
-    write_if_changed(STATE, json.dumps(t, indent=2) + "\n")
+    # niri's own glass (the screenshot UI) follows the island's colours.
+    subprocess.run([sys.executable, str(HERE / "niri-glass.py")], capture_output=True)
+    if write_if_changed(STATE, json.dumps(t, indent=2) + "\n"):
+        notify_keyboard()
     print(f"{Path(path).name}: {t['name']}" + (f" → {', '.join(changed)}" if changed else " (unchanged)"))
 
 

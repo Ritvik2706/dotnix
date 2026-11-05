@@ -1,0 +1,462 @@
+From a98e8d781f54c9e0b8182e50ee0657c2bcbc6a96 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 14:05:57 +0400
+Subject: [PATCH 23/38] lumen-glass v4: glass on glass (layer 1), 24 shapes
+
+Controls on a panel (layer 1) are a second capture drawn above the panel's
+glass, so they refract it, as on iOS. Flat, like MacShell's Control Center
+buttons: no inner edge shading, no drop shadow, and no second blur. Up to
+16 shapes per layer.
+---
+ resources/lumen-glass-v1.xml                 |  10 +-
+ src/protocols/lumen_glass.rs                 |  18 +-
+ src/render_helpers/liquid_glass.rs           | 228 ++++++++++---------
+ src/render_helpers/shaders/liquid_glass.frag |  20 +-
+ 4 files changed, 153 insertions(+), 123 deletions(-)
+
+diff --git a/resources/lumen-glass-v1.xml b/resources/lumen-glass-v1.xml
+index 3fbff1ff..211ba3dc 100644
+--- a/resources/lumen-glass-v1.xml
++++ b/resources/lumen-glass-v1.xml
+@@ -34,7 +34,7 @@
+     Private to lumen and the patched niri.
+   </description>
+ 
+-  <interface name="lumen_glass_manager_v1" version="3">
++  <interface name="lumen_glass_manager_v1" version="4">
+     <description summary="glass for surfaces">
+     </description>
+ 
+@@ -58,7 +58,7 @@
+     </request>
+   </interface>
+ 
+-  <interface name="lumen_glass_surface_v1" version="3">
++  <interface name="lumen_glass_surface_v1" version="4">
+     <description summary="the glass of one surface">
+       All state is double-buffered: it applies on the surface's next
+       wl_surface.commit, together with what the client drew for that frame.
+@@ -79,14 +79,16 @@
+     <request name="set_shapes">
+       <description summary="the glass shapes">
+         Native-endian 32-bit floats, 13 per shape (16 from version 2, all
+-        shapes alike), at most 8 shapes; an empty
++        shapes alike), at most 8 shapes (24 from version 4); an empty
+         array removes all glass. Per shape, in surface-local logical pixels
+         unless noted:
+ 
+           x, y, width, height
+           radius top-left, top-right, bottom-right, bottom-left
+           corner: 0 circular arcs, 1 continuous (squircle, lumen's
+-            `continuous` corners)
++            `continuous` corners); from version 4, plus 2 x layer: 0 glass
++            on what is behind the surface, 1 glass on top of that glass
++            (a control on a panel), which refracts it
+           refraction: how far the backdrop is displaced at the very rim,
+             fading to 0 where the edge's curve ends
+           dispersion: 0..1, how much the colours separate at the rim
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index 77d37dc0..2b67f059 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -14,13 +14,13 @@ use super::raw::lumen_glass::v1::server::{lumen_glass_manager_v1, lumen_glass_su
+ use lumen_glass_manager_v1::LumenGlassManagerV1;
+ use lumen_glass_surface_v1::LumenGlassSurfaceV1;
+ 
+-const VERSION: u32 = 3;
++const VERSION: u32 = 4;
+ 
+ /// Floats per shape in set_shapes: 13, or 16 (version 2) with lens zoom, tint
+ /// and rim tint (the two can't be confused with at most 8 shapes).
+ const SHAPE_FLOATS: usize = 13;
+ const SHAPE_FLOATS_EXT: usize = 16;
+-pub const MAX_SHAPES: usize = 8;
++pub const MAX_SHAPES: usize = 24;
+ 
+ #[derive(Debug, Clone, Copy, PartialEq)]
+ pub struct GlassShape {
+@@ -31,6 +31,9 @@ pub struct GlassShape {
+     /// top-left, top-right, bottom-right, bottom-left
+     pub radii: [f32; 4],
+     pub continuous: bool,
++    /// 0: glass on what is behind the surface (panels, capsules); 1: glass on
++    /// top of that glass (controls inside a panel), drawn as a second layer.
++    pub layer: u8,
+     pub refraction: f32,
+     pub dispersion: f32,
+     pub bevel: f32,
+@@ -210,11 +213,8 @@ where
+             }
+             lumen_glass_surface_v1::Request::SetShapes { shapes } => {
+                 let floats = shapes.len() / 4;
+-                let per = if floats % SHAPE_FLOATS_EXT == 0 && floats / SHAPE_FLOATS_EXT <= MAX_SHAPES {
+-                    SHAPE_FLOATS_EXT
+-                } else {
+-                    SHAPE_FLOATS
+-                };
++                // Version 2 clients send 16 per shape, older ones 13.
++                let per = if glass.version() >= 2 { SHAPE_FLOATS_EXT } else { SHAPE_FLOATS };
+                 if shapes.len() % 4 != 0 || floats % per != 0 {
+                     glass.post_error(
+                         lumen_glass_surface_v1::Error::InvalidShapes,
+@@ -236,7 +236,9 @@ where
+                         w: v[2],
+                         h: v[3],
+                         radii: [v[4].max(0.), v[5].max(0.), v[6].max(0.), v[7].max(0.)],
+-                        continuous: v[8] >= 0.5,
++                        // corner: continuous (0/1) + 2 x layer.
++                        continuous: v[8].rem_euclid(2.) >= 0.5,
++                        layer: ((v[8] / 2.).floor() as i32).clamp(0, 1) as u8,
+                         refraction: v[9].clamp(-200., 200.),
+                         dispersion: v[10].clamp(0., 1.),
+                         bevel: v[11].max(0.),
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 5bb39cf3..ff4c4621 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -30,16 +30,33 @@ const EDGE_PAD: f32 = 28.;
+ struct SurfaceGlass(Mutex<SurfaceGlassInner>);
+ 
+ struct SurfaceGlassInner {
+-    effect: FramebufferEffect,
++    /// Layer 0: glass on what is behind the surface. Layer 1: glass on top of
++    /// that glass (controls inside a panel), drawn above it, so its capture
++    /// holds layer 0's glass too and it refracts that, as on iOS.
++    layers: [GlassLayer; 2],
+     last: Option<LumenGlassCachedState>,
+-    /// The backdrop's brightness behind each shape, read back by the capture.
+-    measure: Arc<Mutex<GlassMeasure>>,
+     /// Each shape's light/dark glass, as decided and as drawn (crossfading).
+     lights: Vec<ShapeLight>,
++}
++
++struct GlassLayer {
++    effect: FramebufferEffect,
++    /// The backdrop's brightness behind each of this layer's shapes.
++    measure: Arc<Mutex<GlassMeasure>>,
+     /// The reading the decisions were last made from (one decision per reading).
+     seen: Option<Instant>,
+ }
+ 
++impl GlassLayer {
++    fn new() -> Self {
++        Self {
++            effect: FramebufferEffect::new(),
++            measure: Arc::new(Mutex::new(GlassMeasure::default())),
++            seen: None,
++        }
++    }
++}
++
+ /// Light or dark glass for a shape, like iOS: decided from what is behind with
+ /// hysteresis (light above LIGHT_ON, dark again only below LIGHT_OFF, so a
+ /// backdrop in between never flickers), crossfaded over FADE. The client is
+@@ -100,49 +117,6 @@ pub fn render_for_surface(
+             return false;
+         }
+ 
+-        // The shapes' bounding box, a pixel wider for the antialiased rim.
+-        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+-        for s in &state.shapes {
+-            x0 = x0.min(s.x);
+-            y0 = y0.min(s.y);
+-            x1 = x1.max(s.x + s.w);
+-            y1 = y1.max(s.y + s.h);
+-        }
+-        // Captured wider than the shapes (see EDGE_PAD).
+-        let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
+-        let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
+-        let geometry = Rectangle::new(
+-            location + Point::from((x0 as f64, y0 as f64)),
+-            Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
+-        );
+-
+-        let shapes: Vec<[f32; 16]> = state
+-            .shapes
+-            .iter()
+-            .map(|s| {
+-                [
+-                    s.x - x0,
+-                    s.y - y0,
+-                    s.w,
+-                    s.h,
+-                    s.radii[0],
+-                    s.radii[1],
+-                    s.radii[2],
+-                    s.radii[3],
+-                    // corner style and rim tint share a float: continuous (0/1)
+-                    // + 2 x rim tint in percent (decoded in the shader).
+-                    (if s.continuous { 1. } else { 0. }) + 2. * (s.rim_tint * 100.).round(),
+-                    s.refraction,
+-                    s.dispersion,
+-                    s.bevel,
+-                    s.specular,
+-                    state.frost,
+-                    s.magnify,
+-                    s.tint,
+-                ]
+-            })
+-            .collect();
+-
+         // Frost is a dial, not a switch: it scales the blur's passes and offset
+         // down to a light soften (the shapes behind stay recognisable, so the
+         // lensing shows) and up to the window blur. Always a real blur of that
+@@ -157,43 +131,71 @@ pub fn render_for_surface(
+         });
+         let noise = if frosted { blur_config.noise as f32 } else { 0. };
+ 
+-        let glass = states
+-            .data_map
+-            .get_or_insert_threadsafe(|| {
+-                SurfaceGlass(Mutex::new(SurfaceGlassInner {
+-                    effect: FramebufferEffect::new(),
+-                    last: None,
+-                    measure: Arc::new(Mutex::new(GlassMeasure::default())),
+-                    lights: Vec::new(),
+-                    seen: None,
+-                }))
+-            });
++        let glass = states.data_map.get_or_insert_threadsafe(|| {
++            SurfaceGlass(Mutex::new(SurfaceGlassInner {
++                layers: [GlassLayer::new(), GlassLayer::new()],
++                last: None,
++                lights: Vec::new(),
++            }))
++        });
+         let mut glass = glass.0.lock().unwrap();
+         let glass = &mut *glass;
+         if glass.last.as_ref() != Some(&state) {
+-            glass.effect.damage();
++            for l in &mut glass.layers {
++                l.effect.damage();
++            }
+             glass.last = Some(state.clone());
+         }
+ 
+-        // Light or dark, per shape, from the latest reading of what is behind.
+-        let mut shapes = shapes;
+         let object = glass_object(states).filter(|o| o.version() >= 3);
+-        let announce = glass.lights.len() != shapes.len();
+-        if announce {
+-            glass.lights = vec![ShapeLight::new(); shapes.len()];
++        if glass.lights.len() != state.shapes.len() {
++            glass.lights = vec![ShapeLight::new(); state.shapes.len()];
+         }
+-        let (lum, reading) = {
+-            let m = glass.measure.lock().unwrap();
+-            (m.lum.clone(), m.last)
+-        };
+-        // Decide only on a new reading (not once per frame).
+-        let fresh = reading.is_some() && reading != glass.seen;
+-        glass.seen = reading;
+         let now = Instant::now();
+-        let mut animating = false;
+-        for (i, (shape, l)) in shapes.iter_mut().zip(glass.lights.iter_mut()).enumerate() {
+-            if fresh && lum.len() == glass_count(&state) {
+-                if let Some(&b) = lum.get(i) {
++
++        // Layer 1 first: pushed first, it is drawn on top (and captures layer 0).
++        for layer in [1u8, 0] {
++            // At most the shader's 16 per layer.
++            let idx: Vec<usize> = (0..state.shapes.len())
++                .filter(|&i| state.shapes[i].layer == layer)
++                .take(16)
++                .collect();
++            if idx.is_empty() {
++                continue;
++            }
++            let lay = &mut glass.layers[layer as usize];
++
++            // The layer's shapes' bounding box, captured wider (see EDGE_PAD).
++            let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
++            for &i in &idx {
++                let s = &state.shapes[i];
++                x0 = x0.min(s.x);
++                y0 = y0.min(s.y);
++                x1 = x1.max(s.x + s.w);
++                y1 = y1.max(s.y + s.h);
++            }
++            let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
++            let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
++            let geometry = Rectangle::new(
++                location + Point::from((x0 as f64, y0 as f64)),
++                Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
++            );
++
++            // Light or dark, per shape, from this layer's latest reading.
++            let (lum, reading) = {
++                let m = lay.measure.lock().unwrap();
++                (m.lum.clone(), m.last)
++            };
++            // Decide only on a new reading (not once per frame).
++            let fresh = reading.is_some() && reading != lay.seen && lum.len() == idx.len();
++            lay.seen = reading;
++            let mut animating = false;
++            let mut shapes: Vec<[f32; 16]> = Vec::with_capacity(idx.len());
++            for (k, &i) in idx.iter().enumerate() {
++                let s = &state.shapes[i];
++                let l = &mut glass.lights[i];
++                if fresh {
++                    let b = lum[k];
+                     let want = if l.light { b > LIGHT_OFF } else { b > LIGHT_ON };
+                     if !l.known {
+                         // The first reading: as it is, no fade on appearing.
+@@ -218,38 +220,58 @@ pub fn render_for_surface(
+                         l.against = 0;
+                     }
+                 }
++                let v = l.value(now);
++                animating |= v != if l.light { 1. } else { 0. };
++                // A client that can't switch its text keeps light glass at 80%,
++                // so white text on it still reads.
++                let v = if object.is_some() { v } else { v * 0.8 };
++                shapes.push([
++                    s.x - x0,
++                    s.y - y0,
++                    s.w,
++                    s.h,
++                    s.radii[0],
++                    s.radii[1],
++                    s.radii[2],
++                    s.radii[3],
++                    // corner (0/1) + 2 x (rim tint % + 128 x (light % + 128 x flat)),
++                    // see the shader; layer 1 (controls on a panel) is flat.
++                    (if s.continuous { 1. } else { 0. })
++                        + 2. * ((s.rim_tint * 100.).round()
++                            + 128. * ((v * 100.).round() + 128. * if layer >= 1 { 1. } else { 0. })),
++                    s.refraction,
++                    s.dispersion,
++                    s.bevel,
++                    s.specular,
++                    state.frost,
++                    s.magnify,
++                    s.tint,
++                ]);
++            }
++            if animating {
++                lay.effect.damage();
+             }
+-            let v = l.value(now);
+-            animating |= v != if l.light { 1. } else { 0. };
+-            // A client that can't switch its text keeps light glass at 80%,
+-            // so white text on it still reads.
+-            let v = if object.is_some() { v } else { v * 0.8 };
+-            // corner (0/1) + 2 x (rim tint % + 128 x light %), see the shader.
+-            shape[8] += 2. * 128. * (v * 100.).round();
+-        }
+-        if animating {
+-            glass.effect.damage();
+-        }
+ 
+-        let params = RenderParams {
+-            geometry,
+-            subregion: None,
+-            clip: Some((geometry, CornerRadius::default())),
+-            scale,
+-        };
+-        let elem = glass
+-            .effect
+-            .render(ns, params, blur, noise, state.saturation)
+-            .with_glass(GlassDraw {
+-                shapes,
+-                merge: state.merge,
+-                measure: Some(glass.measure.clone()),
+-            });
+-        push(elem.into());
++            let params = RenderParams {
++                geometry,
++                subregion: None,
++                clip: Some((geometry, CornerRadius::default())),
++                scale,
++            };
++            // Layer 1 captures layer 0's glass, already frosted: not blurred a
++            // second time (one light pass only made it blocky).
++            let blur = if layer >= 1 { None } else { blur };
++            let elem = lay
++                .effect
++                .render(ns, params, blur, if layer >= 1 { 0. } else { noise }, state.saturation)
++                .with_glass(GlassDraw {
++                    shapes,
++                    merge: state.merge,
++                    measure: Some(lay.measure.clone()),
++                });
++            push(elem.into());
++        }
+         true
+     })
+ }
+ 
+-fn glass_count(state: &LumenGlassCachedState) -> usize {
+-    state.shapes.len()
+-}
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 42edeff7..f252c341 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -53,7 +53,7 @@ uniform mat3 input_to_geo;
+ // Per shape, columns: (x, y, w, h), radii (tl, tr, br, bl),
+ // (corner, refraction, dispersion, bevel), (specular, frost, -, -).
+ // Coordinates in logical px from the bounding box's top-left.
+-uniform mat4 glass_shapes[8];
++uniform mat4 glass_shapes[16];
+ uniform float glass_count;
+ uniform float glass_merge;
+ uniform float saturation;
+@@ -98,7 +98,7 @@ float glass_sdf(vec2 p, out float nearest) {
+     float d = 1e6;
+     float best = 1e6;
+     nearest = 0.0;
+-    for (int i = 0; i < 8; i++) {
++    for (int i = 0; i < 16; i++) {
+         if (float(i) >= glass_count)
+             break;
+         float di = shape_sdf(p, glass_shapes[i]);
+@@ -118,7 +118,7 @@ float glass_sdf(vec2 p, out float nearest) {
+ 
+ mat4 shape_at(float index) {
+     mat4 s = glass_shapes[0];
+-    for (int i = 1; i < 8; i++) {
++    for (int i = 1; i < 16; i++) {
+         if (float(i) == index)
+             s = glass_shapes[i];
+     }
+@@ -205,13 +205,16 @@ void main() {
+     float frost = clamp(s[3].y, 0.0, 1.0);
+     float magnify = s[3].z;                          // vertical lens of the whole slab
+     float tint_mix = clamp(s[3].w, 0.0, 1.0);        // flat tint mixed in
+-    // s[2].x = corner (0/1) + 2 x (rim tint % + 128 x light %).
++    // s[2].x = corner (0/1) + 2 x (rim tint % + 128 x (light % + 128 x flat)).
+     float glass_bits = floor(s[2].x / 2.0);
+     float rim_tint = clamp(mod(glass_bits, 128.0) / 100.0, 0.0, 1.0);  // 0 white rim .. 1 the glass's colour
+     // Light or dark glass (0 dark .. 1 light), decided by niri from what is
+     // behind with hysteresis and crossfaded (liquid_glass.rs); the client's
+     // text switches with it.
+-    float light = clamp(floor(glass_bits / 128.0) / 100.0, 0.0, 1.0);
++    float light = clamp(mod(floor(glass_bits / 128.0), 128.0) / 100.0, 0.0, 1.0);
++    // Flat: a control on a panel (MacShell's buttons, flatInner): no inner edge
++    // shading and no drop shadow.
++    float flat_inner = clamp(floor(glass_bits / 16384.0), 0.0, 1.0);
+ 
+     // From logical px to texture coordinates (inverse of input_to_geo's linear part).
+     mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
+@@ -222,7 +225,7 @@ void main() {
+     vec2 down = inv * (vec2(0.0, -3.0) / geo_size);
+     float ignore_i;
+     float sds = glass_sdf((input_to_geo * vec3(v_coords + down, 1.0)).xy * geo_size, ignore_i);
+-    float shadow = 0.30 * min(rim * 1.2, 1.0) * (1.0 - smoothstep(-2.0, 9.0, sds));
++    float shadow = 0.30 * min(rim * 1.2, 1.0) * (1.0 - smoothstep(-2.0, 9.0, sds)) * (1.0 - flat_inner);
+     if (sd > 1.0) {
+         gl_FragColor = vec4(0.0, 0.0, 0.0, shadow * 0.5) * alpha;
+         return;
+@@ -278,8 +281,9 @@ void main() {
+     // absorbing light toward the edge.
+     float ty = clamp((p.y - s[0].y) / max(s[0].w, 1.0), 0.0, 1.0);
+     col += (1.0 - ty) * mix(0.040, 0.030, dark);
+-    col *= 1.0 - 0.12 * exp(-t / 6.0) * clamp(g.y, 0.0, 1.0);
+-    col *= 1.0 - 0.10 * exp(-t / (bz * 0.45));
++    float inner_k = 1.0 - flat_inner;
++    col *= 1.0 - 0.12 * exp(-t / 6.0) * clamp(g.y, 0.0, 1.0) * inner_k;
++    col *= 1.0 - 0.10 * exp(-t / (bz * 0.45)) * inner_k;
+ 
+     // The rim's colour: white, or a brighter shade of the glass here.
+     vec3 rim_col = mix(vec3(0.96, 0.98, 1.0), clamp(col * 1.5 + 0.12, 0.0, 1.0), rim_tint);

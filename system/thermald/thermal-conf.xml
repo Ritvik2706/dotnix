@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<!-- Caps the CPU's sustained heat. Short spikes to 100 C are normal on this
+     laptop and pass under the sampling period; a load that stays above the trip
+     has its power limit pulled down, then its clocks, until it comes back under.
+     razer/razer-fan.py has the fans flat out at 89 C, just under this, so
+     cooling is used up before any speed is given away.
+     Installed by system/power-setup.sh. -->
+<ThermalConfiguration>
+  <Platform>
+    <Name>Razer Blade 15 2022</Name>
+    <ProductName>*</ProductName>
+    <Preference>QUIET</Preference>
+    <ThermalZones>
+      <ThermalZone>
+        <Type>cpu</Type>
+        <TripPoints>
+          <TripPoint>
+            <SensorType>x86_pkg_temp</SensorType>
+            <Temperature>90000</Temperature>
+            <type>passive</type>
+            <ControlType>SEQUENTIAL</ControlType>
+            <CoolingDevice>
+              <index>1</index>
+              <type>rapl_controller</type>
+              <influence>100</influence>
+              <SamplingPeriod>5</SamplingPeriod>
+            </CoolingDevice>
+            <CoolingDevice>
+              <index>2</index>
+              <type>intel_pstate</type>
+              <influence>50</influence>
+              <SamplingPeriod>5</SamplingPeriod>
+            </CoolingDevice>
+          </TripPoint>
+        </TripPoints>
+      </ThermalZone>
+    </ThermalZones>
+  </Platform>
+</ThermalConfiguration>

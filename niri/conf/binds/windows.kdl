@@ -1,0 +1,131 @@
+// binds/windows.kdl — moving around the strip and arranging windows:
+// focus, move, resize, stack, size, float.
+//
+// Mod = Super (the key labelled Alt on this keyboard, via keyd).
+// Mod+Shift+/ shows every bind. Every bind file is merged into one; a key
+// bound twice silently goes to the later file, so keep each key in one place.
+//
+// Vim keys, one job per modifier:
+//   Mod        + h j k l   focus: columns (on to the TV at the ends),
+//                          windows in a column (on to the next workspace)
+//   Mod+Ctrl   + h j k l   move the column / window the same way
+//   Mod+Shift  + h l       column narrower / wider      j k  window taller / shorter
+//   Mod+Alt    + h l       stack into the column left / right (or back out)
+//                          j    pull the next column under this window
+//                          k    put this window back in a column of its own
+//   Mod+Ctrl+Shift + h l   swap this window with the one beside it
+//                    j k   (workspaces.kdl) send the column a workspace down / up
+//
+// Widths size themselves (auto-fit, built into the patched niri): alone →
+// full, two → ½ each, more → ½ and scroll. An app with its own width
+// (rules/apps.kdl: Zen ⅔, Claude full) is full alone and keeps that width
+// beside others, which share what's left. A column you size yourself, with
+// any key below or a mouse drag, is yours: auto-fit leaves it until Mod+= on
+// that workspace. Mod+F and fullscreen don't count: the width comes back.
+//
+// Getting around a long strip: Mod+Tab is the overview (h j k l move in it,
+// Enter picks), Mod+O jumps back to the window you came from, Mod+Grave to
+// the workspace you came from, Mod+Home/End to the ends of the strip.
+// Mod+drag moves a window, Mod+right-drag resizes it; Alt+Tab is niri's own
+// recent-windows switcher.
+binds {
+    Mod+Shift+Slash { show-hotkey-overlay; }
+
+    // ── Focus ──
+    Mod+H     { focus-column-or-monitor-left; }
+    Mod+J     { focus-window-or-workspace-down; }
+    Mod+K     { focus-window-or-workspace-up; }
+    Mod+L     { focus-column-or-monitor-right; }
+    Mod+Left  { focus-column-or-monitor-left; }
+    Mod+Down  { focus-window-or-workspace-down; }
+    Mod+Up    { focus-window-or-workspace-up; }
+    Mod+Right { focus-column-or-monitor-right; }
+    Mod+Home  { focus-column-first; }
+    Mod+End   { focus-column-last; }
+
+    Mod+Tab repeat=false hotkey-overlay-title="Overview" { toggle-overview; }
+    Mod+O hotkey-overlay-title="Back to the previous window" { focus-window-previous; }
+    Mod+Grave hotkey-overlay-title="Back to the previous workspace" { focus-workspace-previous; }
+    Mod+Ctrl+Space { switch-focus-between-floating-and-tiling; }
+
+    // ── Move (on a floating window these nudge it) ──
+    Mod+Ctrl+H     { move-column-left-or-to-monitor-left; }
+    Mod+Ctrl+J     { move-window-down-or-to-workspace-down; }
+    Mod+Ctrl+K     { move-window-up-or-to-workspace-up; }
+    Mod+Ctrl+L     { move-column-right-or-to-monitor-right; }
+    Mod+Ctrl+Left  { move-column-left-or-to-monitor-left; }
+    Mod+Ctrl+Down  { move-window-down-or-to-workspace-down; }
+    Mod+Ctrl+Up    { move-window-up-or-to-workspace-up; }
+    Mod+Ctrl+Right { move-column-right-or-to-monitor-right; }
+    Mod+Ctrl+Home  { move-column-to-first; }
+    Mod+Ctrl+End   { move-column-to-last; }
+    // Swap places with the window beside it (the columns keep their widths).
+    Mod+Ctrl+Shift+H hotkey-overlay-title="Swap with the window left" { swap-window-left; }
+    Mod+Ctrl+Shift+L hotkey-overlay-title="Swap with the window right" { swap-window-right; }
+
+    // ── Resize (a floating window resizes the same way) ──
+    Mod+Shift+H { set-column-width "-10%"; }
+    Mod+Shift+L { set-column-width "+10%"; }
+    Mod+Shift+J { set-window-height "+10%"; }
+    Mod+Shift+K { set-window-height "-10%"; }
+
+    // ── Stacking ──
+    // Alt+H/L pull the focused window into the column beside it, or out of
+    // its column; Alt+J pulls the next column in under it (a quick stack),
+    // Alt+K puts it back out on its own. Mod+T shows a column as tabs (J/K
+    // flip through them). Height is Mod+Shift+J/K.
+    Mod+Alt+H { consume-or-expel-window-left; }
+    Mod+Alt+L { consume-or-expel-window-right; }
+    Mod+Alt+J hotkey-overlay-title="Stack the next column under this" { consume-window-into-column; }
+    Mod+Alt+K hotkey-overlay-title="Unstack this window" { expel-window-from-column; }
+    Mod+T hotkey-overlay-title="Tabbed column" { toggle-column-tabbed-display; }
+
+    // ── Auto-fit ──
+    // Mod+= hands every column on this workspace back to auto-fit (the ones
+    // you sized too) and fits them. Through `niri msg` so stock niri, the
+    // fallback, still reads this file; the patched CLI by its path, since the
+    // `niri` on niri's own PATH is the stock one, which doesn't know it.
+    Mod+Equal hotkey-overlay-title="Auto-fit this workspace again" { spawn-sh "~/.local/bin/niri msg action auto-fit-columns"; }
+
+    // ── Sizing by hand ──
+    // Mod+F fills the screen with the column (bars and gaps stay);
+    // Mod+Shift+F is real fullscreen. Mod+Alt+Z steps through ⅓ ½ ⅔ full.
+    // Pressed again it centres the column it gives back: niri would otherwise
+    // leave it where the maximized one began, at the left edge.
+    Mod+F hotkey-overlay-title="Maximize column" { spawn-sh "niri msg action maximize-column && niri msg action center-column"; }
+    Mod+Shift+F { fullscreen-window; }
+    Mod+Ctrl+F { expand-column-to-available-width; }
+    Mod+Alt+F { toggle-windowed-fullscreen; }
+    // Straight to a width: the number is N in 1/N (Shift+3 is ⅔), so a
+    // ⅓ + ⅔ pair is two keys.
+    Mod+Alt+1 hotkey-overlay-title="Width: full" { set-column-width "100%"; }
+    Mod+Alt+2 hotkey-overlay-title="Width: ½" { set-column-width "50%"; }
+    Mod+Alt+3 hotkey-overlay-title="Width: ⅓" { set-column-width "33.333%"; }
+    Mod+Alt+Shift+3 hotkey-overlay-title="Width: ⅔" { set-column-width "66.667%"; }
+    // Z: this window and the one on its right (on its left at the end of the
+    // strip) side by side, ½ + ½, both in view; Z again puts them back as they
+    // were. Patched niri, so through ~/.local/bin/niri (the `niri` on niri's
+    // PATH is stock).
+    Mod+Z hotkey-overlay-title="Half and half with the neighbour" { spawn-sh "~/.local/bin/niri msg action half-and-half"; }
+    Mod+Alt+Z hotkey-overlay-title="Next preset width" { switch-preset-column-width; }
+    Mod+Shift+Z { switch-preset-window-height; }
+    Mod+Ctrl+R { reset-window-height; }
+    // M for middle: centre the column (or a floating window), or everything
+    // on screen as a group.
+    Mod+M { center-window; }
+    Mod+Shift+M hotkey-overlay-title="Centre visible columns" { center-visible-columns; }
+    Mod+Space hotkey-overlay-title="Float / tile" { toggle-window-floating; }
+    // Steam's main window quits Steam fully, no tray (scripts/close.sh).
+    Mod+Q repeat=false { spawn-sh "~/.config/niri/scripts/close.sh"; }
+
+    // ── Mouse and trackpad ──
+    // Wheel scrolls the strip, Shift+wheel walks workspaces; 3-finger swipes
+    // do the same on the trackpad, 4 fingers up opens the overview (so does
+    // the top-left hot corner).
+    Mod+WheelScrollDown cooldown-ms=150 { focus-column-right; }
+    Mod+WheelScrollUp   cooldown-ms=150 { focus-column-left; }
+    Mod+Shift+WheelScrollDown cooldown-ms=150 { focus-workspace-down; }
+    Mod+Shift+WheelScrollUp   cooldown-ms=150 { focus-workspace-up; }
+    Mod+WheelScrollRight { focus-column-right; }
+    Mod+WheelScrollLeft  { focus-column-left; }
+}

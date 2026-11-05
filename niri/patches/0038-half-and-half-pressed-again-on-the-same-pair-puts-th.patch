@@ -1,0 +1,206 @@
+From 983226ac330b473eb820373d1975570cc1656504 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Mon, 2 Nov 2026 20:59:43 +0400
+Subject: [PATCH 38/38] half-and-half: pressed again on the same pair, puts
+ them back
+
+Remembers the pair's widths, preferences and full-width state; a second
+press from either window restores them, unless one was resized or closed
+since (then it splits afresh).
+---
+ src/layout/scrolling.rs | 73 +++++++++++++++++++++++++++++++++++++++++
+ src/layout/tests.rs     | 63 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 136 insertions(+)
+
+diff --git a/src/layout/scrolling.rs b/src/layout/scrolling.rs
+index 7ab80f12..15f52475 100644
+--- a/src/layout/scrolling.rs
++++ b/src/layout/scrolling.rs
+@@ -53,6 +53,9 @@ pub struct ScrollingSpace<W: LayoutElement> {
+     /// windows are not asked for an intermediate size; they fit once at the end.
+     auto_fit_suspended: bool,
+ 
++    /// dotnix: what the last half-and-half changed, so pressing it again puts it back.
++    half_and_half_undo: Option<[HalfAndHalfSaved<W>; 2]>,
++
+     /// Offset of the view computed from the active column.
+     ///
+     /// Any gaps, including left padding from work area left exclusive zone, is handled
+@@ -312,6 +315,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             view_offset: ViewOffset::Static(0.),
+             activate_prev_column_on_removal: None,
+             auto_fit_suspended: false,
++            half_and_half_undo: None,
+             view_offset_to_restore: None,
+             closing_windows: Vec::new(),
+             view_size,
+@@ -675,8 +679,15 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+     /// without it, they are sized by hand.
+     pub fn half_and_half(&mut self) {
+         if self.columns.len() < 2 {
++            self.half_and_half_undo = None;
+             return;
+         }
++
++        // Pressed again on the pair it just split, untouched since: put them back.
++        if self.half_and_half_restore() {
++            return;
++        }
++
+         let a = self.active_column_idx;
+         let b = if a + 1 < self.columns.len() { a + 1 } else { a - 1 };
+         if [a, b]
+@@ -687,6 +698,17 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             return;
+         }
+ 
++        self.half_and_half_undo = Some([a, b].map(|idx| {
++            let col = &self.columns[idx];
++            HalfAndHalfSaved {
++                window: col.tiles[0].window().id().clone(),
++                width: col.width,
++                preset_width_idx: col.preset_width_idx,
++                auto_fit: col.auto_fit,
++                is_full_width: col.is_full_width,
++            }
++        }));
++
+         let auto_fit = self.options.layout.auto_fit_columns;
+         for idx in [a, b] {
+             let col = &mut self.columns[idx];
+@@ -718,6 +740,47 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+         self.animate_view_offset(a, new_offset);
+     }
+ 
++    /// Undoes the last half-and-half if the focused column is one of its pair and neither has
++    /// been resized since. Returns whether it did.
++    fn half_and_half_restore(&mut self) -> bool {
++        let Some(saved) = self.half_and_half_undo.take() else {
++            return false;
++        };
++        let find = |s: &HalfAndHalfSaved<W>| {
++            self.columns
++                .iter()
++                .position(|col| col.tiles[0].window().id() == &s.window)
++        };
++        let (Some(i0), Some(i1)) = (find(&saved[0]), find(&saved[1])) else {
++            return false;
++        };
++        let untouched = |i: usize| {
++            let col = &self.columns[i];
++            !col.is_full_width
++                && col.pending_sizing_mode().is_normal()
++                && matches!(col.width, ColumnWidth::Proportion(p) if (p - 0.5).abs() < 1e-6)
++        };
++        let active = self.active_column_idx;
++        if i0 == i1 || !(active == i0 || active == i1) || !untouched(i0) || !untouched(i1) {
++            return false;
++        }
++
++        for (i, s) in [(i0, &saved[0]), (i1, &saved[1])] {
++            let col = &mut self.columns[i];
++            cancel_resize_for_column(&mut self.interactive_resize, col);
++            col.width = s.width;
++            col.preset_width_idx = s.preset_width_idx;
++            col.auto_fit = s.auto_fit;
++            col.is_full_width = s.is_full_width;
++            col.update_tile_sizes(true);
++        }
++
++        if !self.view_offset.is_gesture() {
++            self.animate_view_offset_to_column(None, self.active_column_idx, None);
++        }
++        true
++    }
++
+     pub fn is_centering_focused_column(&self) -> bool {
+         self.options.layout.center_focused_column == CenterFocusedColumn::Always
+             || (self.options.layout.always_center_single_column && self.columns.len() <= 1)
+@@ -5871,6 +5934,16 @@ fn cancel_resize_for_column<W: LayoutElement>(
+     }
+ }
+ 
++/// dotnix: a column's sizing before half-and-half, found again by its first window.
++#[derive(Debug)]
++struct HalfAndHalfSaved<W: LayoutElement> {
++    window: W::Id,
++    width: ColumnWidth,
++    preset_width_idx: Option<usize>,
++    auto_fit: Option<f64>,
++    is_full_width: bool,
++}
++
+ /// dotnix auto-fit: one column, as the planner sees it.
+ #[derive(Debug, Clone, Copy, PartialEq)]
+ enum FitCol {
+diff --git a/src/layout/tests.rs b/src/layout/tests.rs
+index 317012d2..081a115d 100644
+--- a/src/layout/tests.rs
++++ b/src/layout/tests.rs
+@@ -4351,3 +4351,66 @@ fn half_and_half_ends_full_width_and_works_without_auto_fit() {
+     Op::HalfAndHalf.apply(&mut layout);
+     assert_width(&layout, 1, 1.);
+ }
++
++#[test]
++fn half_and_half_again_puts_them_back() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.)); // Zen
++    auto_fit_add(&mut layout, 2, Some(0.5)); // terminal: ⅔ + ⅓
++    Op::FocusColumnFirst.apply(&mut layout);
++    Op::HalfAndHalf.apply(&mut layout);
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++    // Again, from either window of the pair: back to ⅔ + ⅓.
++    Op::FocusColumnRight.apply(&mut layout);
++    Op::HalfAndHalf.apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 2. / 3.);
++    assert_width(&layout, 2, 1. / 3.);
++    // And the preferences came back too: a new window fits as before the split.
++    Op::CloseWindow(2).apply(&mut layout);
++    auto_fit_add(&mut layout, 3, Some(0.5));
++    assert_width(&layout, 1, 2. / 3.);
++    assert_width(&layout, 3, 1. / 3.);
++    // A third press is a fresh split.
++    Op::HalfAndHalf.apply(&mut layout);
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 3, 0.5);
++}
++
++#[test]
++fn half_and_half_restores_full_width_and_hand_sizes() {
++    let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), Options::default());
++    Op::AddOutput(1).apply(&mut layout);
++    auto_fit_add(&mut layout, 1, Some(0.5));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    Op::SetColumnWidth(SizeChange::SetProportion(30.)).apply(&mut layout);
++    Op::FocusColumnFirst.apply(&mut layout);
++    Op::MaximizeColumn.apply(&mut layout);
++    Op::HalfAndHalf.apply(&mut layout);
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++    Op::HalfAndHalf.apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 1.); // full width again
++    assert_width(&layout, 2, 0.3);
++}
++
++#[test]
++fn half_and_half_is_not_undone_after_a_change() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    Op::FocusColumnFirst.apply(&mut layout);
++    Op::HalfAndHalf.apply(&mut layout);
++    // Resized by hand in between: the old sizes no longer apply; it splits afresh.
++    Op::SetColumnWidth(SizeChange::SetProportion(40.)).apply(&mut layout);
++    Op::HalfAndHalf.apply(&mut layout);
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++    // Closing one of the pair: nothing to restore, and nothing breaks.
++    Op::CloseWindow(2).apply(&mut layout);
++    Op::HalfAndHalf.apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 1.);
++}

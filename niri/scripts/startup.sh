@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# startup.sh — the apps niri opens at login (config.kdl spawn-sh-at-startup):
+# startup.sh — the apps niri opens at login (conf/startup.kdl spawn-sh-at-startup):
 # a terminal, and after a switch from Hyprland or back, what was open, put
 # back where it was (layout.sh only acts on a layout saved moments ago).
 set -uo pipefail

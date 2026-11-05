@@ -1,0 +1,99 @@
+From 2b91d04ff46ebe7fa483d500e450c72bd0b269c0 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 14:27:33 +0400
+Subject: [PATCH 25/38] liquid glass: 32 shapes a layer, controls never melt
+ together
+
+Every control of lumen's island is glass now: 32 per layer (48 a surface),
+and layer 1 merges nothing, so buttons side by side keep their own edge.
+---
+ resources/lumen-glass-v1.xml                 | 2 +-
+ src/protocols/lumen_glass.rs                 | 2 +-
+ src/render_helpers/liquid_glass.rs           | 7 ++++---
+ src/render_helpers/shaders/liquid_glass.frag | 6 +++---
+ 4 files changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/resources/lumen-glass-v1.xml b/resources/lumen-glass-v1.xml
+index 211ba3dc..2cb7f444 100644
+--- a/resources/lumen-glass-v1.xml
++++ b/resources/lumen-glass-v1.xml
+@@ -79,7 +79,7 @@
+     <request name="set_shapes">
+       <description summary="the glass shapes">
+         Native-endian 32-bit floats, 13 per shape (16 from version 2, all
+-        shapes alike), at most 8 shapes (24 from version 4); an empty
++        shapes alike), at most 8 shapes (48 from version 4); an empty
+         array removes all glass. Per shape, in surface-local logical pixels
+         unless noted:
+ 
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index 2b67f059..ce3c1807 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -20,7 +20,7 @@ const VERSION: u32 = 4;
+ /// and rim tint (the two can't be confused with at most 8 shapes).
+ const SHAPE_FLOATS: usize = 13;
+ const SHAPE_FLOATS_EXT: usize = 16;
+-pub const MAX_SHAPES: usize = 24;
++pub const MAX_SHAPES: usize = 48;
+ 
+ #[derive(Debug, Clone, Copy, PartialEq)]
+ pub struct GlassShape {
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index 4c68467f..728aa526 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -199,10 +199,10 @@ pub fn render_for_surface(
+ 
+         // Layer 1 first: pushed first, it is drawn on top (and captures layer 0).
+         for layer in [1u8, 0] {
+-            // At most the shader's 16 per layer.
++            // At most the shader's 32 per layer.
+             let idx: Vec<usize> = (0..state.shapes.len())
+                 .filter(|&i| state.shapes[i].layer == layer)
+-                .take(16)
++                .take(32)
+                 .collect();
+             if idx.is_empty() {
+                 continue;
+@@ -310,7 +310,8 @@ pub fn render_for_surface(
+                 .render(ns, params, blur, if layer >= 1 { 0. } else { noise }, state.saturation)
+                 .with_glass(GlassDraw {
+                     shapes,
+-                    merge: state.merge,
++                    // Controls side by side stay apart: only the panels melt.
++                    merge: if layer >= 1 { 0. } else { state.merge },
+                     measure: Some(lay.measure.clone()),
+                 });
+             push(elem.into());
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index f252c341..22eacf2c 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -53,7 +53,7 @@ uniform mat3 input_to_geo;
+ // Per shape, columns: (x, y, w, h), radii (tl, tr, br, bl),
+ // (corner, refraction, dispersion, bevel), (specular, frost, -, -).
+ // Coordinates in logical px from the bounding box's top-left.
+-uniform mat4 glass_shapes[16];
++uniform mat4 glass_shapes[32];
+ uniform float glass_count;
+ uniform float glass_merge;
+ uniform float saturation;
+@@ -98,7 +98,7 @@ float glass_sdf(vec2 p, out float nearest) {
+     float d = 1e6;
+     float best = 1e6;
+     nearest = 0.0;
+-    for (int i = 0; i < 16; i++) {
++    for (int i = 0; i < 32; i++) {
+         if (float(i) >= glass_count)
+             break;
+         float di = shape_sdf(p, glass_shapes[i]);
+@@ -118,7 +118,7 @@ float glass_sdf(vec2 p, out float nearest) {
+ 
+ mat4 shape_at(float index) {
+     mat4 s = glass_shapes[0];
+-    for (int i = 1; i < 16; i++) {
++    for (int i = 1; i < 32; i++) {
+         if (float(i) == index)
+             s = glass_shapes[i];
+     }

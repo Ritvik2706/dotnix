@@ -10,7 +10,7 @@ still reaches niri and apps as before. Press -> `emit peek 1`, release ->
 `emit peek 0`, auto-repeat ignored.
 
 Needs read access to /dev/input (the `input` group). Started by niri
-(config.kdl); Hyprland has its own binds, so not there.
+(conf/startup.kdl); Hyprland has its own binds, so not there.
 """
 import os
 import signal

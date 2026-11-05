@@ -24,8 +24,8 @@ source "$_zsh_dir/prompt-status.zsh"
 
 unset _zsh_dir
 
-# Set DOTNIX_NO_TMUX=1 to start a plain shell. Keep the terminal's starting
-# directory when creating main; attaching preserves the existing workspace.
+# Set DOTNIX_NO_TMUX=1 to start a plain shell. main starts in the dotnix
+# repo when created; attaching preserves the existing workspace.
 if [[ -o interactive && -t 0 && -t 1 && -z "$TMUX" && "$TERM_PROGRAM" != "vscode" && "${DOTNIX_NO_TMUX:-0}" != 1 ]] && command -v tmux &>/dev/null; then
-  tmux new-session -A -s main -c "$PWD"
+  tmux new-session -A -s main -c "$HOME/github/config/dotnix"
 fi

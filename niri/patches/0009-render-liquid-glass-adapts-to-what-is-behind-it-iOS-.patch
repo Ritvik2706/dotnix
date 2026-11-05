@@ -1,0 +1,185 @@
+From e7d03a05b63053da4db059c7ce20e15d3b825a1a Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 01:11:41 +0400
+Subject: [PATCH 09/38] render: liquid glass adapts to what is behind it (iOS
+ 27)
+
+Busy content behind the glass (text, fine detail) is diffused more: how
+busy is measured over ~24 px (crisp vs frosted backdrop at 5 taps), and the
+same taps make a wider frost from the already smooth capture, so it never
+ghosts; the lensed rim keeps most of its clarity, and a busy backdrop gets
+a slightly deeper tint. The backdrop is always captured at least 40%
+frosted so clear glass can diffuse too. Also iOS 27's separation: a soft
+darkened edge just outside each shape (4 px pad), and brighter glints.
+---
+ src/render_helpers/liquid_glass.rs           | 20 +++++--
+ src/render_helpers/shaders/liquid_glass.frag | 61 ++++++++++++++++----
+ 2 files changed, 65 insertions(+), 16 deletions(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index a7faa4cf..81e88f81 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -16,6 +16,11 @@ use crate::render_helpers::blur::BlurOptions;
+ use crate::render_helpers::framebuffer_effect::{FramebufferEffect, GlassDraw};
+ use crate::render_helpers::RenderCtx;
+ 
++/// How far outside its shapes a glass draws (its darkened edge), logical px.
++const EDGE_PAD: f32 = 4.;
++/// The least frost the backdrop is captured with, for diffusing busy content.
++const DIFFUSE_MIN: f32 = 0.4;
++
+ /// The capture a surface's glass is drawn from, and the state it was last
+ /// drawn with (a change re-renders it).
+ struct SurfaceGlass(Mutex<SurfaceGlassInner>);
+@@ -58,8 +63,9 @@ pub fn render_for_surface(
+             x1 = x1.max(s.x + s.w);
+             y1 = y1.max(s.y + s.h);
+         }
+-        let (x0, y0) = ((x0 - 1.).floor(), (y0 - 1.).floor());
+-        let (x1, y1) = ((x1 + 1.).ceil(), (y1 + 1.).ceil());
++        // Wider than the shapes by the darkened edge drawn just outside them.
++        let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
++        let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
+         let geometry = Rectangle::new(
+             location + Point::from((x0 as f64, y0 as f64)),
+             Size::from(((x1 - x0) as f64, (y1 - y0) as f64)),
+@@ -90,12 +96,16 @@ pub fn render_for_surface(
+             })
+             .collect();
+ 
+-        let frosted = state.frost > 0. && !blur_config.off;
++        // The backdrop is always frosted at least DIFFUSE_MIN, even for clear
++        // glass: the shader shows it crisp where what is behind is calm, and
++        // diffuses busy content (text, fine detail) from this, like iOS 27.
++        let frosted = !blur_config.off;
++        let strength = state.frost.max(DIFFUSE_MIN);
+         let blur = frosted.then(|| {
+             let mut options = BlurOptions::from(blur_config);
+             // Low frost must not retain the full downsampling pyramid.
+-            options.passes = ((options.passes as f32 * state.frost).ceil() as u8).max(1);
+-            options.offset *= state.frost as f64;
++            options.passes = ((options.passes as f32 * strength).ceil() as u8).max(1);
++            options.offset *= strength as f64;
+             options
+         });
+         let noise = if frosted { blur_config.noise as f32 } else { 0. };
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 1f19973c..6b7c8cd4 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -160,14 +160,18 @@ void main() {
+ 
+     float idx;
+     float d = glass_sdf(p, idx);
++    mat4 s = shape_at(idx);
+     // Coverage, antialiased over one physical pixel.
+     float cover = clamp(0.5 - d * niri_scale, 0.0, 1.0);
++    // iOS 27's separation: a soft darkened edge just outside the glass, so it
++    // stands off busy content behind it (as strong as the glass's light).
++    float ring = d > 0.0 ? 0.24 * min(s[3].x * 1.5, 1.0) * pow(max(1.0 - d / 3.5, 0.0), 2.0) : 0.0;
++    vec4 edge = vec4(0.0, 0.0, 0.0, ring) * alpha;
+     if (cover <= 0.0) {
+-        gl_FragColor = vec4(0.0);
++        gl_FragColor = edge;
+         return;
+     }
+ 
+-    mat4 s = shape_at(idx);
+     float thickness = max(s[2].y, 0.0);   // `refraction`: how tall the glass is
+     float dispersion = s[2].z;
+     float bevel = min(s[2].w, min(s[0].z, s[0].w) * 0.5);
+@@ -188,29 +192,61 @@ void main() {
+ 
+     float u = -d;   // px in from the edge
+     float slope = 0.0;
++
++    // Where the glass is clear and where it is frosted, as asked: low frost
++    // shows the backdrop crisp, higher frost the frosted capture (never a
++    // half-mix of the two, which ghosts).
++    float clear = 1.0 - smoothstep(0.08, 0.25, frost);
++
++    // iOS 27: busy content behind the glass (text, fine detail) is diffused
++    // more. How busy, measured over ~24 px around the point (so the frost
++    // changes by region, not line by line): how far the crisp backdrop
++    // strays from the frosted one. The same taps, averaged, are a wider
++    // frost built from an already smooth image (no ghosting).
++    vec2 r1 = inv * (vec2(24.0, 0.0) / geo_size);
++    vec2 r2 = inv * (vec2(0.0, 24.0) / geo_size);
++    vec4 f0 = texture2D(tex, v_coords);
++    vec4 fa = texture2D(tex, v_coords + r1);
++    vec4 fb = texture2D(tex, v_coords - r1);
++    vec4 fc = texture2D(tex, v_coords + r2);
++    vec4 fd = texture2D(tex, v_coords - r2);
++    const vec3 lw = vec3(0.2126, 0.7152, 0.0722);
++    float detail = abs(dot(texture2D(tex_sharp, v_coords).rgb - f0.rgb, lw))
++                 + abs(dot(texture2D(tex_sharp, v_coords + r1).rgb - fa.rgb, lw))
++                 + abs(dot(texture2D(tex_sharp, v_coords - r1).rgb - fb.rgb, lw))
++                 + abs(dot(texture2D(tex_sharp, v_coords + r2).rgb - fc.rgb, lw))
++                 + abs(dot(texture2D(tex_sharp, v_coords - r2).rgb - fd.rgb, lw));
++    float busy = smoothstep(0.04, 0.22, detail);
++    vec4 diffused = (f0 * 2.0 + fa + fb + fc + fd) / 6.0;
++
+     vec4 color;
++    float rim = 0.0;
+     if (bevel > 0.5 && thickness > 0.0 && u < bevel) {
+         // Convex: rays converge, so each pixel shows what lies further in.
+         float dg = displacement(u, bevel, thickness, 1.5, slope);
+         vec2 dir = inv * (-n / geo_size);
+-        // The rim is crisp, easing into the frost of the middle.
++        // The rim is crisp, easing into the middle.
+         float e = clamp(1.0 - u / bevel, 0.0, 1.0);
+-        float clear = e * e * (3.0 - 2.0 * e);
+-        vec4 g = backdrop(v_coords + dir * dg, clear);
++        rim = e * e * (3.0 - 2.0 * e);
++        float c = max(clear, rim);
++        vec4 g = backdrop(v_coords + dir * dg, c);
+         if (dispersion > 0.0) {
+             // Red bends less, blue more: a prism's spread of the index.
+             float spread = 0.05 * dispersion;
+             float ignore_slope;
+             float dr = displacement(u, bevel, thickness, 1.5 - spread, ignore_slope);
+             float db = displacement(u, bevel, thickness, 1.5 + spread, ignore_slope);
+-            color = vec4(backdrop(v_coords + dir * dr, clear).r, g.g,
+-                         backdrop(v_coords + dir * db, clear).b, g.a);
++            color = vec4(backdrop(v_coords + dir * dr, c).r, g.g,
++                         backdrop(v_coords + dir * db, c).b, g.a);
+         } else {
+             color = g;
+         }
+     } else {
+-        color = texture2D(tex, v_coords);
++        color = backdrop(v_coords, clear);
+     }
++    // Busy content is diffused; the lensed rim keeps most of its clarity.
++    float diffuse = busy * (1.0 - 0.7 * rim);
++    color = mix(color, diffused, diffuse);
+ #if defined(NO_ALPHA)
+     color.a = 1.0;
+ #endif
+@@ -218,8 +254,10 @@ void main() {
+     // Lumen's light foreground needs separation from bright backgrounds:
+     // compress brightness where it is high, keep hue, add no white veil.
+     float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722)) / max(color.a, 0.001);
+-    float contrast = frost * smoothstep(0.08, 0.8, luminance);
++    float contrast = max(frost, busy) * smoothstep(0.08, 0.8, luminance);
+     color.rgb *= 1.0 - 0.55 * contrast;
++    // A busy backdrop also gets a slightly deeper tint, so text on the glass reads.
++    color.rgb *= 1.0 - 0.18 * busy;
+ 
+     // Vibrancy: glass carries the colour behind it a little richer.
+     float sat = saturation * 1.18;
+@@ -244,10 +282,11 @@ void main() {
+     // The glints live on the curved band (where the surface tilts), brightest
+     // where it faces the light; the hairline keeps the whole outline drawn.
+     float tilt = smoothstep(0.0, 0.35, fresnel);
+-    float lit = specular * ((0.9 * glint + 0.45 * inner) * tilt + 0.45 * hairline);
++    // Brighter than iOS 26's: iOS 27 strengthened the highlights for separation.
++    float lit = specular * ((1.2 * glint + 0.55 * inner) * tilt + 0.55 * hairline);
+     color.rgb = mix(color.rgb, vec3(color.a), clamp(lit, 0.0, 1.0));
+ 
+-    color *= cover * alpha;
++    color = color * cover * alpha + edge * (1.0 - cover);
+ 
+ #if defined(DEBUG_FLAGS)
+     if (tint == 1.0)

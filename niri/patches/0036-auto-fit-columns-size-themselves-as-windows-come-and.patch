@@ -1,0 +1,1107 @@
+From ec61ac6d55675a89bb3fdb619b6b076abfe44f3c Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Mon, 2 Nov 2026 18:36:38 +0400
+Subject: [PATCH 36/38] auto-fit: columns size themselves as windows come and
+ go
+
+layout { auto-fit-columns true; } (off by default, so upstream behaviour and
+tests are unchanged): alone a column fills the screen; beside others a
+window keeps its rule width (Zen 2/3 + terminal 1/3) when those fit
+together, else they share evenly; full-width rules stay full; a column you
+size by hand (set-column-width, presets, mouse resize, expand) is left
+alone until the new auto-fit-columns action hands it back. Maximize and
+fullscreen don't pin.
+
+Smooth by construction: a new window's first configure already carries its
+fitted width, its neighbours are resized in the same step, and the view
+target is computed from the widths columns are heading to, so a new window
+never opens wide, scrolls, then corrects. Runs only when columns come and
+go: one allocation-free pass over the workspace's columns.
+---
+ niri-config/src/binds.rs  |   2 +
+ niri-config/src/layout.rs |  13 ++
+ niri-config/src/lib.rs    |   1 +
+ niri-ipc/src/lib.rs       |   2 +
+ src/input/mod.rs          |   5 +
+ src/layout/mod.rs         |   8 +
+ src/layout/scrolling.rs   | 412 +++++++++++++++++++++++++++++++++++++-
+ src/layout/tests.rs       | 312 +++++++++++++++++++++++++++++
+ src/layout/tile.rs        |   8 +
+ src/layout/workspace.rs   |   5 +
+ 10 files changed, 767 insertions(+), 1 deletion(-)
+
+diff --git a/niri-config/src/binds.rs b/niri-config/src/binds.rs
+index 4d7a21d1..e3259f56 100644
+--- a/niri-config/src/binds.rs
++++ b/niri-config/src/binds.rs
+@@ -232,6 +232,7 @@ pub enum Action {
+     #[knuffel(skip)]
+     CenterWindowById(u64),
+     CenterVisibleColumns,
++    AutoFitColumns,
+     FocusWorkspaceDown,
+     #[knuffel(skip)]
+     FocusWorkspaceDownUnderMouse,
+@@ -523,6 +524,7 @@ impl From<niri_ipc::Action> for Action {
+             niri_ipc::Action::CenterWindow { id: None } => Self::CenterWindow,
+             niri_ipc::Action::CenterWindow { id: Some(id) } => Self::CenterWindowById(id),
+             niri_ipc::Action::CenterVisibleColumns {} => Self::CenterVisibleColumns,
++            niri_ipc::Action::AutoFitColumns {} => Self::AutoFitColumns,
+             niri_ipc::Action::FocusWorkspaceDown {} => Self::FocusWorkspaceDown,
+             niri_ipc::Action::FocusWorkspaceUp {} => Self::FocusWorkspaceUp,
+             niri_ipc::Action::FocusWorkspace { reference } => {
+diff --git a/niri-config/src/layout.rs b/niri-config/src/layout.rs
+index f84528bd..f06e503d 100644
+--- a/niri-config/src/layout.rs
++++ b/niri-config/src/layout.rs
+@@ -24,6 +24,10 @@ pub struct Layout {
+     pub gaps: f64,
+     pub struts: Struts,
+     pub background_color: Color,
++    /// dotnix: size columns to fit the screen as they come and go (alone: full width; two:
++    /// halves, or each at its window-rule width when those fit together; ...). See
++    /// `ScrollingSpace::auto_fit()`.
++    pub auto_fit_columns: bool,
+ }
+ 
+ impl Default for Layout {
+@@ -52,6 +56,7 @@ impl Default for Layout {
+                 PresetSize::Proportion(2. / 3.),
+             ],
+             background_color: DEFAULT_BACKGROUND_COLOR,
++            auto_fit_columns: false,
+         }
+     }
+ }
+@@ -84,6 +89,10 @@ impl MergeWith<LayoutPart> for Layout {
+             self.default_column_width = x.0;
+         }
+ 
++        if let Some(x) = part.auto_fit_columns {
++            self.auto_fit_columns = x;
++        }
++
+         if self.preset_column_widths.is_empty() {
+             self.preset_column_widths = Layout::default().preset_column_widths;
+         }
+@@ -126,6 +135,10 @@ pub struct LayoutPart {
+     pub struts: Option<Struts>,
+     #[knuffel(child)]
+     pub background_color: Option<Color>,
++    /// `auto-fit-columns true|false`: an argument rather than a flag, so a later include can
++    /// turn it back off.
++    #[knuffel(child, unwrap(argument))]
++    pub auto_fit_columns: Option<bool>,
+ }
+ 
+ #[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+diff --git a/niri-config/src/lib.rs b/niri-config/src/lib.rs
+index 0530831e..b310521f 100644
+--- a/niri-config/src/lib.rs
++++ b/niri-config/src/lib.rs
+@@ -1471,6 +1471,7 @@ mod tests {
+                     b: 0.25,
+                     a: 1.0,
+                 },
++                auto_fit_columns: false,
+             },
+             prefer_no_csd: true,
+             cursor: Cursor {
+diff --git a/niri-ipc/src/lib.rs b/niri-ipc/src/lib.rs
+index 0aa3cb4f..115f41b7 100644
+--- a/niri-ipc/src/lib.rs
++++ b/niri-ipc/src/lib.rs
+@@ -470,6 +470,8 @@ pub enum Action {
+     },
+     /// Center all fully visible columns on the screen.
+     CenterVisibleColumns {},
++    /// Hand every column on the focused workspace back to auto-fit and fit them (dotnix).
++    AutoFitColumns {},
+     /// Focus the workspace below.
+     FocusWorkspaceDown {},
+     /// Focus the workspace above.
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index d88da771..a9580a4d 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -1666,6 +1666,11 @@ impl State {
+                 // FIXME: granular
+                 self.niri.queue_redraw_all();
+             }
++            Action::AutoFitColumns => {
++                self.niri.layout.fit_columns();
++                // FIXME: granular
++                self.niri.queue_redraw_all();
++            }
+             Action::MaximizeColumn => {
+                 self.niri.layout.toggle_full_width();
+             }
+diff --git a/src/layout/mod.rs b/src/layout/mod.rs
+index 5c4dd639..d1c50053 100644
+--- a/src/layout/mod.rs
++++ b/src/layout/mod.rs
+@@ -2272,6 +2272,14 @@ impl<W: LayoutElement> Layout<W> {
+         workspace.center_visible_columns();
+     }
+ 
++    /// dotnix auto-fit: hand every column on the active workspace back to auto-fit.
++    pub fn fit_columns(&mut self) {
++        let Some(workspace) = self.active_workspace_mut() else {
++            return;
++        };
++        workspace.fit_columns();
++    }
++
+     pub fn focus(&self) -> Option<&W> {
+         self.focus_with_output().map(|(win, _out)| win)
+     }
+diff --git a/src/layout/scrolling.rs b/src/layout/scrolling.rs
+index 931d963a..14781f39 100644
+--- a/src/layout/scrolling.rs
++++ b/src/layout/scrolling.rs
+@@ -49,6 +49,10 @@ pub struct ScrollingSpace<W: LayoutElement> {
+     /// Ongoing interactive resize.
+     interactive_resize: Option<InteractiveResize<W>>,
+ 
++    /// dotnix auto-fit: set during compound operations that remove and re-add a column, so
++    /// windows are not asked for an intermediate size; they fit once at the end.
++    auto_fit_suspended: bool,
++
+     /// Offset of the view computed from the active column.
+     ///
+     /// Any gaps, including left padding from work area left exclusive zone, is handled
+@@ -173,6 +177,10 @@ pub struct Column<W: LayoutElement> {
+     /// Whether this column is full-width.
+     is_full_width: bool,
+ 
++    /// dotnix auto-fit: `Some(preferred width)` while auto-fit sizes this column, `None` once
++    /// it is pinned (sized by hand, or a window that sizes itself).
++    auto_fit: Option<f64>,
++
+     /// Whether this column is going to be fullscreen.
+     ///
+     /// This is the compositor-side fullscreen state, so it changes immediately upon
+@@ -303,6 +311,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             interactive_resize: None,
+             view_offset: ViewOffset::Static(0.),
+             activate_prev_column_on_removal: None,
++            auto_fit_suspended: false,
+             view_offset_to_restore: None,
+             closing_windows: Vec::new(),
+             view_size,
+@@ -502,6 +511,16 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+ 
+         let working_size = self.working_area.size;
+ 
++        // dotnix auto-fit: ask the window for the width it will have once it joins, so it
++        // opens at it, rather than at its rule width and resizing a moment later.
++        let width = match width {
++            Some(PresetSize::Proportion(p)) if p > 0. && self.auto_fit_active() => {
++                let plan = self.auto_fit_plan(Some(FitCol::Auto(p)));
++                Some(PresetSize::Proportion(plan.target(FitCol::Auto(p)).unwrap_or(p)))
++            }
++            width => width,
++        };
++
+         let width = if let Some(size) = width {
+             let size = match resolve_preset_size(size, &self.options, working_size.w, extra.w) {
+                 ResolvedSize::Tile(mut size) => {
+@@ -541,6 +560,113 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+         Size::from((width, max(height.floor() as i32, 1)))
+     }
+ 
++    fn auto_fit_active(&self) -> bool {
++        self.options.layout.auto_fit_columns && !self.auto_fit_suspended
++    }
++
++    /// dotnix auto-fit: the plan for this space's columns, plus `extra`, a column about to
++    /// join.
++    fn auto_fit_plan(&self, extra: Option<FitCol>) -> AutoFitPlan {
++        let default = match self.options.layout.default_column_width {
++            Some(PresetSize::Proportion(p)) if p > 0. => p,
++            _ => 0.5,
++        };
++        // How many columns share a screen evenly: three on a wide one.
++        let per_screen = if self.working_area.size.w >= 1900. { 3 } else { 2 };
++        let inputs = self.columns.iter().map(|col| col.auto_fit_input()).chain(extra);
++        AutoFitPlan::new(inputs, default, per_screen)
++    }
++
++    /// dotnix auto-fit: size every managed column for the columns this space has now. Runs only
++    /// when columns come and go (and on `fit_columns`): one pass over the columns, nothing per
++    /// frame. Returns whether every column then fits on screen at once.
++    fn auto_fit(&mut self) -> bool {
++        if !self.auto_fit_active() || self.columns.is_empty() {
++            return false;
++        }
++
++        let plan = self.auto_fit_plan(None);
++        let mut total = 0.;
++        for col in &mut self.columns {
++            let input = col.auto_fit_input();
++            match plan.target(input) {
++                Some(target) => {
++                    col.set_auto_fit_width(target);
++                    total += target;
++                }
++                None => total += input.width(),
++            }
++        }
++
++        total <= 1. + 0.01
++    }
++
++    /// dotnix auto-fit: when every column fits on screen, put them all in view. The target is
++    /// computed from the widths the columns are heading to, not their current ones: niri only
++    /// learns new widths as clients commit them, and a view computed from the old widths is
++    /// what leaves a new window centred over a half-hidden neighbour. The view is relative to
++    /// the active column, so it stays right while the others resize around it.
++    fn auto_fit_view(&mut self, config: niri_config::Animation, instant: bool) {
++        if self.columns.is_empty()
++            || self.view_offset.is_gesture()
++            || self.interactive_resize.is_some()
++            || self.columns.iter().any(|col| !col.pending_sizing_mode().is_normal())
++        {
++            return;
++        }
++
++        let area = self.working_area;
++        let gaps = self.options.layout.gaps;
++
++        let new_offset = if self.columns.len() == 1 {
++            if !self.is_centering_focused_column() {
++                return;
++            }
++            let width = self.columns[0].target_width();
++            if area.size.w <= width {
++                -(area.loc.x + gaps)
++            } else {
++                -(area.size.w - width) / 2. - area.loc.x
++            }
++        } else {
++            if self.options.layout.center_focused_column == CenterFocusedColumn::Always {
++                return;
++            }
++            let left: f64 = self.columns[..self.active_column_idx]
++                .iter()
++                .map(|col| col.target_width() + gaps)
++                .sum();
++            -(area.loc.x + gaps + left)
++        };
++
++        if instant {
++            self.view_offset = ViewOffset::Static(new_offset);
++        } else {
++            self.animate_view_offset_with_config(self.active_column_idx, new_offset, config);
++        }
++    }
++
++    /// dotnix auto-fit: hand every column back to auto-fit (each at the width its window
++    /// prefers; one that sized itself at the default) and fit them.
++    pub fn fit_columns(&mut self) {
++        if !self.options.layout.auto_fit_columns || self.columns.is_empty() {
++            return;
++        }
++        let default = match self.options.layout.default_column_width {
++            Some(PresetSize::Proportion(p)) if p > 0. => p,
++            _ => 0.5,
++        };
++        for col in &mut self.columns {
++            let pref = col.tiles[0].auto_fit_pref.flatten().filter(|p| *p > 0.);
++            col.auto_fit = Some(pref.unwrap_or(default));
++            cancel_resize_for_column(&mut self.interactive_resize, col);
++        }
++        if self.auto_fit() {
++            let config = self.options.animations.horizontal_view_movement.0;
++            self.auto_fit_view(config, false);
++        }
++    }
++
+     pub fn is_centering_focused_column(&self) -> bool {
+         self.options.layout.center_focused_column == CenterFocusedColumn::Always
+             || (self.options.layout.always_center_single_column && self.columns.len() <= 1)
+@@ -1008,6 +1134,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             }
+         }
+ 
++        // dotnix auto-fit: size the columns for the new one before the view is worked out.
++        let fits = self.auto_fit();
++
+         if activate {
+             // If this is the first window on an empty workspace, remove the effect of whatever
+             // view_offset was left over and skip the animation.
+@@ -1025,6 +1154,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             self.activate_column_with_anim_config(idx, anim_config);
+             self.activate_prev_column_on_removal = prev_offset;
+         }
++
++        if fits {
++            let view_config =
++                anim_config.unwrap_or(self.options.animations.horizontal_view_movement.0);
++            self.auto_fit_view(view_config, was_empty);
++        }
+     }
+ 
+     pub fn remove_active_tile(&mut self, transaction: Transaction) -> Option<RemovedTile<W>> {
+@@ -1209,6 +1344,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             return column;
+         }
+ 
++        // dotnix auto-fit: the others share the room it leaves.
++        let fits = self.auto_fit();
++
+         let view_config = anim_config.unwrap_or(self.options.animations.horizontal_view_movement.0);
+ 
+         if column_idx < self.active_column_idx {
+@@ -1246,6 +1384,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             );
+         }
+ 
++        if fits {
++            self.auto_fit_view(view_config, false);
++        }
++
+         column
+     }
+ 
+@@ -2083,6 +2225,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+ 
+         let transaction = Transaction::new();
+ 
++        // dotnix auto-fit: a drained column is removed and re-created below; fit once, after.
++        self.auto_fit_suspended = true;
++
+         // If the source column contains a single tile, this will also remove the column.
+         // When this happens `source_column_drained` will be set and the column will need to be
+         // recreated with `add_tile`
+@@ -2158,6 +2303,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+             .animate_move_from(target_pt - source_pt);
+         self.columns[source_column_idx].tiles[source_tile_idx].ensure_alpha_animates_to_1();
+ 
++        self.auto_fit_suspended = false;
++        self.auto_fit();
++
+         self.activate_column(target_column_idx);
+     }
+ 
+@@ -2816,6 +2964,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
+         col.width = ColumnWidth::Fixed(active_width + available_width);
+         col.preset_width_idx = None;
+         col.is_full_width = false;
++        col.auto_fit = None;
+         col.update_tile_sizes(true);
+ 
+         // Put the leftmost window into the view.
+@@ -3962,7 +4111,7 @@ impl WindowHeight {
+ impl<W: LayoutElement> Column<W> {
+     #[allow(clippy::too_many_arguments)]
+     fn new_with_tile(
+-        tile: Tile<W>,
++        mut tile: Tile<W>,
+         view_size: Size<f64, Logical>,
+         working_area: Rectangle<f64, Logical>,
+         parent_area: Rectangle<f64, Logical>,
+@@ -3994,6 +4143,13 @@ impl<W: LayoutElement> Column<W> {
+             .iter()
+             .position(|preset| width == ColumnWidth::from(*preset));
+ 
++        // dotnix auto-fit: a window's preferred width is the width its first column opened at
++        // (later columns of a moved window keep the first one's).
++        let auto_fit = *tile.auto_fit_pref.get_or_insert(match width {
++            ColumnWidth::Proportion(p) if !is_full_width && p > 0. => Some(p),
++            _ => None,
++        });
++
+         let mut rv = Self {
+             tiles: vec![],
+             data: vec![],
+@@ -4001,6 +4157,7 @@ impl<W: LayoutElement> Column<W> {
+             width,
+             preset_width_idx,
+             is_full_width,
++            auto_fit,
+             is_pending_maximized: false,
+             is_pending_fullscreen: false,
+             display_mode,
+@@ -4433,6 +4590,62 @@ impl<W: LayoutElement> Column<W> {
+         resolve_preset_size(preset, &self.options, self.working_area.size.h, extra.h)
+     }
+ 
++    /// dotnix auto-fit: this column as auto-fit sees it.
++    fn auto_fit_input(&self) -> FitCol {
++        if self.is_full_width || !self.pending_sizing_mode().is_normal() {
++            // Full width, maximized or fullscreen: takes a screen for now, but keeps its
++            // auto-fit state and width so it comes back to them.
++            return FitCol::Pinned(1.);
++        }
++        match self.auto_fit {
++            Some(pref) => FitCol::Auto(pref),
++            None => FitCol::Pinned(self.width_proportion()),
++        }
++    }
++
++    /// The column's width setting as a proportion of the working area.
++    fn width_proportion(&self) -> f64 {
++        match self.width {
++            ColumnWidth::Proportion(p) => p,
++            ColumnWidth::Fixed(px) => {
++                let gaps = self.options.layout.gaps;
++                let full = self.working_area.size.w - gaps;
++                if full <= 0. {
++                    1.
++                } else {
++                    (px + gaps + self.extra_size().w) / full
++                }
++            }
++        }
++    }
++
++    /// The width this column is heading to (what its tiles were asked for), in logical
++    /// pixels, tab indicator included: unlike `width()`, not waiting for the clients.
++    fn target_width(&self) -> f64 {
++        let width = if self.is_full_width {
++            ColumnWidth::Proportion(1.)
++        } else {
++            self.width
++        };
++        self.resolve_column_width(width) + self.extra_size().w
++    }
++
++    /// dotnix auto-fit: size this column to `proportion`, keeping it managed.
++    fn set_auto_fit_width(&mut self, proportion: f64) {
++        if matches!(self.width, ColumnWidth::Proportion(p) if (p - proportion).abs() < 1e-6) {
++            return;
++        }
++        let width = ColumnWidth::Proportion(proportion);
++        self.width = width;
++        self.preset_width_idx = self
++            .options
++            .layout
++            .preset_column_widths
++            .iter()
++            .position(|preset| ColumnWidth::from(*preset) == width);
++        self.update_tile_sizes(true);
++    }
++
+     fn resolve_column_width(&self, width: ColumnWidth) -> f64 {
+         let working_size = self.working_area.size;
+         let gaps = self.options.layout.gaps;
+@@ -4943,6 +5156,8 @@ impl<W: LayoutElement> Column<W> {
+         self.preset_width_idx = None;
+         self.is_full_width = false;
+         self.is_pending_maximized = false;
++        // Sized by hand: auto-fit leaves it be from now on.
++        self.auto_fit = None;
+         self.update_tile_sizes(animate);
+     }
+ 
+@@ -5586,6 +5801,114 @@ fn cancel_resize_for_column<W: LayoutElement>(
+     }
+ }
+ 
++/// dotnix auto-fit: one column, as the planner sees it.
++#[derive(Debug, Clone, Copy, PartialEq)]
++enum FitCol {
++    /// Sized by auto-fit; the width its window prefers beside others.
++    Auto(f64),
++    /// Left as it is (sized by hand, sizes itself, or full width for now); its width.
++    Pinned(f64),
++}
++
++impl FitCol {
++    fn width(self) -> f64 {
++        match self {
++            FitCol::Auto(w) | FitCol::Pinned(w) => w,
++        }
++    }
++}
++
++/// Widths closer than this are the same width.
++const AUTO_FIT_TOL: f64 = 0.02;
++/// Auto-fit never makes a column narrower than this; more columns scroll instead.
++const AUTO_FIT_MIN_SHARE: f64 = 1. / 3.;
++
++/// dotnix auto-fit: the widths for a set of columns, decided in one pass over them, with
++/// nothing allocated. For each managed column:
++///
++/// - alone on its workspace: the whole width;
++/// - preferring full width (Claude): full, scrolled past, the others laid out as if it weren't
++///   there;
++/// - preferring another width (a window rule, Zen ⅔): that width, as long as those widths fit
++///   together with a share for the rest; otherwise (Zen ⅔ + Zen ⅔) everything shares evenly;
++/// - the rest share what is left, `per_screen` at a time, never under a third (then they scroll
++///   at 1 / per_screen).
++#[derive(Debug, Clone, Copy, PartialEq)]
++struct AutoFitPlan {
++    solo: bool,
++    default: f64,
++    keep_prefs: bool,
++    share: f64,
++}
++
++impl AutoFitPlan {
++    fn new(cols: impl Iterator<Item = FitCol>, default: f64, per_screen: usize) -> Self {
++        let per_screen = per_screen.max(1);
++        let (mut count, mut pinned) = (0usize, 0.);
++        let (mut fixed, mut fixed_sum, mut flex) = (0usize, 0., 0usize);
++        for col in cols {
++            count += 1;
++            match Self::sane(col, default) {
++                FitCol::Pinned(w) => pinned += w,
++                FitCol::Auto(pref) if pref >= 1. - AUTO_FIT_TOL => (),
++                FitCol::Auto(pref) if (pref - default).abs() > AUTO_FIT_TOL => {
++                    fixed += 1;
++                    fixed_sum += pref;
++                }
++                FitCol::Auto(_) => flex += 1,
++            }
++        }
++
++        let need = pinned + fixed_sum + if flex > 0 { AUTO_FIT_MIN_SHARE } else { 0. };
++        let keep_prefs = !(fixed > 0 && need > 1. + AUTO_FIT_TOL);
++        if !keep_prefs {
++            flex += fixed;
++            fixed_sum = 0.;
++        }
++
++        let mut avail = 1. - pinned - fixed_sum;
++        if avail < 1. / 3. - AUTO_FIT_TOL {
++            // The others fill a screen by themselves: these lay out as a screen of their own.
++            avail = 1.;
++        }
++        let mut share = avail / flex.clamp(1, per_screen) as f64;
++        if share < AUTO_FIT_MIN_SHARE - 1e-6 {
++            share = 1. / per_screen as f64;
++        }
++
++        Self {
++            solo: count == 1,
++            default,
++            keep_prefs,
++            share,
++        }
++    }
++
++    /// A preference that is not a usable width counts as the default.
++    fn sane(col: FitCol, default: f64) -> FitCol {
++        match col {
++            // Under 5% is not a width anyone means.
++            FitCol::Auto(pref) if !(pref.is_finite() && pref >= 0.05) => FitCol::Auto(default),
++            FitCol::Pinned(w) if !w.is_finite() => FitCol::Pinned(1.),
++            col => col,
++        }
++    }
++
++    /// The width for a column, `None` for one auto-fit leaves alone.
++    fn target(&self, col: FitCol) -> Option<f64> {
++        let FitCol::Auto(pref) = Self::sane(col, self.default) else {
++            return None;
++        };
++        Some(if self.solo || pref >= 1. - AUTO_FIT_TOL {
++            1.
++        } else if self.keep_prefs && (pref - self.default).abs() > AUTO_FIT_TOL {
++            pref
++        } else {
++            self.share
++        })
++    }
++}
++
+ fn resolve_preset_size(
+     preset: PresetSize,
+     options: &Options,
+@@ -5636,3 +5959,90 @@ mod tests {
+         compute_working_area(parent_area, 1., struts);
+     }
+ }
++
++#[cfg(test)]
++mod auto_fit_plan_tests {
++    use super::{AutoFitPlan, FitCol};
++
++    const D: f64 = 0.5;
++
++    fn plan(cols: &[FitCol], per_screen: usize) -> Vec<Option<f64>> {
++        let p = AutoFitPlan::new(cols.iter().copied(), D, per_screen);
++        cols.iter().map(|c| p.target(*c).map(|t| (t * 1000.).round() / 1000.)).collect()
++    }
++
++    use FitCol::{Auto, Pinned};
++
++    #[test]
++    fn empty_and_solo() {
++        assert_eq!(plan(&[], 2), vec![]);
++        assert_eq!(plan(&[Auto(D)], 2), vec![Some(1.)]);
++        assert_eq!(plan(&[Auto(2. / 3.)], 2), vec![Some(1.)]);
++        assert_eq!(plan(&[Pinned(0.42)], 2), vec![None]);
++    }
++
++    #[test]
++    fn even_shares() {
++        assert_eq!(plan(&[Auto(D), Auto(D)], 2), vec![Some(0.5), Some(0.5)]);
++        assert_eq!(plan(&[Auto(D); 3], 2), vec![Some(0.5); 3]);
++        assert_eq!(plan(&[Auto(D); 3], 3), vec![Some(0.333); 3]);
++        assert_eq!(plan(&[Auto(D); 5], 3), vec![Some(0.333); 5]);
++    }
++
++    #[test]
++    fn preferences() {
++        // Zen ⅔ + terminal.
++        assert_eq!(plan(&[Auto(2. / 3.), Auto(D)], 2), vec![Some(0.667), Some(0.333)]);
++        // Zen ⅔ + Thunar ⅓.
++        assert_eq!(plan(&[Auto(2. / 3.), Auto(1. / 3.)], 2), vec![Some(0.667), Some(0.333)]);
++        // Two that can't fit together share evenly.
++        assert_eq!(plan(&[Auto(2. / 3.), Auto(2. / 3.)], 2), vec![Some(0.5), Some(0.5)]);
++        // Zen ⅔ + two terminals: the two can't share a third, so they scroll at ½.
++        assert_eq!(
++            plan(&[Auto(2. / 3.), Auto(D), Auto(D)], 2),
++            vec![Some(0.667), Some(0.5), Some(0.5)]
++        );
++    }
++
++    #[test]
++    fn full_width_preference() {
++        // Claude beside the terminal: both full.
++        assert_eq!(plan(&[Auto(D), Auto(1.)], 2), vec![Some(1.), Some(1.)]);
++        assert_eq!(plan(&[Auto(D), Auto(D), Auto(1.)], 2), vec![Some(0.5), Some(0.5), Some(1.)]);
++    }
++
++    #[test]
++    fn pinned_columns() {
++        // Self-sized mpv beside a terminal: the terminal takes the rest.
++        assert_eq!(plan(&[Pinned(0.42), Auto(D)], 2), vec![None, Some(0.58)]);
++        // Full width for now (maximized): the other lays out as a screen of its own.
++        assert_eq!(plan(&[Pinned(1.), Auto(D)], 2), vec![None, Some(1.)]);
++        assert_eq!(plan(&[Pinned(1.), Auto(D), Auto(D)], 2), vec![None, Some(0.5), Some(0.5)]);
++        // A hand-sized 0.4: the two others can't share 0.6, so ½ each.
++        assert_eq!(plan(&[Auto(D), Pinned(0.4), Auto(D)], 2), vec![Some(0.5), None, Some(0.5)]);
++        assert_eq!(plan(&[Auto(D), Pinned(0.4)], 2), vec![Some(0.6), None]);
++        // Preference that doesn't fit next to a pinned column: share evenly.
++        assert_eq!(plan(&[Pinned(0.566), Auto(2. / 3.)], 2), vec![None, Some(0.434)]);
++    }
++
++    #[test]
++    fn never_degenerate() {
++        // Whatever comes in, targets are positive and finite.
++        let inputs = [0., 1e-9, 0.1, 0.25, 1. / 3., 0.5, 2. / 3., 0.9, 1., 1.5, 1e9];
++        for &a in &inputs {
++            for &b in &inputs {
++                for per_screen in [0, 1, 2, 3] {
++                    for cols in [
++                        vec![Auto(a), Auto(b)],
++                        vec![Auto(a), Pinned(b)],
++                        vec![Pinned(a), Pinned(b), Auto(D)],
++                    ] {
++                        for t in plan(&cols, per_screen).into_iter().flatten() {
++                            assert!(t.is_finite() && t > 0., "{cols:?} {per_screen}: {t}");
++                        }
++                    }
++                }
++            }
++        }
++    }
++}
+diff --git a/src/layout/tests.rs b/src/layout/tests.rs
+index 31265dd9..3cbd062c 100644
+--- a/src/layout/tests.rs
++++ b/src/layout/tests.rs
+@@ -517,6 +517,7 @@ enum Op {
+         id: Option<usize>,
+     },
+     CenterVisibleColumns,
++    AutoFitColumns,
+     FocusWorkspaceDown,
+     FocusWorkspaceUp,
+     FocusWorkspace(#[proptest(strategy = "0..=4usize")] usize),
+@@ -1179,6 +1180,7 @@ impl Op {
+                 layout.center_window(id.as_ref());
+             }
+             Op::CenterVisibleColumns => layout.center_visible_columns(),
++            Op::AutoFitColumns => layout.fit_columns(),
+             Op::FocusWorkspaceDown => layout.switch_workspace_down(),
+             Op::FocusWorkspaceUp => layout.switch_workspace_up(),
+             Op::FocusWorkspace(idx) => layout.switch_workspace(idx),
+@@ -1723,6 +1725,7 @@ fn operations_dont_panic() {
+         Op::ConsumeWindowIntoColumn,
+         Op::ExpelWindowFromColumn,
+         Op::CenterColumn,
++        Op::AutoFitColumns,
+         Op::FocusWorkspaceDown,
+         Op::FocusWorkspaceUp,
+         Op::FocusWorkspace(1),
+@@ -1897,6 +1900,7 @@ fn operations_from_starting_state_dont_panic() {
+         Op::ConsumeWindowIntoColumn,
+         Op::ExpelWindowFromColumn,
+         Op::CenterColumn,
++        Op::AutoFitColumns,
+         Op::FocusWorkspaceDown,
+         Op::FocusWorkspaceUp,
+         Op::FocusWorkspace(1),
+@@ -3888,6 +3892,7 @@ prop_compose! {
+         center_focused_column in prop::option::of(arbitrary_center_focused_column()),
+         always_center_single_column in prop::option::of(any::<bool>().prop_map(Flag)),
+         empty_workspace_above_first in prop::option::of(any::<bool>().prop_map(Flag)),
++        auto_fit_columns in prop::option::of(any::<bool>()),
+     ) -> niri_config::LayoutPart {
+         niri_config::LayoutPart {
+             gaps,
+@@ -3895,6 +3900,7 @@ prop_compose! {
+             center_focused_column,
+             always_center_single_column,
+             empty_workspace_above_first,
++            auto_fit_columns,
+             focus_ring,
+             border,
+             shadow,
+@@ -3929,3 +3935,309 @@ proptest! {
+         check_ops_with_options(options, ops);
+     }
+ }
++
++// ── dotnix auto-fit ─────────────────────────────────────────────────────────
++
++fn auto_fit_options() -> Options {
++    Options {
++        layout: niri_config::Layout {
++            auto_fit_columns: true,
++            ..Default::default()
++        },
++        ..Default::default()
++    }
++}
++
++/// Opens window `id` as a new column; `width` is what its window rule would give it (niri passes
++/// the default, ½, for a window without one; `None` is a window that sizes itself).
++fn auto_fit_add(layout: &mut Layout<TestWindow>, id: usize, width: Option<f64>) {
++    layout.add_window(
++        TestWindow::new(TestWindowParams::new(id)),
++        AddWindowTarget::Auto,
++        width.map(PresetSize::Proportion),
++        None,
++        false,
++        false,
++        ActivateWindow::default(),
++    );
++    layout.verify_invariants();
++}
++
++/// Lets every window take its requested size and every animation finish.
++fn auto_fit_settle(layout: &mut Layout<TestWindow>) {
++    for id in 0..10 {
++        Op::Communicate(id).apply(layout);
++    }
++    Op::CompleteAnimations.apply(layout);
++    layout.verify_invariants();
++}
++
++/// The width the layout asked window `id` for, as a proportion of the 1280 px test output
++/// (16 px gaps).
++fn auto_fit_width(layout: &Layout<TestWindow>, id: usize) -> f64 {
++    let (_, win) = layout.windows().find(|(_, w)| w.0.id == id).unwrap();
++    let w = f64::from(win.requested_size().unwrap().w);
++    (w + 16.) / (1280. - 16.)
++}
++
++#[track_caller]
++fn assert_width(layout: &Layout<TestWindow>, id: usize, expected: f64) {
++    let got = auto_fit_width(layout, id);
++    assert!(
++        (got - expected).abs() < 0.005,
++        "window {id}: width {got:.4}, expected {expected:.4}"
++    );
++}
++
++fn auto_fit_layout() -> Layout<TestWindow> {
++    let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), auto_fit_options());
++    Op::AddOutput(1).apply(&mut layout);
++    layout
++}
++
++#[test]
++fn auto_fit_off_keeps_upstream_widths() {
++    let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), Options::default());
++    Op::AddOutput(1).apply(&mut layout);
++    auto_fit_add(&mut layout, 1, Some(0.5));
++    assert_width(&layout, 1, 0.5);
++    auto_fit_add(&mut layout, 2, Some(2. / 3.));
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 2. / 3.);
++}
++
++#[test]
++fn auto_fit_alone_fills_two_share() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(0.5));
++    assert_width(&layout, 1, 1.);
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++    // A third scrolls at a half each (never under a third on this narrow output).
++    auto_fit_add(&mut layout, 3, Some(0.5));
++    for id in 1..=3 {
++        assert_width(&layout, id, 0.5);
++    }
++}
++
++#[test]
++fn auto_fit_rule_width_alone_is_full() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.));
++    assert_width(&layout, 1, 1.);
++}
++
++#[test]
++fn auto_fit_rule_width_kept_beside_others() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.)); // Zen
++    auto_fit_add(&mut layout, 2, Some(0.5)); // a terminal
++    assert_width(&layout, 1, 2. / 3.);
++    assert_width(&layout, 2, 1. / 3.);
++}
++
++#[test]
++fn auto_fit_rule_widths_that_dont_fit_share_evenly() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.)); // Zen
++    auto_fit_add(&mut layout, 2, Some(2. / 3.)); // another Zen
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++}
++
++#[test]
++fn auto_fit_full_width_rule_stays_full() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(0.5)); // terminal
++    auto_fit_add(&mut layout, 2, Some(1.)); // Claude
++    assert_width(&layout, 1, 1.);
++    assert_width(&layout, 2, 1.);
++}
++
++#[test]
++fn auto_fit_close_gives_room_back() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    auto_fit_settle(&mut layout);
++    Op::CloseWindow(2).apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 1.);
++}
++
++#[test]
++fn auto_fit_hand_sized_column_is_left_alone() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(0.5));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    // Window 2 is focused: size it by hand.
++    Op::SetColumnWidth(SizeChange::SetProportion(40.)).apply(&mut layout);
++    assert_width(&layout, 2, 0.4);
++    auto_fit_add(&mut layout, 3, Some(0.5));
++    assert_width(&layout, 2, 0.4);
++    // The others share what is left: 0.6 between two is under a third, so they scroll at ½.
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 3, 0.5);
++    // Closing one never touches the pinned one either.
++    Op::CloseWindow(3).apply(&mut layout);
++    assert_width(&layout, 2, 0.4);
++    assert_width(&layout, 1, 0.6);
++}
++
++#[test]
++fn auto_fit_columns_action_hands_back() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(0.5));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    Op::SetColumnWidth(SizeChange::SetProportion(40.)).apply(&mut layout);
++    Op::AutoFitColumns.apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++}
++
++#[test]
++fn auto_fit_maximize_does_not_pin() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(0.5));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    Op::MaximizeColumn.apply(&mut layout);
++    assert_width(&layout, 2, 1.);
++    Op::MaximizeColumn.apply(&mut layout);
++    assert_width(&layout, 2, 0.5);
++    // Still managed: a third window reflows it like the others.
++    Op::CloseWindow(1).apply(&mut layout);
++    assert_width(&layout, 2, 1.);
++}
++
++#[test]
++fn auto_fit_moving_a_window_refits_both_workspaces() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    // Window 2 is focused; send it down to the empty workspace.
++    Op::MoveWindowToWorkspaceDown(true).apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 1.);
++    assert_width(&layout, 2, 1.);
++}
++
++#[test]
++fn auto_fit_stacking_refits() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(0.5));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    auto_fit_add(&mut layout, 3, Some(0.5));
++    // Window 3 (focused) goes into window 2's column: two columns left.
++    Op::ConsumeOrExpelWindowLeft { id: None }.apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++    assert_width(&layout, 3, 0.5);
++    Op::ExpelWindowFromColumn.apply(&mut layout);
++    layout.verify_invariants();
++    for id in 1..=3 {
++        assert_width(&layout, id, 0.5);
++    }
++}
++
++#[test]
++fn auto_fit_swap_keeps_widths() {
++    let mut layout = auto_fit_layout();
++    auto_fit_add(&mut layout, 1, Some(2. / 3.));
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    Op::SwapWindowInDirection(ScrollDirection::Left).apply(&mut layout);
++    layout.verify_invariants();
++    assert_width(&layout, 1, 2. / 3.);
++    assert_width(&layout, 2, 1. / 3.);
++}
++
++#[test]
++fn auto_fit_view_shows_every_column_that_fits() {
++    let mut layout = auto_fit_layout();
++    // Zen alone: full width.
++    auto_fit_add(&mut layout, 1, Some(2. / 3.));
++    auto_fit_settle(&mut layout);
++    assert_width(&layout, 1, 1.);
++    // Another Zen: both end at ½, and once the old one has committed its new width the view
++    // shows both from the left edge, with no further view movement needed.
++    auto_fit_add(&mut layout, 2, Some(2. / 3.));
++    auto_fit_settle(&mut layout);
++    let ws = layout.active_workspace().unwrap();
++    assert_eq!(ws.scrolling().target_view_pos(), -16.);
++    assert_width(&layout, 1, 0.5);
++    assert_width(&layout, 2, 0.5);
++}
++
++#[test]
++fn auto_fit_operations_dont_panic() {
++    // Every op, in a fixed order, with auto-fit on.
++    let ops = [
++        Op::AddOutput(1),
++        Op::AddWindow {
++            params: TestWindowParams::new(1),
++        },
++        Op::AddWindow {
++            params: TestWindowParams::new(2),
++        },
++        Op::AddWindow {
++            params: TestWindowParams::new(3),
++        },
++        Op::MaximizeColumn,
++        Op::FullscreenWindow(2),
++        Op::SwapWindowInDirection(ScrollDirection::Left),
++        Op::ConsumeWindowIntoColumn,
++        Op::ExpelWindowFromColumn,
++        Op::ToggleColumnTabbedDisplay,
++        Op::SetColumnWidth(SizeChange::AdjustProportion(10.)),
++        Op::AutoFitColumns,
++        Op::MoveColumnToWorkspaceDown(true),
++        Op::FocusWorkspaceUp,
++        Op::CloseWindow(1),
++        Op::Communicate(2),
++        Op::Communicate(3),
++        Op::CompleteAnimations,
++        Op::AutoFitColumns,
++        Op::CloseWindow(2),
++        Op::CloseWindow(3),
++        Op::AutoFitColumns,
++    ];
++    check_ops_with_options(auto_fit_options(), ops);
++}
++
++#[test]
++fn auto_fit_self_sized_window_is_left_alone() {
++    let mut layout = auto_fit_layout();
++    // Sizes itself (mpv, `default-column-width {}`): the test window picks 100 px.
++    auto_fit_add(&mut layout, 1, None);
++    auto_fit_settle(&mut layout);
++    let w1 = auto_fit_width(&layout, 1);
++    auto_fit_add(&mut layout, 2, Some(0.5));
++    assert_width(&layout, 1, w1);
++    // The terminal takes what the self-sized one leaves.
++    assert_width(&layout, 2, 1. - w1);
++}
++
++#[test]
++fn auto_fit_new_window_opens_at_its_fitted_width() {
++    let mut layout = auto_fit_layout();
++    let rules = ResolvedWindowRules::default();
++    let limits = (Size::from((0, 0)), Size::from((0, 0)));
++    let ask = |layout: &Layout<TestWindow>, p: f64| {
++        let ws = layout.active_workspace().unwrap();
++        ws.new_window_size(Some(PresetSize::Proportion(p)), None, false, &rules, limits)
++            .w
++    };
++    // Empty workspace: a ⅔ window opens full.
++    assert_eq!(ask(&layout, 2. / 3.), 1248);
++    auto_fit_add(&mut layout, 1, Some(2. / 3.));
++    // Beside a Zen: another Zen opens at ½ straight away; a terminal at ⅓.
++    assert_eq!(ask(&layout, 2. / 3.), 616);
++    assert_eq!(ask(&layout, 0.5), 405);
++    // Off: the rule width, as upstream.
++    let mut options = auto_fit_options();
++    options.layout.auto_fit_columns = false;
++    layout.update_options(options);
++    assert_eq!(ask(&layout, 2. / 3.), 826);
++}
+diff --git a/src/layout/tile.rs b/src/layout/tile.rs
+index 73088d81..e9e64735 100644
+--- a/src/layout/tile.rs
++++ b/src/layout/tile.rs
+@@ -56,6 +56,13 @@ pub struct Tile<W: LayoutElement> {
+     /// the same windows their body does, not the wallpaper.
+     border_glass: FramebufferEffect,
+ 
++    /// dotnix auto-fit: the column width this window prefers beside others, taken from the
++    /// width its first column opened at (its window rule, or the default). `None` until it
++    /// first joins a column; `Some(None)` when it opened at a size of its own (`{}`, fixed),
++    /// which auto-fit leaves alone. Kept on the tile so it survives moves between columns and
++    /// workspaces.
++    pub(super) auto_fit_pref: Option<Option<f64>>,
++
+     /// This tile's current sizing mode.
+     ///
+     /// This will update only when the `window` actually goes maximized or fullscreen, rather than
+@@ -200,6 +207,7 @@ impl<W: LayoutElement> Tile<W> {
+             focus_ring: FocusRing::new(focus_ring_config),
+             shadow: Shadow::new(shadow_config),
+             border_glass: FramebufferEffect::new(),
++            auto_fit_pref: None,
+             sizing_mode,
+             fullscreen_backdrop: SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.]),
+             restore_to_floating: false,
+diff --git a/src/layout/workspace.rs b/src/layout/workspace.rs
+index 49548a83..05aadf00 100644
+--- a/src/layout/workspace.rs
++++ b/src/layout/workspace.rs
+@@ -1174,6 +1174,11 @@ impl<W: LayoutElement> Workspace<W> {
+         self.scrolling.center_visible_columns();
+     }
+ 
++    /// dotnix auto-fit: hand every column back to auto-fit and fit them.
++    pub fn fit_columns(&mut self) {
++        self.scrolling.fit_columns();
++    }
++
+     pub fn toggle_width(&mut self, forwards: bool) {
+         if self.floating_is_active.get() {
+             self.floating.toggle_window_width(None, forwards);

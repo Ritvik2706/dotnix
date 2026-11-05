@@ -14,25 +14,47 @@ Usage:
     ./razer-fx.py wave starlight        # wave with starlight twinkles on top
     ./razer-fx.py static:8000ff breath  # purple base, breathing overlay
     ./razer-fx.py --fps 20 wave starlight
+    ./razer-fx.py aurora reactive --battery wallpaper reactive
+                                        # on battery: the wallpaper, still
 
 Auto-pauses (blanks keys, ~0 CPU) while the lid is closed; resumes on open.
-Stop with Ctrl-C (restores the keyboard to off).
+With --battery, switches to that layer stack while unplugged and back on AC.
+A frame that hasn't changed is never re-sent, and when nothing on the
+keyboard moves (only still layers + reactive with no key fading) the loop
+sleeps with no timer at all. It is woken only by events: a key press, the
+lid switch, a power-supply change (udev), a signal — SIGHUP means "the
+wallpaper changed" (wallpaper-theme.py sends it). So a still stack costs
+nothing between keystrokes. Stop with Ctrl-C (restores the keyboard to off).
 """
 import os
 import sys
 import time
 import signal
 import argparse
+import threading
 import numpy as np
 
 from openrazer.client import DeviceManager
 
 LID_STATE = "/proc/acpi/button/lid/LID0/state"
+AC_ONLINE = "/sys/class/power_supply/AC0/online"
 PIDFILE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "razer-fx.pid")
+# wallpaper-theme.py writes this (only when the theme changes); its "source"
+# is the wallpaper on screen. awww's own cache is the fallback.
+THEME_STATE = os.path.expanduser("~/.cache/lumen/theme.json")
+AWWW_CACHE_DIR = os.path.expanduser("~/.cache/awww")
 
 # Toggled by signals so an idle daemon (hypridle) can pause us when the screen
 # blanks: SIGUSR1 = pause (blank keys, ~0 CPU), SIGUSR2 = resume.
 _paused = {"on": False}
+
+# Wakes the main loop out of its idle wait: a key press (reactive), the lid
+# switch, a power-supply change, a signal.
+_wake = threading.Event()
+
+# Bumped by SIGHUP ("the wallpaper changed"); the wallpaper layer reloads
+# when it sees a new number.
+_wall_gen = {"n": 0}
 
 
 class _Stop(Exception):
@@ -43,10 +65,60 @@ def _on_term(*_):
     raise _Stop()
 
 
+def _set_paused(on):
+    _paused["on"] = on
+    _wake.set()
+
+
+def _on_hup(*_):
+    _wall_gen["n"] += 1
+    _wake.set()
+
+
 def _install_signal_pause():
-    signal.signal(signal.SIGUSR1, lambda *_: _paused.__setitem__("on", True))
-    signal.signal(signal.SIGUSR2, lambda *_: _paused.__setitem__("on", False))
+    signal.signal(signal.SIGUSR1, lambda *_: _set_paused(True))
+    signal.signal(signal.SIGUSR2, lambda *_: _set_paused(False))
+    signal.signal(signal.SIGHUP, _on_hup)
     signal.signal(signal.SIGTERM, _on_term)
+
+
+def _watch_events():
+    """Wake the loop on the lid switch and on power-supply changes, so it
+    never has to poll for them. Both are best-effort: without them the loop
+    still re-reads lid and power on every other wake (keys, signals)."""
+    try:
+        import evdev
+        for path in evdev.list_devices():
+            try:
+                d = evdev.InputDevice(path)
+            except OSError:
+                continue
+            if evdev.ecodes.SW_LID in d.capabilities().get(evdev.ecodes.EV_SW, []):
+                def lid_reader(dev=d):
+                    try:
+                        for ev in dev.read_loop():
+                            if ev.type == evdev.ecodes.EV_SW:
+                                _wake.set()
+                    except OSError:
+                        pass
+                threading.Thread(target=lid_reader, daemon=True).start()
+    except ImportError:
+        pass
+    try:
+        import pyudev
+        mon = pyudev.Monitor.from_netlink(pyudev.Context())
+        mon.filter_by("power_supply")
+        pyudev.MonitorObserver(mon, callback=lambda _dev: _wake.set(), daemon=True).start()
+    except Exception:
+        pass
+
+
+def on_ac():
+    try:
+        with open(AC_ONLINE) as f:
+            return f.read().strip() == "1"
+    except OSError:
+        return True   # no adapter info -> treat as plugged in
 
 
 def lid_is_open():
@@ -76,12 +148,20 @@ def hsv_to_rgb(h, s, v):
 # A layer is a callable: layer(t, R, C) -> (rgb[R,C,3] float, alpha[R,C] float)
 # where R, C are precomputed row/col index grids.
 
+# A layer that changes on its own every frame sets `layer.animated = True`;
+# the main loop only idles when no active layer is animated.
+
+def animated(layer):
+    layer.animated = True
+    return layer
+
+
 def make_wave(speed=0.25, spread=0.07, sat=1.0, val=1.0):
     def layer(t, R, C):
         hue = (R + C) * spread - t * speed
         rgb = hsv_to_rgb(hue, np.full_like(hue, sat), np.full_like(hue, val))
         return rgb, np.ones(R.shape)
-    return layer
+    return animated(layer)
 
 
 # Vivid, saturated anchors (each has a near-zero channel so it doesn't wash
@@ -112,7 +192,7 @@ def make_aurora(speed=0.16, spread=0.05, val=0.65, hold=0.25, palette=AURORA_PAL
     def layer(t, R, C):
         phase = (R + C) * spread - t * speed
         return sample(phase) * val, np.ones(R.shape)
-    return layer
+    return animated(layer)
 
 
 def make_bands(palette=AURORA_PALETTE):
@@ -139,6 +219,62 @@ def make_breath(period=4.0, sat=1.0):
         hue = np.full(R.shape, t * 0.03)
         rgb = hsv_to_rgb(hue, np.full(R.shape, sat), np.full(R.shape, v))
         return rgb, np.ones(R.shape)
+    return animated(layer)
+
+
+def _current_wallpaper():
+    """Path of the wallpaper on screen: wallpaper-theme's state, else awww's
+    cache (its last line is the image path)."""
+    import json
+    try:
+        with open(THEME_STATE) as f:
+            src = json.load(f).get("source")
+        if src and os.path.isfile(src):
+            return src
+    except (OSError, ValueError):
+        pass
+    try:
+        for root, _, files in os.walk(AWWW_CACHE_DIR):
+            for name in sorted(files):
+                with open(os.path.join(root, name), "rb") as f:
+                    lines = [l for l in f.read().split(b"\n") if l.startswith(b"/")]
+                if lines and os.path.isfile(lines[-1].decode(errors="ignore")):
+                    return lines[-1].decode()
+    except OSError:
+        pass
+    return None
+
+
+def make_wallpaper(sat=1.4, val=0.65, floor=0.22):
+    """The wallpaper, still: the image averaged down to one colour per key and
+    flipped top-to-bottom, so the keyboard reads like a mirror lying below the
+    screen — the bottom of the wallpaper lands on the top row (the keys
+    nearest the screen), the sky on the bottom row; left/right unchanged.
+    LEDs wash colours out,
+    so saturation is pushed up, and brightness is evened out (dark corners of
+    the picture still glow a little) and capped like the aurora's. Follows
+    wallpaper changes on SIGHUP (sent by wallpaper-theme.py) — no polling."""
+    state = {"gen": None, "grid": None}
+
+    def load(shape):
+        from PIL import Image
+        path = _current_wallpaper()
+        if path is None:
+            return np.full(shape + (3,), 255.0 * val)
+        rows, cols = shape
+        im = (Image.open(path).convert("RGB").resize((cols, rows), Image.BOX)
+              .transpose(Image.Transpose.FLIP_TOP_BOTTOM))
+        hsv = np.asarray(im.convert("HSV"), dtype=float) / 255.0
+        h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        s = np.clip(s * sat, 0.0, 1.0)
+        v = val * (floor + (1.0 - floor) * np.clip(v, 0.0, 1.0) ** 0.7)
+        return hsv_to_rgb(h, s, v)
+
+    def layer(t, R, C):
+        if state["grid"] is None or state["gen"] != _wall_gen["n"]:
+            state["gen"] = _wall_gen["n"]
+            state["grid"] = load(R.shape)
+        return state["grid"], np.ones(R.shape)
     return layer
 
 
@@ -174,7 +310,7 @@ def make_starlight(rate=5.0, life=2.8, color=None):
         alpha = np.sin(np.pi * age) ** 1.5
         alpha[age >= 1.0] = 0.0
         return rgb * alpha[..., None], alpha
-    return layer
+    return animated(layer)
 
 
 def _reactive_keycode_map():
@@ -244,6 +380,7 @@ def make_reactive(color="44FF00", life=3.0):
                     r, c = rc
                     if r < born["arr"].shape[0] and c < born["arr"].shape[1]:
                         born["arr"][r, c] = time.time()
+                        _wake.set()          # light it now, even from idle
 
     for p in paths:
         threading.Thread(target=reader, args=(p,), daemon=True).start()
@@ -264,6 +401,7 @@ LAYER_FACTORIES = {
     "reactive": lambda a: make_reactive(color=a or "44FF00"),
     "starlight": lambda a: make_starlight(color=a or None),
     "static": lambda a: make_static(a or "ffffff"),
+    "wallpaper": lambda a: make_wallpaper(),
 }
 
 
@@ -278,6 +416,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("layers", nargs="+", help="layers bottom->top, e.g. wave starlight")
     ap.add_argument("--fps", type=float, default=15.0)
+    ap.add_argument("--battery", nargs="+", metavar="LAYER",
+                    help="layer stack to use while on battery, e.g. wallpaper reactive")
     args = ap.parse_args()
 
     # One at a time: two copies fight over the matrix and the keys flicker
@@ -298,29 +438,45 @@ def main():
     rows, cols = dev.fx.advanced.rows, dev.fx.advanced.cols
     R, C = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
     R, C = R.astype(float), C.astype(float)
-    layers = [build_layer(s) for s in args.layers]
+    # Built once per spec, so a layer in both stacks (reactive) is one
+    # instance: one set of key readers, and its fade carries across a switch.
+    built = {}
+
+    def stack(specs):
+        for s in specs:
+            if s not in built:
+                built[s] = build_layer(s)
+        return [built[s] for s in specs]
+
+    ac_layers = stack(args.layers)
+    bat_layers = stack(args.battery) if args.battery else ac_layers
     mtx = dev.fx.advanced.matrix
     _install_signal_pause()
+    _watch_events()
     with open(PIDFILE, "w") as f:           # so hypridle can signal us by PID
         f.write(str(os.getpid()))
-    print(f"{dev.name}: {rows}x{cols}, layers={args.layers}, {args.fps:g} fps. "
+    print(f"{dev.name}: {rows}x{cols}, layers={args.layers}, "
+          f"battery={args.battery or args.layers}, {args.fps:g} fps. "
           f"pid {os.getpid()} -> {PIDFILE}. Ctrl-C to stop.")
 
     frame = 1.0 / args.fps
     t0 = time.time()
     blanked = False
+    last = None                              # the frame on the keys now
     try:
         while True:
+            _wake.clear()
             # Pause (blank, ~0 CPU) while the lid is shut or an idle daemon
             # has signalled SIGUSR1 (e.g. screen blanked). Resume on open/SIGUSR2.
             if not lid_is_open() or _paused["on"]:
                 if not blanked:
                     mtx.reset(); dev.fx.advanced.draw(); blanked = True
-                # Poll often so effects snap back quickly on lid-open/resume;
-                # this only re-reads a tiny /proc file, so CPU cost is trivial.
-                time.sleep(0.1)
+                    last = None
+                # Lid-open (the lid switch) and SIGUSR2 both wake us.
+                _wake.wait()
                 continue
             blanked = False
+            layers = ac_layers if on_ac() else bat_layers
             t = time.time() - t0
             out = np.zeros((rows, cols, 3))
             for layer in layers:
@@ -328,11 +484,19 @@ def main():
                 a = alpha[..., None]
                 out = out * (1 - a) + rgb * a
             out = np.clip(out, 0, 255).astype(int)
-            for r in range(rows):
-                for c in range(cols):
-                    mtx.set(r, c, tuple(out[r, c]))
-            dev.fx.advanced.draw()
-            time.sleep(frame)
+            if last is None or not np.array_equal(out, last):
+                for r in range(rows):
+                    for c in range(cols):
+                        mtx.set(r, c, tuple(out[r, c]))
+                dev.fx.advanced.draw()
+                last = out
+                time.sleep(frame)
+            elif any(getattr(l, "animated", False) for l in layers):
+                time.sleep(frame)
+            else:
+                # Still: nothing to draw until a key, the lid, a power
+                # change or a signal (incl. SIGHUP = new wallpaper).
+                _wake.wait()
     except (KeyboardInterrupt, _Stop):
         mtx.reset(); dev.fx.advanced.draw(); dev.fx.static(0, 0, 0)
         print("\nstopped.")

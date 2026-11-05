@@ -1,0 +1,51 @@
+From e6734d096f41103b77e800075f8d6615871b6978 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 02:23:56 +0400
+Subject: [PATCH 16/38] render: liquid glass edge bends without smearing
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The nearly linear (1-x)^1.1 falloff capped at 0.85x bevel magnified the
+whole band ~14x, smearing text into rainbow streaks. Now (1-x)^1.6 capped
+at 0.6x bevel (steepest slope 0.96, fold-free): hard right at the rim,
+easing off inward, content stays recognisable; dispersion back to ±0.35x.
+---
+ src/render_helpers/shaders/liquid_glass.frag | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 1d54bfbb..450a2b33 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -147,12 +147,13 @@ float edge_slope(float u, float bevel, float thickness) {
+ 
+ // How far (px, inward) the backdrop shifts at `u` px in from the edge. A ray
+ // through glass of index `ior` this thick shifts about thickness * (ior - 1)
+-// at the rim. The shift falls off as (1 - x)^LENS_POWER across the bevel,
+-// nearly linear, so the whole band is strongly squeezed (Apple's edges bend a
+-// lot), capped at LENS_CAP x bevel so the squeeze never reverses into a
+-// mirror image: its steepest slope, LENS_POWER * LENS_CAP, stays below 1.
+-#define LENS_POWER 1.1
+-#define LENS_CAP 0.85
++// at the rim. The shift falls off as (1 - x)^LENS_POWER across the bevel:
++// content bends hard right at the rim and eases off inward, so it stays
++// recognisable (a nearly linear falloff smeared the whole band into streaks),
++// capped at LENS_CAP x bevel so the squeeze never reverses into a mirror
++// image: its steepest slope, LENS_POWER * LENS_CAP, stays below 1.
++#define LENS_POWER 1.6
++#define LENS_CAP 0.6
+ float displacement(float u, float bevel, float thickness, float ior) {
+     float x = clamp(u / bevel, 0.0, 1.0);
+     float peak = min(thickness * (ior - 1.0), LENS_CAP * bevel);
+@@ -230,8 +231,8 @@ void main() {
+         if (dispersion > 0.0) {
+             // Red bends less, blue more: a prism's spread of the index.
+             // (around the capped shift, so the split survives the cap).
+-            float dr = dg * (1.0 - 0.6 * dispersion);
+-            float db = dg * (1.0 + 0.6 * dispersion);
++            float dr = dg * (1.0 - 0.35 * dispersion);
++            float db = dg * (1.0 + 0.35 * dispersion);
+             color = vec4(backdrop(v_coords + dir * dr, c).r, g.g,
+                          backdrop(v_coords + dir * db, c).b, g.a);
+         } else {

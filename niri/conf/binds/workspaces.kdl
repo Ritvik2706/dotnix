@@ -1,0 +1,66 @@
+// binds/workspaces.kdl — workspaces, projects, the TV, screen sharing.
+// Mod+1-5 are the laptop's homes, 6 the first plain workspace, 7 8 9 0 the TV's
+// (../workspaces.kdl).
+binds {
+    // ── Projects ──
+    // The island's Projects page (the pill grows into it); `project.sh pick`
+    // is the old terminal picker.
+    Mod+A hotkey-overlay-title="Open a project" { spawn-sh "~/.local/bin/lumen --say island 'emit proj_open'"; }
+    Mod+Shift+A hotkey-overlay-title="Close this project" { spawn-sh "~/.config/niri/scripts/project.sh close"; }
+
+    // ── Workspaces ──
+    // Mod+N goes there, Mod+Shift+N takes the column along, Mod+Ctrl+N throws it
+    // there and stays. By name, so each works from either monitor. 6 has no name
+    // (it is the first plain workspace): plain-ws.sh finds it.
+    Mod+1 repeat=false { focus-workspace "browser"; }
+    Mod+2 repeat=false { focus-workspace "terminal"; }
+    Mod+3 repeat=false { focus-workspace "docs"; }
+    Mod+4 repeat=false { focus-workspace "media"; }
+    Mod+5 repeat=false { focus-workspace "tools"; }
+    Mod+6 repeat=false { spawn-sh "~/.config/niri/scripts/plain-ws.sh focus"; }
+    Mod+7 repeat=false { focus-workspace "TV 7"; }
+    Mod+8 repeat=false { focus-workspace "TV 8"; }
+    Mod+9 repeat=false { focus-workspace "TV 9"; }
+    Mod+0 repeat=false { focus-workspace "TV 0"; }
+    Mod+Shift+1 { move-column-to-workspace "browser"; }
+    Mod+Shift+2 { move-column-to-workspace "terminal"; }
+    Mod+Shift+3 { move-column-to-workspace "docs"; }
+    Mod+Shift+4 { move-column-to-workspace "media"; }
+    Mod+Shift+5 { move-column-to-workspace "tools"; }
+    Mod+Shift+6 { spawn-sh "~/.config/niri/scripts/plain-ws.sh move"; }
+    Mod+Shift+7 { move-column-to-workspace "TV 7"; }
+    Mod+Shift+8 { move-column-to-workspace "TV 8"; }
+    Mod+Shift+9 { move-column-to-workspace "TV 9"; }
+    Mod+Shift+0 { move-column-to-workspace "TV 0"; }
+    Mod+Ctrl+1 { move-column-to-workspace "browser" focus=false; }
+    Mod+Ctrl+2 { move-column-to-workspace "terminal" focus=false; }
+    Mod+Ctrl+3 { move-column-to-workspace "docs" focus=false; }
+    Mod+Ctrl+4 { move-column-to-workspace "media" focus=false; }
+    Mod+Ctrl+5 { move-column-to-workspace "tools" focus=false; }
+    Mod+Ctrl+6 { spawn-sh "~/.config/niri/scripts/plain-ws.sh send"; }
+    Mod+Ctrl+7 { move-column-to-workspace "TV 7" focus=false; }
+    Mod+Ctrl+8 { move-column-to-workspace "TV 8" focus=false; }
+    Mod+Ctrl+9 { move-column-to-workspace "TV 9" focus=false; }
+    Mod+Ctrl+0 { move-column-to-workspace "TV 0" focus=false; }
+    // The column a workspace down / up; the whole workspace up / down.
+    Mod+Ctrl+Shift+J { move-column-to-workspace-down; }
+    Mod+Ctrl+Shift+K { move-column-to-workspace-up; }
+    Mod+Ctrl+Shift+Up   { move-workspace-up; }
+    Mod+Ctrl+Shift+Down { move-workspace-down; }
+
+    // ── Monitors ──
+    // Next/previous, not left/right: these work however the screens are arranged.
+    Mod+Comma  { focus-monitor-previous; }
+    Mod+Period { focus-monitor-next; }
+    Mod+Shift+Comma  { move-column-to-monitor-previous; }
+    Mod+Shift+Period { move-column-to-monitor-next; }
+    Mod+Ctrl+Comma  { move-workspace-to-monitor-previous; }
+    Mod+Ctrl+Period { move-workspace-to-monitor-next; }
+
+    // ── Screen sharing ──
+    // Share "the dynamic target" in the call once, then point it at whatever
+    // you like from here (red rim = being shared, rules/look.kdl).
+    Mod+Ctrl+S hotkey-overlay-title="Share this window" { set-dynamic-cast-window; }
+    Mod+Ctrl+Shift+S hotkey-overlay-title="Share this monitor" { set-dynamic-cast-monitor; }
+    Mod+Ctrl+Alt+S hotkey-overlay-title="Stop sharing" { clear-dynamic-cast-target; }
+}

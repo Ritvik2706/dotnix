@@ -1,0 +1,193 @@
+From d5d14d3b66b6a9e32e2df7b10dc3e665c9a893b2 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 01:53:23 +0400
+Subject: [PATCH 11/38] render: fold-free liquid glass lensing; drop the busy
+ measure
+
+Two artifacts: jagged polygons inside small glass over sharp edges, and
+patches that slid around while glass animated.
+- The busy-content measure (crisp vs frosted at 5 taps 24 px apart) is
+  large only on edges, so it painted five shifted copies of every edge
+  behind the glass. Removed until there is a blurred detail map.
+- The strict Snell trace folds the backdrop into a mirror image near the
+  rim; replaced by a fold-free squeeze, strongest at the rim
+  (thickness*(ior-1), capped at 0.45*bevel), falling off as (1-x)^2; the
+  light still uses the true squircle slope. Dispersion spreads that shift.
+- Capture padded 28 px around the shapes (blur needs real backdrop there);
+  the darkened outer edge is much fainter.
+---
+ src/render_helpers/liquid_glass.rs           | 10 ++-
+ src/render_helpers/shaders/liquid_glass.frag | 82 +++++++++-----------
+ 2 files changed, 44 insertions(+), 48 deletions(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index a635a56b..e1ea823d 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -16,8 +16,12 @@ use crate::render_helpers::blur::BlurOptions;
+ use crate::render_helpers::framebuffer_effect::{FramebufferEffect, GlassDraw};
+ use crate::render_helpers::RenderCtx;
+ 
+-/// How far outside its shapes a glass draws (its darkened edge), logical px.
+-const EDGE_PAD: f32 = 4.;
++/// How far around its shapes a glass captures the backdrop, logical px: the
++/// blur and the shader's "how busy is it" taps (24 px) must find real
++/// backdrop there, not the capture's clamped border (which made small or
++/// growing glass read busy and dark near its own edges). Only the shapes and
++/// their darkened edge are drawn.
++const EDGE_PAD: f32 = 28.;
+ /// The most blur passes the glass's frost takes.
+ const MAX_PASSES: u8 = 6;
+ 
+@@ -63,7 +67,7 @@ pub fn render_for_surface(
+             x1 = x1.max(s.x + s.w);
+             y1 = y1.max(s.y + s.h);
+         }
+-        // Wider than the shapes by the darkened edge drawn just outside them.
++        // Captured wider than the shapes (see EDGE_PAD).
+         let (x0, y0) = ((x0 - EDGE_PAD).floor(), (y0 - EDGE_PAD).floor());
+         let (x1, y1) = ((x1 + EDGE_PAD).ceil(), (y1 + EDGE_PAD).ceil());
+         let geometry = Rectangle::new(
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index e1ba0933..84e87ef6 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -15,14 +15,14 @@
+ // Apple's Liquid Glass use (kube.io's "Liquid Glass in CSS and SVG"): each
+ // shape is a slab of glass (IOR 1.5) whose edge, across `bevel` px, rises
+ // from 0 to the full `thickness` along a convex squircle, y = (1-(1-x)^4)^1/4.
+-// A ray straight down through the surface refracts by Snell's law and lands
+-// h * tan(θ1 - θ2) away from where it would without glass. That displacement
+-// is 0 at the very edge, peaks within a pixel or two of it and falls to 0
+-// where the glass turns flat: the middle shows the backdrop undistorted and
+-// the rim squeezes (and, nearest the edge, mirrors) what is just inside it —
+-// the lensed band that makes it read as glass. Dispersion is a different IOR
+-// per channel; the light is a rim glint from a top-left key with a weaker
+-// internal reflection opposite, plus a Fresnel edge glow.
++// The strict Snell trace folds the backdrop into a mirror image near the rim,
++// which over sharp content or on small shapes is a mess of jagged copies, so
++// the shift is a fold-free squeeze instead: strongest at the rim (about
++// thickness * (ior - 1), capped at FOLD_CAP x bevel), falling off as (1-x)^2
++// to nothing where the glass turns flat. The middle shows the backdrop
++// undistorted; the rim squeezes what is just inside it — the lensed band.
++// Dispersion spreads that shift per channel; the light uses the true squircle
++// slope: a top-left glint, a weaker internal reflection opposite, a hairline.
+ 
+ precision highp float;
+ #if defined(EXTERNAL)
+@@ -136,17 +136,26 @@ float profile(float x) {
+     return pow(max(1.0 - k * k * k * k, 0.0), 0.25);
+ }
+ 
+-// How far (px, inward) the backdrop shifts at `u` px in from the edge, for a
+-// bevel `bevel` px wide and `thickness` px tall, at refractive index `ior`.
+-// Also the surface slope there (for the light).
+-float displacement(float u, float bevel, float thickness, float ior, out float slope) {
++// The edge's slope at `u` px in from the edge, for a bevel `bevel` px wide and
++// `thickness` px tall: the true squircle surface, which the light uses.
++float edge_slope(float u, float bevel, float thickness) {
+     float x = clamp(u / bevel, 1e-3, 1.0);
+     float dx = 1e-3;
+     float dy = profile(min(x + dx, 1.0)) - profile(max(x - dx, 0.0));
+-    slope = dy / (2.0 * dx) * thickness / bevel;
+-    float t1 = atan(slope);
+-    float t2 = asin(sin(t1) / ior);
+-    return profile(x) * thickness * tan(t1 - t2);
++    return dy / (2.0 * dx) * thickness / bevel;
++}
++
++// How far (px, inward) the backdrop shifts at `u` px in from the edge. A ray
++// through glass of index `ior` this thick shifts at most about thickness *
++// (ior - 1) at the rim; the shift falls off as (1 - x)^2 across the bevel.
++// Capped at FOLD_CAP x bevel, so the backdrop is squeezed toward the rim but
++// never folds back into a mirror image (the strict Snell trace does, and on a
++// small shape or over a sharp edge that mirroring is a mess of jagged copies).
++#define FOLD_CAP 0.45
++float displacement(float u, float bevel, float thickness, float ior) {
++    float x = clamp(u / bevel, 0.0, 1.0);
++    float peak = min(thickness * (ior - 1.0), FOLD_CAP * bevel);
++    return peak * (1.0 - x) * (1.0 - x);
+ }
+ 
+ // The backdrop at c: frosted, or crisp by `clear` (0..1).
+@@ -165,7 +174,8 @@ void main() {
+     float cover = clamp(0.5 - d * niri_scale, 0.0, 1.0);
+     // iOS 27's separation: a soft darkened edge just outside the glass, so it
+     // stands off busy content behind it (as strong as the glass's light).
+-    float ring = d > 0.0 ? 0.24 * min(s[3].x * 1.5, 1.0) * pow(max(1.0 - d / 3.5, 0.0), 2.0) : 0.0;
++    // Faint: on small glass a stronger one reads as a dirty halo.
++    float ring = d > 0.0 ? 0.09 * min(s[3].x * 1.5, 1.0) * pow(max(1.0 - d / 2.5, 0.0), 2.0) : 0.0;
+     vec4 edge = vec4(0.0, 0.0, 0.0, ring) * alpha;
+     if (cover <= 0.0) {
+         gl_FragColor = edge;
+@@ -198,32 +208,17 @@ void main() {
+     // half-mix of the two, which ghosts).
+     float clear = 1.0 - smoothstep(0.08, 0.25, frost);
+ 
+-    // iOS 27: busy content behind the glass (text, fine detail) is diffused
+-    // more. How busy, measured over ~24 px around the point (so the frost
+-    // changes by region, not line by line): how far the crisp backdrop
+-    // strays from the frosted one. The taps only measure; what is shown is
+-    // the frosted capture itself (averaging spread taps would stack copies).
+-    vec2 r1 = inv * (vec2(24.0, 0.0) / geo_size);
+-    vec2 r2 = inv * (vec2(0.0, 24.0) / geo_size);
+-    vec4 f0 = texture2D(tex, v_coords);
+-    vec4 fa = texture2D(tex, v_coords + r1);
+-    vec4 fb = texture2D(tex, v_coords - r1);
+-    vec4 fc = texture2D(tex, v_coords + r2);
+-    vec4 fd = texture2D(tex, v_coords - r2);
+-    const vec3 lw = vec3(0.2126, 0.7152, 0.0722);
+-    float detail = abs(dot(texture2D(tex_sharp, v_coords).rgb - f0.rgb, lw))
+-                 + abs(dot(texture2D(tex_sharp, v_coords + r1).rgb - fa.rgb, lw))
+-                 + abs(dot(texture2D(tex_sharp, v_coords - r1).rgb - fb.rgb, lw))
+-                 + abs(dot(texture2D(tex_sharp, v_coords + r2).rgb - fc.rgb, lw))
+-                 + abs(dot(texture2D(tex_sharp, v_coords - r2).rgb - fd.rgb, lw));
+-    float busy = smoothstep(0.04, 0.22, detail);
+-    vec4 diffused = f0;
++    // (No busy-content measure here yet: sampling the crisp/frosted difference
++    // at a few points paints shifted copies of every edge behind the glass. It
++    // needs a blurred detail map from the capture, see liquid_glass.rs.)
++    float busy = 0.0;
+ 
+     vec4 color;
+     float rim = 0.0;
+     if (bevel > 0.5 && thickness > 0.0 && u < bevel) {
+         // Convex: rays converge, so each pixel shows what lies further in.
+-        float dg = displacement(u, bevel, thickness, 1.5, slope);
++        slope = edge_slope(u, bevel, thickness);
++        float dg = displacement(u, bevel, thickness, 1.5);
+         vec2 dir = inv * (-n / geo_size);
+         // The rim is crisp, easing into the middle.
+         float e = clamp(1.0 - u / bevel, 0.0, 1.0);
+@@ -232,10 +227,9 @@ void main() {
+         vec4 g = backdrop(v_coords + dir * dg, c);
+         if (dispersion > 0.0) {
+             // Red bends less, blue more: a prism's spread of the index.
+-            float spread = 0.05 * dispersion;
+-            float ignore_slope;
+-            float dr = displacement(u, bevel, thickness, 1.5 - spread, ignore_slope);
+-            float db = displacement(u, bevel, thickness, 1.5 + spread, ignore_slope);
++            // (around the capped shift, so the split survives the cap).
++            float dr = dg * (1.0 - 0.35 * dispersion);
++            float db = dg * (1.0 + 0.35 * dispersion);
+             color = vec4(backdrop(v_coords + dir * dr, c).r, g.g,
+                          backdrop(v_coords + dir * db, c).b, g.a);
+         } else {
+@@ -244,9 +238,6 @@ void main() {
+     } else {
+         color = backdrop(v_coords, clear);
+     }
+-    // Busy content is diffused; the lensed rim keeps most of its clarity.
+-    float diffuse = busy * (1.0 - 0.7 * rim);
+-    color = mix(color, diffused, diffuse);
+ #if defined(NO_ALPHA)
+     color.a = 1.0;
+ #endif
+@@ -286,6 +277,7 @@ void main() {
+     float lit = specular * ((1.2 * glint + 0.55 * inner) * tilt + 0.55 * hairline);
+     color.rgb = mix(color.rgb, vec3(color.a), clamp(lit, 0.0, 1.0));
+ 
++    
+     color = color * cover * alpha + edge * (1.0 - cover);
+ 
+ #if defined(DEBUG_FLAGS)

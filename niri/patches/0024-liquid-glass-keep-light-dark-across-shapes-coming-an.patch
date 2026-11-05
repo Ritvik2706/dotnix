@@ -1,0 +1,85 @@
+From 572e43294d93afcefa2a19959ce6ad48fbe18874 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 14:15:47 +0400
+Subject: [PATCH 24/38] liquid glass: keep light/dark across shapes coming and
+ going
+
+A change in the number of shapes reset every shape's decision, so all of
+them went dark until the next reading: every pill flickered as the card
+opened and its controls appeared. Each shape now keeps that of the same
+shape before; a new control takes that of the glass it sits on.
+---
+ src/render_helpers/liquid_glass.rs | 46 +++++++++++++++++++++++++++++-
+ 1 file changed, 45 insertions(+), 1 deletion(-)
+
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index ff4c4621..4c68467f 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -12,7 +12,7 @@ use smithay::reexports::wayland_server::Resource;
+ use smithay::utils::{Logical, Point, Rectangle, Size};
+ use smithay::wayland::compositor::with_states;
+ 
+-use crate::protocols::lumen_glass::{glass_object, LumenGlassCachedState};
++use crate::protocols::lumen_glass::{glass_object, GlassShape, LumenGlassCachedState};
+ use crate::render_helpers::background_effect::{BackgroundEffectElement, RenderParams};
+ use crate::render_helpers::blur::BlurOptions;
+ use crate::render_helpers::framebuffer_effect::{FramebufferEffect, GlassDraw, GlassMeasure};
+@@ -92,6 +92,48 @@ impl ShapeLight {
+     }
+ }
+ 
++/// The light/dark state of each of `new`, carried over from `old` (whose
++/// states are `lights`): a shape keeps the one of the same shape before —the
++/// same index if nothing was added or removed, else the nearest one on its
++/// layer— and one that is new on layer 1 takes that of the layer 0 glass it
++/// sits on. Starting over (dark until the next reading) made every pill
++/// flicker whenever a control appeared or went, as when the card opens.
++fn carry_lights(old: &[GlassShape], lights: &[ShapeLight], new: &[GlassShape]) -> Vec<ShapeLight> {
++    if old.len() != lights.len() {
++        return vec![ShapeLight::new(); new.len()];
++    }
++    if old.len() == new.len() && old.iter().zip(new).all(|(a, b)| a.layer == b.layer) {
++        return lights.to_vec();
++    }
++    let centre = |s: &GlassShape| (s.x + s.w / 2., s.y + s.h / 2.);
++    let nearest = |s: &GlassShape, layer: u8, inside: bool| {
++        let (cx, cy) = centre(s);
++        old.iter()
++            .enumerate()
++            .filter(|(_, o)| o.layer == layer)
++            .filter(|(_, o)| !inside || (cx >= o.x && cx <= o.x + o.w && cy >= o.y && cy <= o.y + o.h))
++            .min_by(|(_, a), (_, b)| {
++                let d = |o: &GlassShape| {
++                    let (ox, oy) = centre(o);
++                    (ox - cx).powi(2) + (oy - cy).powi(2)
++                };
++                d(a).total_cmp(&d(b))
++            })
++            .map(|(j, _)| lights[j])
++    };
++    new.iter()
++        .map(|s| {
++            nearest(s, s.layer, false)
++                .or_else(|| (s.layer >= 1).then(|| nearest(s, 0, true)).flatten())
++                .map(|mut l| {
++                    l.against = 0;
++                    l
++                })
++                .unwrap_or_else(ShapeLight::new)
++        })
++        .collect()
++}
++
+ /// Renders the surface's liquid glass, if it has any; `location` is the
+ /// surface's origin. Returns whether it did (then it replaces the surface's
+ /// plain background effect).
+@@ -144,6 +186,8 @@ pub fn render_for_surface(
+             for l in &mut glass.layers {
+                 l.effect.damage();
+             }
++            let old = glass.last.as_ref().map_or(&[][..], |l| &l.shapes[..]);
++            glass.lights = carry_lights(old, &glass.lights, &state.shapes);
+             glass.last = Some(state.clone());
+         }
+ 

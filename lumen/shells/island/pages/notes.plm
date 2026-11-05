@@ -50,7 +50,7 @@ part Notes {
             move: ex0 + 16, 44
             zone ellipse nbk { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
             body {
-                color: mix(chip, chip_hi, nbk.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * nbk.hover - nbk.pressed, 4.2, 21%
+                color: mix(chip, chip_hi, nbk.hover); material: control
                 ellipse { at: 16, 18; radius: 16 - 0.6 * nbk.pressed }
             }
             path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * nbk.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
@@ -59,7 +59,7 @@ part Notes {
             group {
                 show: n_count > 0
                 body {
-                    color: mix(rose, #7c3d4d, nclr.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + nclr.hover - nclr.pressed, 4.9, 20%
+                    color: mix(rose, #7c3d4d, nclr.hover); material: control; opacity: 45%
                     box { from: 284, 2; size: 68, 32; corner: 16 continuous }
                 }
                 image ic_trash { at: 296, 10; size: 15, 15; tint: rose_ink; opacity: 90% }

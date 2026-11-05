@@ -12,7 +12,7 @@ part Timer {
         follow lift = b.hover - b.pressed
         body {
             gradient: 0, 0 to 112, 40, mix(mix(chip, chip_hi, max(lift, 0)), soft_l, if(lit, 1, 0)), mix(mix(chip, chip_hi, max(lift, 0)), soft_s, if(lit, 1, 0))
-            glass: 25%; blur: 0%; light: 5%, 0, 20; shadow: 0, 1.8 + 0.5 * lift, 7 + 2 * lift, 22%
+            material: control; opacity: lgc_fill + 55% * if(lit, 1, 0)
             box { from: 0, 0; size: 112, 40; corner: 20 continuous }
         }
         text pick(if(go == 0, if(tmr_mode == watch, 1, 0), if(go == 1, if(tmr_paused, 3, 2), 4)), "Cancel", "Reset", "Pause", "Resume", "+1 min") { at: 56, 20; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: if(lit, pearl_ink, ink) }
@@ -29,7 +29,7 @@ part Timer {
             move: ex0 + 16, 44
             zone ellipse tmb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
             body {
-                color: mix(chip, chip_hi, tmb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * tmb.hover - tmb.pressed, 4.2, 21%
+                color: mix(chip, chip_hi, tmb.hover); material: control
                 ellipse { at: 16, 18; radius: 16 - 0.6 * tmb.pressed }
             }
             path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * tmb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
@@ -64,7 +64,7 @@ part Timer {
                 zone box ws_go { from: ex0 + 16, 136; size: 352, 44; corner: 22 continuous; cursor: pointer; label: "Start the stopwatch" }
                 body {
                     gradient: ex0 + 16, 136 to ex0 + 368, 180, soft_l, soft_s
-                    glass: 25%; blur: 0%; light: 7%, 136, 22; shadow: 0, 1.8 + ws_go.hover, 7, 24%
+                    material: control; opacity: 60%
                     box { from: ex0 + 16, 136 + ws_go.pressed; size: 352, 44; corner: 22 continuous }
                 }
                 text "Start" { at: ex0 + 192, 158 + ws_go.pressed; anchor: center; size: 13.5; weight: 700; family: "SF Pro Display"; color: pearl_ink }

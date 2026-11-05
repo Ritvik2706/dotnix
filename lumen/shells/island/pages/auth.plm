@@ -14,7 +14,7 @@ part Auth {
             move: ex0 + 16, 44
             body {
                 gradient: 0, 2 to 32, 34, soft_l, soft_s
-                glass: 25%; blur: 0%; light: 7%, 2, 16; shadow: 0, 1.2, 4.2, 26%
+                material: control; opacity: 55%
                 ellipse { at: 16, 18; radius: 16 }
             }
             image ic_lock { at: 7, 9; size: 18, 18; tint: pearl_ink }
@@ -48,13 +48,13 @@ part Auth {
         group {
             move: ex0 + 16, 214
             body {
-                color: mix(chip, chip_hi, pkc.hover); glass: 25%; blur: 0%; light: 4%, 0, 18; shadow: 0, 1.5, 5, 20%
+                color: mix(chip, chip_hi, pkc.hover); material: control
                 box { from: 172, 0; size: 84, 36; corner: 18 continuous }
             }
             text "Cancel" { at: 214, 18; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink }
             body {
                 gradient: 264, 0 to 352, 36, soft_l, soft_s
-                glass: 25%; blur: 0%; light: 7%, 0, 18; shadow: 0, 1.5 + pko.hover, 5, 24%
+                material: control; opacity: 55%
                 box { from: 264, 0; size: 88, 36; corner: 18 continuous }
             }
             text "Unlock" { at: 308, 18; anchor: center; size: 12.5; weight: 700; family: "SF Pro Display"; color: pearl_ink }

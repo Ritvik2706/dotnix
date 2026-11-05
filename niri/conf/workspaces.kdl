@@ -1,0 +1,25 @@
+// workspaces.kdl — the fixed homes: five on the laptop, four on the TV.
+//
+// A workspace is a task, not an app: a project's terminal, editor, docs and
+// browser sit side by side as columns and you scroll through them. Mod+A
+// opens a project (scripts/project.sh): its own named workspace with its tmux
+// session; Mod+Shift+A closes it. Plain workspaces come and go below.
+//
+// The first five are fixed homes (always there, so Mod+1-5 always mean the
+// same): apps open on theirs (rules/apps.kdl), and stay wherever you move
+// them after. Mod+6 is the first plain or project workspace after them.
+//
+// Mod+7 8 9 0 are the TV's, and they go by name, so they work from either
+// monitor. Unplugged, they wait on the laptop and go back when it returns.
+// The names are not bare digits: `niri msg action ... 7` means index 7.
+// These names are also in project.sh, plain-ws.sh, wm.sh and island.luau.
+
+workspace "browser" { open-on-output "eDP-2"; }
+workspace "terminal" { open-on-output "eDP-2"; }
+workspace "docs" { open-on-output "eDP-2"; }
+workspace "media" { open-on-output "eDP-2"; }
+workspace "tools" { open-on-output "eDP-2"; }
+workspace "TV 7" { open-on-output "HDMI-A-1"; }
+workspace "TV 8" { open-on-output "HDMI-A-1"; }
+workspace "TV 9" { open-on-output "HDMI-A-1"; }
+workspace "TV 0" { open-on-output "HDMI-A-1"; }

@@ -1,25 +1,25 @@
-// Written by theme/wallpaper-theme.py for skyline.jpg (theme: generated): the island's colours, from what is behind it. Don't edit.
+// Written by theme/wallpaper-theme.py for bluewhite.jpg (theme: generated): the island's colours, from what is behind it. Don't edit.
 part Theme {
-    let ink       = #f4f9fb
-    let cool      = #49baed
-    let warm      = #86d3f7
-    let lilac     = #6bc5f4
-    let sunset    = #65c8f4
-    let dusk      = #1c282e
-    let deep      = #162127
-    let rim_grey  = #adbbc1
-    let idle_c    = #668391
-    let low_c     = #a2bac5
-    let chip      = #343c41
-    let chip_hi   = #444e53
-    let pearl     = #e6ebee
-    let pearl_ink = #20272b
-    let shade     = #08161d
-    let stack1_t  = #182c37
-    let stack1_b  = #0a1d27
-    let stack2_t  = #1c313d
-    let stack2_b  = #0d222d
-    let well_t    = #1f2c33
-    let well_b    = #182228
-    let glass_alpha = 49%
+    let ink_base  = #f5f8fc
+    let cool      = #96a4ff
+    let warm      = #adc7ff
+    let lilac     = #adb1ff
+    let sunset    = #99baff
+    let dusk      = #232630
+    let deep      = #1c1f28
+    let rim_grey  = #b2b9c4
+    let idle_c    = #717f96
+    let low_c     = #aab6ca
+    let chip      = #383b42
+    let chip_hi   = #494c54
+    let pearl     = #e8eaef
+    let pearl_ink = #24262c
+    let shade     = #12131f
+    let stack1_t  = #262739
+    let stack1_b  = #171929
+    let stack2_t  = #2a2d3f
+    let stack2_b  = #1c1d2f
+    let well_t    = #282935
+    let well_b    = #1f202a
+    let glass_alpha = 38%
 }

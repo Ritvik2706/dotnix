@@ -1,5 +1,5 @@
 // The Controls page: the card's second Control Center page, under the home
-// one (the dots in the header, or the wheel, go between them). Sixteen
+// one (the dots in the header, or the wheel, go between them). Nineteen
 // round buttons of glass with their names under them, as iOS draws its
 // controls: what opens something on top, what switches something below.
 // Lit, a button fills with the island's soft tint; recording, with coral.
@@ -13,8 +13,7 @@ part Controls {
         follow lift = c.hover - c.pressed
         body {
             gradient: 20, 2 to 68, 50, mix(mix(chip, chip_hi, max(lift, 0)), if(glyph == 7, coral, soft_l), k), mix(mix(chip, chip_hi, max(lift, 0)), if(glyph == 7, #e85d72, soft_s), k)
-            glass: 25%; blur: 0%; light: 5%, 2, 24
-            shadow: 0, 1.8 + 0.8 * max(lift, 0) - 0.8 * c.pressed, 7 + 2 * max(lift, 0), 22%
+            material: control; opacity: lgc_fill + 75% * k
             ellipse { at: 44, 26 - 1 * max(lift, 0); radius: 24 - 0.8 * c.pressed }
         }
         //  Its symbol: dark on a lit button (white on the coral one).
@@ -39,6 +38,9 @@ part Controls {
             image cc_watch { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 14 }
             image cc_camera { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 15 }
             image cc_folder { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 16 }
+            image cc_tune { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 17 }
+            image cc_drive { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 18 }
+            image cc_activity { at: 0, 0; size: 20, 20; tint: mix(ink, pearl_ink, k); opacity: 90%; show: glyph == 19 }
         }
         //  Its name; recording says Stop, the power button says which mode it is in.
         text pick(if(glyph == 7 and lit, 1, if(glyph == 12, if(profile == saver, 2, if(profile == performance, 4, 3)), if(glyph == 11 and lit, 5, 0))), name, "Stop", "Power Saver", "Balanced", "Performance", awake_left) {
@@ -71,6 +73,9 @@ part Controls {
             Control(14, tmr_on and tmr_mode == watch, open_watch, "Stopwatch")
             Control(15, cam.on, open_cam, "Camera")
             Control(16, false, find_open, "Files")
+            Control(17, gl_dirty, open_gtune, "Glass")
+            Control(18, false, stor_open, "Storage")
+            Control(19, false, act_open, "Activity")
         }
     }
 

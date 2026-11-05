@@ -1,0 +1,98 @@
+// The Glass page (Control Center → Glass): a slider for each saved value of
+// the compositor's liquid glass (glass.plm), as the Sound page's iOS sliders.
+// Moving one changes the glass at once (the logic sets its `lgo_*` override);
+// Save writes them all into glass.plm (scripts/glass-save.py), Reset drops the
+// overrides back to what was saved. Indices and ranges must match GLASS_TUNE
+// in island.luau.
+part GlassTune {
+    //  One row: its name and value, the slider under them.
+    component TuneRow(name: text, v: number, shown: text, idx: number) {
+        size: 352, 32
+        prop lv = 0 ~120ms
+        follow lv = clamp(v, 0, 1)
+        text name { at: 4, 8; anchor: left center; width: 240; lines: 1; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 85% }
+        text shown { at: 348, 8; anchor: right center; size: 11; weight: 600; family: "SF Pro Display"; color: ink; opacity: 60% }
+        zone box sl { from: 0, 14; size: 352, 18; cursor: pointer; label: "{name}" }
+        let th = 6 + 3 * sl.hover + 3 * sl.pressed
+        box { from: 0, 23 - th / 2; size: 352, th; corner: th / 2 continuous; color: well; opacity: 30% }
+        body {
+            gradient: 0, 0 to 352, 0, #ffffff, pearl
+            opacity: 90%; light: 6%, 19, 5
+            box { from: 0, 23 - th / 2; size: max(th, 352 * lv), th; corner: th / 2 continuous }
+        }
+        let sv = clamp((pointer.x - ex0 - 30) / 352, 0, 1)
+        on press sl { emit gl_set(idx * 10000 + round(sv * 1000)) }
+        on drag sl { emit gl_set(idx * 10000 + round(sv * 1000)) }
+    }
+
+    //  A section's name, small and dim, over its rows.
+    component TuneHead(name: text) {
+        size: 352, 18
+        text name { at: 4, 9; anchor: left center; size: 10; weight: 700; family: "SF Pro Display"; color: tint_ink; opacity: 80% }
+    }
+
+    group {
+        opacity: smooth(0.4, 1, on_gtune)
+        move: 28 * (1 - on_gtune), 0
+
+        group {
+            move: ex0 + 16, 44
+            zone ellipse gtb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
+            body {
+                color: mix(chip, chip_hi, gtb.hover); material: control
+                ellipse { at: 16, 18; radius: 16 - 0.6 * gtb.pressed }
+            }
+            path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * gtb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
+            text "Glass" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+            text gl_note { at: 380, 18; anchor: right center; size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: 90% }
+        }
+
+        column {
+            at: ex0 + 30, 84; gap: 0
+            TuneHead("MATERIAL")
+            TuneRow("Readability (tint & contrast)", lg_readability, "{lg_readability * 100, 0}%", 0)
+            TuneRow("Frost", lg_frost_strength, "{lg_frost_strength * 100, 0}%", 1)
+            TuneRow("Rim light", lg_specular, "{lg_specular * 100, 0}%", 7)
+            TuneRow("Colour split", lg_dispersion, "{lg_dispersion * 100, 0}%", 6)
+            TuneRow("Milk (brighten)", lg_milk / 0.3, "{lg_milk * 100, 0}%", 18)
+            TuneHead("EDGES")
+            TuneRow("Capsules · lens strength", lg_refraction / 40, "{lg_refraction, 0} px", 2)
+            TuneRow("Capsules · edge width", lg_bevel / 17, "{lg_bevel, 0} px", 3)
+            TuneRow("Card · lens strength", lg_card_refraction / 80, "{lg_card_refraction, 0} px", 4)
+            TuneRow("Card · edge width", lg_card_bevel / 40, "{lg_card_bevel, 0} px", 5)
+            TuneRow("Lens (vertical)", lg_magnify / 0.5, "{lg_magnify * 100, 0}%", 15)
+            TuneRow("Glass tint", lg_glass_tint, "{lg_glass_tint * 100, 0}%", 16)
+            TuneRow("Rim colour (white · glass)", lg_rim_tint, "{lg_rim_tint * 100, 0}%", 17)
+            TuneRow("Merge distance", lg_merge / 30, "{lg_merge, 0} px", 8)
+            TuneHead("TINT")
+            TuneRow("Capsules · tint", lg_tint_base / 0.4, "{lg_tint_base * 100, 0}%", 11)
+            TuneRow("Card · tint", lg_card_tint / 0.5, "{lg_card_tint * 100, 0}%", 12)
+            TuneRow("Coloured rim", lg_prism / 0.3, "{lg_prism * 100, 0}%", 13)
+            TuneRow("Card rim", lg_card_rim / 0.3, "{lg_card_rim * 100, 0}%", 14)
+        }
+
+        //  Reset (back to what is saved) and Save, side by side at the bottom.
+        group {
+            move: ex0 + 30, 88 + 17 * 32 + 3 * 18 + 6
+            zone box rst { from: 0, 0; size: 170, 34; corner: 17 continuous; cursor: pointer; label: "Reset to saved"; active: gl_dirty }
+            body {
+                color: mix(chip, chip_hi, rst.hover); material: control
+                opacity: lgc_fill * (if(gl_dirty, 100%, 45%))
+                box { from: 0, 0; size: 170, 34; corner: 17 continuous }
+            }
+            text "Reset" { at: 85, 17; anchor: center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(gl_dirty, 90%, 40%) }
+            zone box sav { from: 182, 0; size: 170, 34; corner: 17 continuous; cursor: pointer; label: "Save"; active: gl_dirty }
+            body {
+                gradient: 182, 0 to 352, 34, mix(soft_l, pearl, 0.2 * sav.hover), mix(soft_s, pearl, 0.2 * sav.hover)
+                glass: 25%; blur: 0%; light: 6%, 0, 17; shadow: 0, 1.5, 5, 22%
+                opacity: if(gl_dirty, 100%, 45%)
+                box { from: 182, 0; size: 170, 34; corner: 17 continuous }
+            }
+            text "Save" { at: 267, 17; anchor: center; size: 12; weight: 700; family: "SF Pro Display"; color: pearl_ink; opacity: if(gl_dirty, 95%, 50%) }
+        }
+    }
+
+    on press gtb { panel = ctl }
+    on press rst { emit gl_reset }
+    on press sav { emit gl_save }
+}

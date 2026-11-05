@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# xclip, but on Wayland it talks to the Wayland clipboard.
+#
+# Why: xwayland-satellite only copies the Wayland clipboard into X when an X
+# window takes focus. Command-line tools that shell out to xclip (Claude Code's
+# image paste, scripts) read that X copy, which can be hours stale -- every
+# paste came back as an old screenshot. Real X apps never run this binary, so
+# they keep using the X selection, which satellite syncs when they're focused.
+#
+# Anything this does not understand goes to the real xclip untouched.
+
+real=/usr/bin/xclip
+[ -n "$WAYLAND_DISPLAY" ] && command -v wl-paste >/dev/null || exec "$real" "$@"
+
+sel=clipboard out=0 type="" files=() rmlast=0
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+    a=${args[i]}
+    case $a in
+        -o|-out) out=1 ;;
+        -i|-in|-f|-filter|-quiet|-silent|-verbose|-noutf8) ;;
+        -rmlastnl) rmlast=1 ;;
+        -selection|-sel|-se) sel=${args[++i]} ;;
+        -t|-target) type=${args[++i]} ;;
+        -l|-loops|-d|-display) exec "$real" "$@" ;;
+        -*) exec "$real" "$@" ;;
+        *) files+=("$a") ;;
+    esac
+done
+
+case $sel in
+    c|cl|cli|clip|clipb*) flag=() ;;
+    p|pr|pri|prim*) flag=(--primary) ;;
+    *) exec "$real" "$@" ;;   # secondary / buffer-cut: X only
+esac
+
+if ((out)); then
+    case $type in
+        TARGETS) exec wl-paste "${flag[@]}" --list-types ;;
+        "") exec wl-paste "${flag[@]}" --no-newline ;;
+        *) exec wl-paste "${flag[@]}" --no-newline --type "$type" ;;
+    esac
+fi
+
+copy=(wl-copy "${flag[@]}")
+[ -n "$type" ] && [ "$type" != TARGETS ] && copy+=(--type "$type")
+if ((rmlast)); then
+    if ((${#files[@]})); then cat -- "${files[@]}"; else cat; fi | sed -z 's/\n$//' | "${copy[@]}"
+elif ((${#files[@]})); then
+    cat -- "${files[@]}" | "${copy[@]}"
+else
+    exec "${copy[@]}"
+fi

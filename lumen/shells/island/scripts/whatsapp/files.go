@@ -134,7 +134,7 @@ func videoThumb(path string) ([]byte, int, int, uint32) {
 	return thumb, w, h, uint32(secs)
 }
 
-func sendFile(jid, path, caption, tmp, quote string) {
+func sendFile(jid, path, caption, tmp, quote string, ptt bool, given uint32) {
 	fail := func(why string) {
 		emit(map[string]any{"t": "done", "op": "send", "ok": false, "jid": jid, "tmp": tmp, "msg": why})
 	}
@@ -197,9 +197,12 @@ func sendFile(jid, path, caption, tmp, quote string) {
 			FileEncSHA256: up.FileEncSHA256, FileSHA256: up.FileSHA256, FileLength: proto.Uint64(up.FileLength), ContextInfo: ci,
 		}
 	case "audio":
+		if ptt {
+			mt = "audio/ogg; codecs=opus"
+		}
 		msg.AudioMessage = &waE2E.AudioMessage{
-			Mimetype: proto.String(mt),
-			URL:      proto.String(up.URL), DirectPath: proto.String(up.DirectPath), MediaKey: up.MediaKey,
+			Mimetype: proto.String(mt), PTT: proto.Bool(ptt), Seconds: proto.Uint32(given),
+			URL: proto.String(up.URL), DirectPath: proto.String(up.DirectPath), MediaKey: up.MediaKey,
 			FileEncSHA256: up.FileEncSHA256, FileSHA256: up.FileSHA256, FileLength: proto.Uint64(up.FileLength), ContextInfo: ci,
 		}
 	default:
@@ -229,6 +232,12 @@ func sendFile(jid, path, caption, tmp, quote string) {
 	}
 	raw, _ := proto.Marshal(msg)
 	m := row{Chat: jid, ID: resp.ID, Me: true, Text: text, TS: resp.Timestamp.Unix(), Kind: kind, Media: local, W: w, H: h, St: 1, QFrom: qfrom, QText: qtext}
+	if ci != nil {
+		m.QID = quote
+	}
+	if local != "" {
+		preview(resp.ID, kind, local)
+	}
 	m.save(raw)
 	db.Exec(`INSERT INTO chats (jid, ts) VALUES (?, ?) ON CONFLICT (jid) DO UPDATE SET ts = MAX(ts, excluded.ts), unread = 0`, jid, m.TS)
 	emit(map[string]any{"t": "msg", "jid": jid, "live": false, "tmp": tmp, "msg": m.json()})

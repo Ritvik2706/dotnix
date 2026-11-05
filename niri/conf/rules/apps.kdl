@@ -1,0 +1,111 @@
+// rules/apps.kdl — which workspace each app opens on, and how wide.
+//
+// To send an app somewhere or change its width, find its kind below.
+// Workspaces are the fixed homes in ../workspaces.kdl (1 browser,
+// 2 terminal, 3 docs, 4 media, 5 tools); apps stay wherever you move them
+// after.
+//
+// Widths and auto-fit (built into the patched niri): a width here is the
+// width the app prefers *beside other windows*. Alone on a workspace every
+// window fills the screen; next to others it keeps this width and the rest
+// share what is left (Zen ⅔ + terminal → terminal ⅓). Two that can't fit
+// together (Zen ⅔ + Zen ⅔) share evenly; full width (Claude) stays full. An
+// app with no width here opens at ½ (../layout.kdl) and is sized freely.
+// `{}` lets the app size itself, and auto-fit then leaves it alone. Pick
+// widths that add up to a screen: ⅔ + ⅓, or ½ + ½. New windows open straight
+// at their fitted width.
+//
+// Floating dialogs and panels are sized in floating.kdl, which comes after
+// this file and so wins for them.
+
+// ── Browsers: workspace 1, ⅔ ──
+// Wide enough to read, with a ⅓ column to spare beside it.
+window-rule {
+    match app-id=r#"^(zen|firefox|brave-origin|brave-browser|chromium)$"#
+    default-column-width { proportion 0.66667; }
+    open-on-workspace "browser"
+}
+
+// ── Terminals: workspace 2 ──
+// No width: one alone fills the strip, two share it. A project's own
+// terminal (com.mitchellh.ghostty.project, scripts/project.sh) has another
+// app id, so it stays in its project.
+window-rule {
+    match app-id=r#"^com\.mitchellh\.ghostty$"#
+    open-on-workspace "terminal"
+}
+
+// Claude Desktop lives beside the terminal: the second column of workspace 2,
+// full width, so Mod+S scrolls over to it and back
+// (custom_scripts/toggle_claude.sh). Full width beside others too, so the
+// terminal next to it keeps the whole screen. Never closed to hide it, so it's
+// there at once: Electron takes ~4s to rebuild a closed window.
+window-rule {
+    match app-id=r#"^com\.anthropic\.Claude$"#
+    default-column-width { proportion 1.0; }
+    open-on-workspace "terminal"
+}
+
+// ── Documents, PDFs and images: workspace 3 ──
+// (File pickers are the portal's own windows, so they still open where you
+// are.) Things you read or make: wide enough for a page, a ⅓ to spare.
+window-rule {
+    match app-id=r#"^(libreoffice-.*|soffice)$"#
+    match app-id=r#"^com\.github\.xournalpp\.xournalpp$"#
+    match app-id=r#"(?i)nomacs"#
+    match app-id=r#"^com\.github\.PintaProject\.Pinta$"#
+    default-column-width { proportion 0.66667; }
+    open-on-workspace "docs"
+}
+// PDFs and notes pair up: ½ each (the default, so sized freely).
+window-rule {
+    match app-id=r#"^org\.pwmt\.zathura$"#
+    match app-id=r#"^md\.obsidian\.Obsidian$"#
+    open-on-workspace "docs"
+}
+
+// ── Games, music, chat and video: workspace 4 ──
+window-rule {
+    match app-id=r#"^steam$"#
+    default-column-width { proportion 0.66667; }
+    open-on-workspace "media"
+}
+// Music beside chat: ½ each (the default). Games (steam_app_*) open alone
+// here, so they fill the screen.
+window-rule {
+    match app-id=r#"(?i)^spotify$"#
+    match app-id=r#"^vesktop$"#
+    match app-id=r#"^steam_app_"#
+    open-on-workspace "media"
+}
+// Video: mpv sizes itself to the video.
+window-rule {
+    match app-id=r#"^mpv$"#
+    default-column-width {}
+    open-on-workspace "media"
+}
+
+// ── Tools: workspace 5 ──
+window-rule {
+    match app-id=r#"^org\.qbittorrent\.qBittorrent$"#
+    match app-id=r#"^(com\.obsproject\.Studio|obs)$"#
+    default-column-width { proportion 0.66667; }
+    open-on-workspace "tools"
+}
+window-rule {
+    match app-id=r#"^polychromatic-controller$"#
+    open-on-workspace "tools"
+}
+// Small utilities: a ⅓ column.
+window-rule {
+    match app-id=r#"(?i)localsend"#
+    default-column-width { proportion 0.33333; }
+    open-on-workspace "tools"
+}
+
+// ── Anywhere ──
+// Files open where you are, a ⅓ column beside what you're working on.
+window-rule {
+    match app-id=r#"^[Tt]hunar$"#
+    default-column-width { proportion 0.33333; }
+}

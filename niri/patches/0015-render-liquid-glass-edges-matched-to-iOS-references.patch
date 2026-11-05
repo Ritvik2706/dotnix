@@ -1,0 +1,32 @@
+From 382d5a8bce93e7d5c47966e2ab1faf3009c577dc Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 02:18:07 +0400
+Subject: [PATCH 15/38] render: liquid glass edges matched to iOS references
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+From iOS 26/27 screenshots (dock, Control Center flashlight, media player
+over busy backgrounds): a clear middle, a strong edge band. The squeeze is
+now (1-x)^1.1 capped at 0.85x bevel (still fold-free, steepest slope
+0.935), and dispersion spreads it ±0.6x per channel so the rim shows
+visible colour fringes.
+---
+ src/render_helpers/shaders/liquid_glass.frag | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index fc04a24c..1d54bfbb 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -230,8 +230,8 @@ void main() {
+         if (dispersion > 0.0) {
+             // Red bends less, blue more: a prism's spread of the index.
+             // (around the capped shift, so the split survives the cap).
+-            float dr = dg * (1.0 - 0.35 * dispersion);
+-            float db = dg * (1.0 + 0.35 * dispersion);
++            float dr = dg * (1.0 - 0.6 * dispersion);
++            float db = dg * (1.0 + 0.6 * dispersion);
+             color = vec4(backdrop(v_coords + dir * dr, c).r, g.g,
+                          backdrop(v_coords + dir * db, c).b, g.a);
+         } else {

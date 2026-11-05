@@ -1,0 +1,363 @@
+From 195f3b18a047bb0e6b255c2c9fd6c61ca09f8b4d Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 28 Oct 2026 17:22:00 +0400
+Subject: [PATCH 27/38] liquid glass: same look, cheaper: cull far shapes, one
+ pass for the edge normal, async light/dark readback
+
+---
+ src/render_helpers/framebuffer_effect.rs     | 162 ++++++++++++++++---
+ src/render_helpers/shaders/liquid_glass.frag |  78 +++++++--
+ 2 files changed, 203 insertions(+), 37 deletions(-)
+
+diff --git a/src/render_helpers/framebuffer_effect.rs b/src/render_helpers/framebuffer_effect.rs
+index 585e60d7..4ed860c7 100644
+--- a/src/render_helpers/framebuffer_effect.rs
++++ b/src/render_helpers/framebuffer_effect.rs
+@@ -67,6 +67,18 @@ pub struct GlassMeasure {
+ 
+ const MEASURE_EVERY: std::time::Duration = std::time::Duration::from_millis(200);
+ 
++/// A light/dark reading on its way back from the GPU: the pixels are copied
++/// into `pbo` and read once `fence` has passed, a frame or more later, so
++/// measuring never makes the CPU wait for the GPU to finish the frame (a
++/// plain glReadPixels did, every 200 ms: a stall each time).
++#[derive(Debug)]
++struct Readback {
++    pbo: u32,
++    /// The GLsync, as an address.
++    fence: usize,
++    points: usize,
++}
++
+ #[derive(Debug)]
+ struct Inner {
+     framebuffer: Option<GlesTexture>,
+@@ -74,6 +86,9 @@ struct Inner {
+     intermediate: Option<GlesTexture>,
+     /// Reusable storage for subregion-filtered damage rects.
+     subregion_damage: Vec<Rectangle<i32, Physical>>,
++    /// The light/dark reading in flight, and when it was asked for.
++    readback: Option<Readback>,
++    measured: Option<std::time::Instant>,
+ }
+ 
+ impl FramebufferEffect {
+@@ -137,19 +152,16 @@ impl FramebufferEffectElement {
+     /// capture (its centre twice, and +/-30% of its size each way), mapped from
+     /// the element's logical geometry through the output transform to `tex`,
+     /// which holds the framebuffer rectangle `dst_fb` at `tex_size`.
+-    #[allow(clippy::too_many_arguments)]
+-    fn measure_glass(
++    fn measure_points(
+         &self,
+-        frame: &mut GlesFrame<'_, '_>,
+-        tex: &GlesTexture,
+         glass: &GlassDraw,
+         dst_fb: Rectangle<i32, Physical>,
+         tex_size: Size<i32, Buffer>,
+         transform: Transform,
+         out_size: Size<i32, Physical>,
+-    ) -> Result<Vec<f32>, GlesError> {
++    ) -> Vec<(i32, i32)> {
+         if dst_fb.size.w <= 0 || dst_fb.size.h <= 0 {
+-            return Ok(Vec::new());
++            return Vec::new();
+         }
+         let scale = self.scale as f64;
+         let area = out_size.to_f64();
+@@ -170,6 +182,16 @@ impl FramebufferEffectElement {
+                 points.push(to_tex(x, y));
+             }
+         }
++        points
++    }
++
++    /// The light/dark reading, there and then (the GPU finishes the frame so
++    /// far first): only where fences or pixel buffers are missing (GLES 2).
++    fn measure_now(
++        frame: &mut GlesFrame<'_, '_>,
++        tex: &GlesTexture,
++        points: &[(i32, i32)],
++    ) -> Result<Vec<f32>, GlesError> {
+         let lums = frame.with_context(|gl| unsafe {
+             let mut prev = 0i32;
+             gl.GetIntegerv(ffi::READ_FRAMEBUFFER_BINDING, &mut prev as *mut _);
+@@ -178,21 +200,76 @@ impl FramebufferEffectElement {
+             gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, fbo);
+             gl.FramebufferTexture2D(ffi::READ_FRAMEBUFFER, ffi::COLOR_ATTACHMENT0, ffi::TEXTURE_2D, tex.tex_id(), 0);
+             let mut out = Vec::with_capacity(points.len());
+-            for (x, y) in &points {
++            for (x, y) in points {
+                 let mut px = [0u8; 4];
+                 gl.ReadPixels(*x, *y, 1, 1, ffi::RGBA, ffi::UNSIGNED_BYTE, px.as_mut_ptr().cast());
+-                let a = (px[3] as f32 / 255.).max(1e-3);
+-                let l = (0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32) / 255. / a;
+-                out.push(l.clamp(0., 1.));
++                out.extend_from_slice(&px);
+             }
+             gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, prev as u32);
+             gl.DeleteFramebuffers(1, &mut fbo as *mut _);
+             out
+         })?;
+-        Ok(lums
+-            .chunks(5)
+-            .map(|c| (c[0] * 2. + c[1] + c[2] + c[3] + c[4]) / 6.)
+-            .collect())
++        Ok(shape_lums(&lums))
++    }
++
++    /// Ask for the light/dark reading without waiting: the pixels go into a
++    /// pixel buffer behind a fence, collected by `measure_collect`.
++    fn measure_start(
++        frame: &mut GlesFrame<'_, '_>,
++        tex: &GlesTexture,
++        points: &[(i32, i32)],
++    ) -> Result<Option<Readback>, GlesError> {
++        frame.with_context(|gl| unsafe {
++            if !gl.FenceSync.is_loaded() || !gl.MapBufferRange.is_loaded() || points.is_empty() {
++                return None;
++            }
++            let mut prev = 0i32;
++            gl.GetIntegerv(ffi::READ_FRAMEBUFFER_BINDING, &mut prev as *mut _);
++            let mut fbo = 0;
++            gl.GenFramebuffers(1, &mut fbo as *mut _);
++            gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, fbo);
++            gl.FramebufferTexture2D(ffi::READ_FRAMEBUFFER, ffi::COLOR_ATTACHMENT0, ffi::TEXTURE_2D, tex.tex_id(), 0);
++            let mut pbo = 0;
++            gl.GenBuffers(1, &mut pbo as *mut _);
++            gl.BindBuffer(ffi::PIXEL_PACK_BUFFER, pbo);
++            gl.BufferData(ffi::PIXEL_PACK_BUFFER, (points.len() * 4) as isize, std::ptr::null(), ffi::STREAM_READ);
++            for (i, (x, y)) in points.iter().enumerate() {
++                gl.ReadPixels(*x, *y, 1, 1, ffi::RGBA, ffi::UNSIGNED_BYTE, (i * 4) as *mut _);
++            }
++            gl.BindBuffer(ffi::PIXEL_PACK_BUFFER, 0);
++            gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, prev as u32);
++            gl.DeleteFramebuffers(1, &mut fbo as *mut _);
++            let fence = gl.FenceSync(ffi::SYNC_GPU_COMMANDS_COMPLETE, 0);
++            Some(Readback { pbo, fence: fence as usize, points: points.len() })
++        })
++    }
++
++    /// The reading asked for by `measure_start`, if the GPU is done with it
++    /// (`Ok(None)`: not yet; ask again next frame).
++    fn measure_collect(
++        frame: &mut GlesFrame<'_, '_>,
++        r: &Readback,
++    ) -> Result<Option<Vec<f32>>, GlesError> {
++        frame.with_context(|gl| unsafe {
++            let fence = r.fence as ffi::types::GLsync;
++            let status = gl.ClientWaitSync(fence, 0, 0);
++            if status != ffi::ALREADY_SIGNALED && status != ffi::CONDITION_SATISFIED {
++                return None;
++            }
++            gl.DeleteSync(fence);
++            gl.BindBuffer(ffi::PIXEL_PACK_BUFFER, r.pbo);
++            let len = r.points * 4;
++            let ptr = gl.MapBufferRange(ffi::PIXEL_PACK_BUFFER, 0, len as isize, ffi::MAP_READ_BIT);
++            let px = (!ptr.is_null())
++                .then(|| std::slice::from_raw_parts(ptr as *const u8, len).to_vec());
++            if !ptr.is_null() {
++                gl.UnmapBuffer(ffi::PIXEL_PACK_BUFFER);
++            }
++            gl.BindBuffer(ffi::PIXEL_PACK_BUFFER, 0);
++            let mut pbo = r.pbo;
++            gl.DeleteBuffers(1, &mut pbo as *mut _);
++            Some(px.map(|px| shape_lums(&px)).unwrap_or_default())
++        })
+     }
+ 
+     pub fn with_ring(mut self, width: f64, light: f32, shade: f32) -> Self {
+@@ -457,21 +534,39 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
+                 }
+             }
+ 
+-            // Liquid glass: how bright it is behind each shape, now and then.
++            // Liquid glass: how bright it is behind each shape, now and then,
++            // read back a frame or so later (see Readback).
+             if let (Some(glass), Some(tex)) = (&self.glass, inner.intermediate.clone()) {
+                 if let Some(measure) = &glass.measure {
+-                    let due = measure
+-                        .lock()
+-                        .unwrap()
+-                        .last
+-                        .is_none_or(|t| t.elapsed() >= MEASURE_EVERY);
+-                    if due {
+-                        let out_size = output_rect.size;
+-                        let lum = self.measure_glass(frame, &tex, glass, dst, size, transform, out_size);
++                    let report = |lum: Vec<f32>| {
+                         let mut m = measure.lock().unwrap();
+                         m.last = Some(std::time::Instant::now());
+-                        if let Ok(lum) = lum {
+-                            m.lum = lum;
++                        m.lum = lum;
++                    };
++                    if let Some(r) = &inner.readback {
++                        match Self::measure_collect(frame, r) {
++                            Ok(Some(lum)) => {
++                                inner.readback = None;
++                                report(lum);
++                            }
++                            Ok(None) => (),
++                            Err(_) => inner.readback = None,
++                        }
++                    }
++                    let due = inner.readback.is_none()
++                        && inner.measured.is_none_or(|t| t.elapsed() >= MEASURE_EVERY);
++                    if due {
++                        inner.measured = Some(std::time::Instant::now());
++                        let points =
++                            self.measure_points(glass, dst, size, transform, output_rect.size);
++                        match Self::measure_start(frame, &tex, &points) {
++                            Ok(Some(r)) => inner.readback = Some(r),
++                            Ok(None) => {
++                                if let Ok(lum) = Self::measure_now(frame, &tex, &points) {
++                                    report(lum);
++                                }
++                            }
++                            Err(_) => (),
+                         }
+                     }
+                 }
+@@ -650,6 +745,21 @@ impl<'render> RenderElement<TtyRenderer<'render>> for FramebufferEffectElement {
+     }
+ }
+ 
++/// Five RGBA pixels per shape -> its brightness (the centre counts twice).
++fn shape_lums(px: &[u8]) -> Vec<f32> {
++    let lum = |p: &[u8]| {
++        let a = (p[3] as f32 / 255.).max(1e-3);
++        let l = (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) / 255. / a;
++        l.clamp(0., 1.)
++    };
++    px.chunks_exact(20)
++        .map(|c| {
++            let l: Vec<f32> = c.chunks_exact(4).map(lum).collect();
++            (l[0] * 2. + l[1] + l[2] + l[3] + l[4]) / 6.
++        })
++        .collect()
++}
++
+ impl Inner {
+     fn new(renderer: &mut GlesRenderer) -> Self {
+         Inner {
+@@ -657,6 +767,8 @@ impl Inner {
+             blur: Blur::new(renderer),
+             intermediate: None,
+             subregion_damage: Vec::new(),
++            readback: None,
++            measured: None,
+         }
+     }
+ }
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 22eacf2c..1747968a 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -101,6 +101,14 @@ float glass_sdf(vec2 p, out float nearest) {
+     for (int i = 0; i < 32; i++) {
+         if (float(i) >= glass_count)
+             break;
++        // A shape this far away changes neither the union nor the nearest
++        // (outside, its distance is at least 0.94 x its box's): skip its
++        // squircle, the costly part, at pixels of the card far from a control.
++        vec2 bd = abs(p - glass_shapes[i][0].xy - glass_shapes[i][0].zw * 0.5)
++                  - glass_shapes[i][0].zw * 0.5;
++        float box = length(max(bd, 0.0));
++        if (box > 0.0 && 0.9 * box >= max(d + glass_merge, best))
++            continue;
+         float di = shape_sdf(p, glass_shapes[i]);
+         if (di < best) {
+             best = di;
+@@ -116,6 +124,37 @@ float glass_sdf(vec2 p, out float nearest) {
+     return d;
+ }
+ 
++// glass_sdf at four points at once (the edge's direction needs p +/- h on
++// each axis): one pass over the shapes instead of four, each shape fetched
++// once; per point the same sums as glass_sdf, so the same result.
++vec4 glass_sdf4(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
++    vec4 d = vec4(1e6);
++    vec4 best = vec4(1e6);
++    for (int i = 0; i < 32; i++) {
++        if (float(i) >= glass_count)
++            break;
++        mat4 s = glass_shapes[i];
++        vec2 c = s[0].xy + s[0].zw * 0.5;
++        vec2 hs = s[0].zw * 0.5;
++        vec4 box = vec4(length(max(abs(p0 - c) - hs, 0.0)), length(max(abs(p1 - c) - hs, 0.0)),
++                        length(max(abs(p2 - c) - hs, 0.0)), length(max(abs(p3 - c) - hs, 0.0)));
++        // Skipped only if it changes none of the four (see glass_sdf); where
++        // it changes some, applying it to the rest changes nothing there.
++        if (all(greaterThan(box, vec4(0.0))) &&
++            all(greaterThanEqual(0.9 * box, max(d + glass_merge, best))))
++            continue;
++        vec4 di = vec4(shape_sdf(p0, s), shape_sdf(p1, s), shape_sdf(p2, s), shape_sdf(p3, s));
++        best = min(best, di);
++        if (glass_merge > 0.0) {
++            vec4 h = max(glass_merge - abs(d - di), 0.0) / glass_merge;
++            d = min(d, di) - h * h * glass_merge * 0.25;
++        } else {
++            d = min(d, di);
++        }
++    }
++    return d;
++}
++
+ mat4 shape_at(float index) {
+     mat4 s = glass_shapes[0];
+     for (int i = 1; i < 32; i++) {
+@@ -221,11 +260,18 @@ void main() {
+     float det = a[0][0] * a[1][1] - a[1][0] * a[0][1];
+     mat2 inv = mat2(a[1][1], -a[0][1], -a[1][0], a[0][0]) / det;
+ 
+-    // Soft drop shadow, only outside the glass.
+-    vec2 down = inv * (vec2(0.0, -3.0) / geo_size);
+-    float ignore_i;
+-    float sds = glass_sdf((input_to_geo * vec3(v_coords + down, 1.0)).xy * geo_size, ignore_i);
+-    float shadow = 0.30 * min(rim * 1.2, 1.0) * (1.0 - smoothstep(-2.0, 9.0, sds)) * (1.0 - flat_inner);
++    // Soft drop shadow, only outside the glass. Not looked for where it can't
++    // show: fully covered, flat or rimless glass, or too far out (the shadow's
++    // shape is 3 px off, and fades out 9 px from it; 18 leaves room for the
++    // squircle distance being only approximate).
++    float shadow = 0.0;
++    float shadow_k = 0.30 * min(rim * 1.2, 1.0) * (1.0 - flat_inner);
++    if (shadow_k > 0.0 && cov < 1.0 && sd < 18.0) {
++        vec2 down = inv * (vec2(0.0, -3.0) / geo_size);
++        float ignore_i;
++        float sds = glass_sdf((input_to_geo * vec3(v_coords + down, 1.0)).xy * geo_size, ignore_i);
++        shadow = shadow_k * (1.0 - smoothstep(-2.0, 9.0, sds));
++    }
+     if (sd > 1.0) {
+         gl_FragColor = vec4(0.0, 0.0, 0.0, shadow * 0.5) * alpha;
+         return;
+@@ -233,15 +279,23 @@ void main() {
+ 
+     // Distance in from the edge and the outward edge direction.
+     float t = max(-sd, 0.0);
+-    float ignore;
+-    float h = 0.5;
+-    vec2 grad = vec2(glass_sdf(p + vec2(h, 0.0), ignore) - glass_sdf(p - vec2(h, 0.0), ignore),
+-                     glass_sdf(p + vec2(0.0, h), ignore) - glass_sdf(p - vec2(0.0, h), ignore));
+-    vec2 g = length(grad) > 1e-5 ? normalize(grad) : vec2(0.0);
+-
+ 
+-    // Convex squircle bezel -> surface normal (a wider bezel reads thicker).
++    // Convex squircle bezel width (a wider bezel reads thicker).
+     float bz = max(bezel, 1.0) * 1.45;
++
++    // The edge direction matters only near the edge: past the bezel the glass
++    // is flat, and every light term that uses it has faded below 1/255 by
++    // 48 px in, so the middle skips its four shape loops.
++    vec2 g = vec2(0.0);
++    if (t < max(bz, 48.0)) {
++        float h = 0.5;
++        vec4 ds = glass_sdf4(p + vec2(h, 0.0), p - vec2(h, 0.0), p + vec2(0.0, h), p - vec2(0.0, h));
++        vec2 grad = vec2(ds.x - ds.y, ds.z - ds.w);
++        g = length(grad) > 1e-5 ? normalize(grad) : vec2(0.0);
++    }
++
++
++    // The bezel -> surface normal.
+     float u = clamp(t / bz, 0.0, 1.0);
+     float om = 1.0 - u;
+     float om4 = om * om * om * om;

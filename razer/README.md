@@ -102,6 +102,48 @@ can't see the keyboard:
 - **SIGTERM** → clean shutdown (blanks keyboard), for a startup service.
 - Writes its PID to `$XDG_RUNTIME_DIR/razer-fx.pid` so hypridle can signal it.
 
+### Battery mode & event-driven idle (2026-11-03)
+
+`--battery LAYERS…` picks a second stack while unplugged. Autostart uses
+`aurora reactive starlight:BFEFFF --battery wallpaper reactive`
+(`../niri/conf/startup.kdl`, `../hypr/lua/execs.lua`).
+
+- **`wallpaper` layer**: the current wallpaper averaged to one colour per key and
+  **flipped top-to-bottom** — a mirror lying below the screen (bottom of the
+  wallpaper → top row nearest the screen). Saturation ×1.4, brightness floored and
+  capped at 0.65. Path from `~/.cache/lumen/theme.json` (`source`), awww cache as fallback.
+- **No polling, no timers.** A still stack (`wallpaper`/`static` + `reactive` with
+  nothing fading) sleeps on an event until: a key press, the lid switch (evdev
+  `SW_LID`), a udev `power_supply` change, or a signal. **SIGHUP = wallpaper changed**,
+  sent by `../theme/wallpaper-theme.py` (`notify_keyboard()`) after it writes the theme.
+  Unchanged frames are never re-sent. Animated layers (`wave`, `aurora`, `breath`,
+  `starlight`) are marked `animated` and keep the fps loop.
+- Measured: idle wallpaper+reactive = 0 wakeups / 0 CPU over 10 s (the old
+  aurora stack: ~2.6 % CPU, ~37 wakeups/s, plus the daemon's work per frame).
+- `openrazer-daemon` still spins on its own (KeyWatcher `sleep(0.01)` ≈ 100/s,
+  battery notifier 10/s, ~1.8 % CPU) — upstream code, not patched.
+
+## Known hardware fault: right-side second LEDs (2026-11-03, accepted)
+
+Symptom: Enter, right Shift and the arrow keys look "partially pink" (two-tone).
+
+Probed LED by LED via sysfs (`/sys/bus/hid/drivers/razerkbd/0003:1532:028A.0003`):
+- The keys' **first** LEDs are matrix column 14, rows 2–5 (Enter = rows 2+3,
+  RShift row 4, right arrow row 5) and behave normally. Column 15 only lights
+  Power (row 0) and Backspace (row 1); its rows 2–5 drive nothing visible.
+- Their **second** LEDs (right half of Enter, RShift, left/down/right arrows) are
+  **not addressable**: they ignore every custom frame, keep a stale colour (pink
+  from aurora → the two-tone), and ended up **blinking red even with
+  `matrix_effect_none` + brightness 0**, with nothing writing to the device.
+- Not software: pure static and per-key blue look clean on the addressable LEDs;
+  re-sending frames changes nothing; the firmware rejects custom-frame columns
+  > 15 (`Command not supported`, class 03 id 0b), so there's no hidden column.
+- OpenRazer's `KEY_MAPPING` (full-size layout, e.g. Enter at (4,21)) is useless
+  for locating keys on this 6×16 board — probe instead.
+- Untried: a full cold power-off (charger out, 30 s) to reset the keyboard
+  controller. If that doesn't help it's a backlight hardware fault (LED driver /
+  keyboard connection) — repair only. The user chose to live with it.
+
 ### Measured cost (on this machine)
 | State | CPU |
 |-------|-----|
@@ -194,8 +236,8 @@ Press keys for 8s. Working output looks like:
 
 ### Quick reference
 ```bash
-# the look (also autostarted from execs.lua)
-./razer-fx.py aurora reactive starlight:BFEFFF
+# the look (autostarted from niri startup.kdl and execs.lua)
+./razer-fx.py aurora reactive starlight:BFEFFF --battery wallpaper reactive
 # diagnostics
 ./razer-fx.py bands        # see palette colors as static bands
 ./reactive-test.py         # verify keypress capture (keyd/event18)

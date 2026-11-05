@@ -64,7 +64,7 @@ part Clipboard {
             move: clx + 16, 44
             zone ellipse cb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
             body {
-                color: mix(chip, chip_hi, cb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * cb.hover - cb.pressed, 4.2, 21%
+                color: mix(chip, chip_hi, cb.hover); material: control
                 ellipse { at: 16, 18; radius: 16 - 0.6 * cb.pressed }
             }
             path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * cb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
@@ -84,8 +84,8 @@ part Clipboard {
                 text number(clip_total, 0, "") { at: 260, 18; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: if(clip_total > 0, 100%, 0) }
             }
             body {
-                color: mix(chip, chip_hi, csb.hover * (1 - sx)); glass: 25%; blur: 0%; light: 4%, 2, 18
-                shadow: 0, (1.2 + 0.5 * csb.hover - csb.pressed) * (1 - sx), 4.2, 21%; opacity: 1 - sx
+                color: mix(chip, chip_hi, csb.hover * (1 - sx)); material: field
+                opacity: (lgc_fill + 5%) * (1 - sx)
                 box { from: fl, 0; size: 304 - fl, 36; corner: 18 continuous }
             }
             box { from: fl, 0; size: 304 - fl, 36; corner: 18 continuous; color: well; opacity: 30% * sx }
@@ -105,7 +105,7 @@ part Clipboard {
             prop hold_clear = 0 ~700ms
             follow hold_clear = clr.pressed
             body {
-                color: mix(rose, #7c3d4d, clr.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + clr.hover, 4.9, 20%
+                color: mix(rose, #7c3d4d, clr.hover); material: control; opacity: 45%
                 box { from: 312, 2; size: 68, 32; corner: 16 continuous }
             }
             body {
@@ -144,7 +144,7 @@ part Clipboard {
                 //  Copy it back (as Enter).
                 zone ellipse ccopy { at: cvx + 330, cvy + 28; radius: 14; cursor: pointer; label: "Copy it again" }
                 body {
-                    color: mix(chip, chip_hi, ccopy.hover); glass: 25%; blur: 0%; light: 4%, cvy + 14, 14; shadow: 0, 1.2, 4, 20%
+                    color: mix(chip, chip_hi, ccopy.hover); material: control
                     ellipse { at: cvx + 330, cvy + 28; radius: 14 - 0.5 * ccopy.pressed }
                 }
                 image ic_clip { at: cvx + 323, cvy + 21; size: 14, 14; tint: ink; opacity: 85% }

@@ -22,7 +22,7 @@ part Emoji {
         size: 36, 28
         zone box z { from: 0, 0; size: 36, 28; corner: 14 continuous; cursor: pointer; label: "Category" }
         body {
-            color: mix(chip, chip_hi, max(z.hover, 0)); glass: 25%; blur: 0%; light: 3%, 0, 14; show: lit or z.hover
+            color: mix(chip, chip_hi, max(z.hover, 0)); material: control; show: lit or z.hover
             box { from: 0, 0; size: 36, 28; corner: 14 continuous }
         }
         text glyph { at: 18, 14.5; anchor: center; size: 15; family: "Apple Color Emoji"; opacity: if(lit, 100%, 62%) }
@@ -37,7 +37,7 @@ part Emoji {
             move: emx0 + 16, 44
             zone ellipse eb { at: 16, 18; radius: 16; cursor: pointer; label: "Back" }
             body {
-                color: mix(chip, chip_hi, eb.hover); glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * eb.hover - eb.pressed, 4.2, 21%
+                color: mix(chip, chip_hi, eb.hover); material: control
                 ellipse { at: 16, 18; radius: 16 - 0.6 * eb.pressed }
             }
             path { at: 16, 18; stroke: 1.8; color: ink; opacity: 70% + 30% * eb.hover; move 2, -5.5; line -3, 0; line 2, 5.5 }
@@ -57,8 +57,8 @@ part Emoji {
                 text "Emoji" { at: 42, 18; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
             }
             body {
-                color: mix(chip, chip_hi, esb.hover * (1 - esx)); glass: 25%; blur: 0%; light: 4%, 2, 18
-                shadow: 0, (1.2 + 0.5 * esb.hover - esb.pressed) * (1 - esx), 4.2, 21%; opacity: 1 - esx
+                color: mix(chip, chip_hi, esb.hover * (1 - esx)); material: field
+                opacity: (lgc_fill + 5%) * (1 - esx)
                 box { from: efl, 0; size: 352 - efl, 36; corner: 18 continuous }
             }
             box { from: efl, 0; size: 352 - efl, 36; corner: 18 continuous; color: well; opacity: 30% * esx }

@@ -18,12 +18,12 @@ SPECIAL="claude"                 # special:claude
 
 # niri has no special workspaces and no minimize, and closing Claude's window
 # to hide it costs ~4s to rebuild it on show. So there, the niri way: Claude is
-# an ordinary full-width window, the second column of workspace 2, beside the
-# terminal (one terminal, tmux inside). super+S scrolls over to it; on Claude,
+# an ordinary full-width window on workspace 2, after the terminals (the
+# niri window rule opens it there). super+S scrolls over to it; on Claude,
 # back to the window you were on. Nothing is ever closed, so both ways are
 # instant.
 if [[ -n ${NIRI_SOCKET:-} ]]; then
-  WS=2 COL=2
+  WS=2
   BACK="${XDG_RUNTIME_DIR:-/tmp}/claude-back"   # the window super+S left from
   win="$(niri msg -j windows | jq -c --arg c "$CLASS" '[.[] | select(.app_id == $c)][0] // empty')"
   id="$(jq -r '.id // empty' <<<"$win")"
@@ -52,11 +52,10 @@ if [[ -n ${NIRI_SOCKET:-} ]]; then
   fi
 
   # Not open (not running, or its window was closed to the tray): (re)open it
-  # beside the first column of workspace 2, and make sure it is the second.
+  # on workspace 2, as the last column, after the terminals.
   # claude-desktop is single-instance, so this also brings a tray-closed
   # window back.
   niri msg action focus-workspace "$WS"
-  niri msg action focus-column-first
   claude-desktop >/dev/null 2>&1 &
   disown
   for _ in $(seq 150); do
@@ -67,7 +66,7 @@ if [[ -n ${NIRI_SOCKET:-} ]]; then
   [[ -z "$id" ]] && exit 0
   niri msg action move-window-to-tiling --id "$id"
   niri msg action focus-window --id "$id"
-  niri msg action move-column-to-index "$COL"
+  niri msg action move-column-to-last
   exit 0
 fi
 

@@ -1,0 +1,24 @@
+// binds/apps.kdl — launching apps, and the lumen island's pages.
+binds {
+    // ── Apps ──
+    // New windows open beside the focused column, in this project.
+    Mod+Return hotkey-overlay-title="Terminal" { spawn "ghostty"; }
+    Mod+G hotkey-overlay-title="Zen (this project's, or jump)" { spawn-sh "~/.config/niri/scripts/focus-or-spawn.sh '^zen$' zen-browser"; }
+    Mod+Shift+G hotkey-overlay-title="New Zen window" { spawn "zen-browser" "--new-window"; }
+    Mod+R hotkey-overlay-title="Files" { spawn "thunar"; }
+    Mod+S hotkey-overlay-title="Claude (there and back)" { spawn-sh "~/.config/custom_scripts/toggle_claude.sh"; }
+
+    // ── The lumen island does most of it ──
+    Mod+C hotkey-overlay-title="Clipboard (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit clip_open'"; }
+    Mod+D hotkey-overlay-title="Launcher (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit launch_open'"; }
+    Mod+P hotkey-overlay-title="Wallpaper (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit wall_open'"; }
+    Mod+Y hotkey-overlay-title="Finder (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit find_open'"; }
+    Mod+B hotkey-overlay-title="Storage (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit stor_open'"; }
+    Mod+X hotkey-overlay-title="Activity / task manager (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit act_open'"; }
+    Mod+Shift+P hotkey-overlay-title="Colour picker (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit pick_color'"; }
+    Mod+E hotkey-overlay-title="Emoji (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit emoji_open'"; }
+    Mod+U hotkey-overlay-title="Mail (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit mail_big'"; }
+    Mod+W hotkey-overlay-title="WhatsApp (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit wa_big'"; }
+    Mod+BackSpace hotkey-overlay-title="Clear notifications (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit notes_clear'"; }
+    Mod+Shift+BackSpace hotkey-overlay-title="Notifications (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit open_notes'"; }
+}

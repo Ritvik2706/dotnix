@@ -5,8 +5,8 @@
 // mail; Enter sends it.
 // It is the right side of the large view (Super+U, or the card's inbox), beside the list.
 part Mail {
-    let mrx = if(panel == mailx, ex0 + 384 * (1 - max(mxf, mxs)), ex0)   // where the reader starts (focused or folded: the card's edge)…
-    let mrw = if(panel == mailx, 656 + 384 * mxf, 560)             // …and how wide it is
+    let mrx = ax0 + 384 * (1 - max(mxf, mxs))   // where the reader starts (focused or folded: the card's edge)…
+    let mrw = 656 + 384 * mxf             // …and how wide it is
     //  Panned across when wider than the reader; narrower (zoomed out), centred in it.
     let mpw = 620 * wzz
     let mpx_t = if(mpw < mrw - 36, -(mrw - 36 - mpw) / 2, clamp(mx_pan, 0, max(0, mpw - (mrw - 36))))
@@ -17,7 +17,7 @@ part Mail {
     prop wpage = 0 ~260ms
     follow wpage = if(mr_has_web, 1, 0)
     prop wwait = 0 ~700ms
-    follow wwait = if(mr_web_wait and panel == mailx, 1, 0)
+    follow wwait = if(mr_web_wait and app == mailx, 1, 0)
     prop mpx = 0 ~quick
     follow mpx = mpx_t
     //  The spinner's head, a spoke at a time, twelve a second; still when it is not seen.
@@ -42,12 +42,12 @@ part Mail {
                 let bx_ = mrw - 216 + 38 * j
                 zone ellipse mbt.$j { at: bx_ + 16, 18; radius: 16; cursor: pointer; label: pick(j, "Reply (r)", "Mark as unread (u)", "Archive (e)", "Delete (dd)", "Open in Gmail (o)") }
                 //  Unread, archive and bin go back to the narrower inbox: the card keeps the pointer till it is back over it.
-                on press mbt.$j while j != 3 { hold_w = 2 * abs(pointer.x - cx) + 28; emit mail_do(j) }
+                on press mbt.$j while j != 3 { hold_w = 2 * abs(pointer.x - (screen.width / 2)) + 28; emit mail_do(j) }
                 //  The bin asks first.
                 on press mbt.$j while j == 3 { mr_confirm = true }
                 body {
                     color: mix(mix(chip, chip_hi, mbt.$j.hover), rose, if(j == 3, mbt.$j.hover, 0))
-                    glass: 25%; blur: 0%; light: 4%, 2, 16; shadow: 0, 1.2 + 0.5 * mbt.$j.hover - mbt.$j.pressed, 4.2, 21%
+                    material: control; opacity: lgc_fill + 40% * if(j == 3, mbt.$j.hover, 0)
                     ellipse { at: bx_ + 16, 18; radius: 16 - 0.6 * mbt.$j.pressed }
                 }
                 //  Answering: the reply bead lit, as a toggle is.
@@ -79,18 +79,18 @@ part Mail {
                 text "Move this mail to the Bin?" { at: qx + 37, 18.5; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink }
                 zone box cf_no { from: qx + 196, 4; size: 60, 28; corner: 14 continuous; cursor: pointer; label: "Keep it (Esc)"; active: mr_confirm }
                 body {
-                    color: mix(chip, chip_hi, cf_no.hover); glass: 25%; blur: 0%; light: 4%, 4, 14; shadow: 0, 1 + 0.5 * cf_no.hover - cf_no.pressed, 3.5, 20%
+                    color: mix(chip, chip_hi, cf_no.hover); material: control
                     box { from: qx + 196, 4; size: 60, 28; corner: 14 continuous }
                 }
                 text "Cancel" { at: qx + 226, 18.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink }
                 zone box cf_yes { from: qx + 260, 4; size: 54, 28; corner: 14 continuous; cursor: pointer; label: "Move to Bin (Enter)"; active: mr_confirm }
                 body {
-                    color: mix(rose, #8a3e50, cf_yes.hover); glass: 25%; blur: 0%; light: 4%, 4, 14; shadow: 0, 1 + 0.5 * cf_yes.hover - cf_yes.pressed, 3.5, 24%
+                    color: mix(rose, #8a3e50, cf_yes.hover); material: control; opacity: 45%
                     box { from: qx + 260, 4; size: 54, 28; corner: 14 continuous }
                 }
                 text "Bin" { at: qx + 287, 18.5; anchor: center; size: 11.5; weight: 700; family: "SF Pro Display"; color: rose_ink }
                 on press cf_no { mr_confirm = false }
-                on press cf_yes { hold_w = 2 * abs(pointer.x - cx) + 28; mr_confirm = false; emit mail_do(3) }
+                on press cf_yes { hold_w = 2 * abs(pointer.x - (screen.width / 2)) + 28; mr_confirm = false; emit mail_do(3) }
             }
         }
         line { from: mrx + 20, 88; to: mrr - 20, 88; width: 0.7; color: ink; opacity: 10% }
@@ -198,8 +198,8 @@ part Mail {
             zone ellipse msend { at: mrr - 36, ry + 20; radius: 20; cursor: pointer; label: "Send"; active: mr_rep and not mr_sending }
             body {
                 gradient: mrr - 56, ry to mrr - 16, ry + 40, soft_l, soft_s
-                glass: 25%; blur: 0%; light: 7%, ry, 20; shadow: 0, 1.2 + 0.5 * msend.hover - msend.pressed, 4.2, 24%
-                opacity: if(mr_sending, 50%, 100%)
+                material: control
+                opacity: 60% * if(mr_sending, 50%, 100%)
                 ellipse { at: mrr - 36, ry + 20; radius: 20 - 0.6 * msend.pressed }
             }
             image ic_send { at: mrr - 43.5, ry + 13; size: 14, 14; tint: pearl_ink }
