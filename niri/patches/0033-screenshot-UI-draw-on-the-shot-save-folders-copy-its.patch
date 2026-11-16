@@ -1,7 +1,7 @@
 From 5a937bb49caf2bd7b95f9c500dd91dfe4c04c0ee Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Thu, 29 Oct 2026 01:44:51 +0400
-Subject: [PATCH 33/38] screenshot UI: draw on the shot, save folders, copy its
+Subject: [PATCH 33/40] screenshot UI: draw on the shot, save folders, copy its
  text or a colour
 
 d draws on the selection (area, window or screen): pen, line, arrow, box,

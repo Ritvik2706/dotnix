@@ -1,7 +1,7 @@
 From a98e8d781f54c9e0b8182e50ee0657c2bcbc6a96 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 14:05:57 +0400
-Subject: [PATCH 23/38] lumen-glass v4: glass on glass (layer 1), 24 shapes
+Subject: [PATCH 23/40] lumen-glass v4: glass on glass (layer 1), 24 shapes
 
 Controls on a panel (layer 1) are a second capture drawn above the panel's
 glass, so they refract it, as on iOS. Flat, like MacShell's Control Center

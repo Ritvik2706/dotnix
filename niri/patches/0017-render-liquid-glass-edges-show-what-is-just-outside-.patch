@@ -1,7 +1,7 @@
 From d51a217f50024c301434b4df4ca42bd518c7e22d Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 02:43:06 +0400
-Subject: [PATCH 17/38] render: liquid glass edges show what is just outside,
+Subject: [PATCH 17/40] render: liquid glass edges show what is just outside,
  bent in
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

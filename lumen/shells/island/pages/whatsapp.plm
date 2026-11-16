@@ -3,20 +3,33 @@
 // name centred over it, newest at the bottom, and a capsule to write in. Vim's
 // keys throughout (island.plm has the map, shells/island/README.md the list):
 // counts, gg/G, Ctrl+d/u/f/b/e/y, H/M/L and n/N in the list; a cursor on the
-// messages in the chat (j/k, yy, o, r); and the field itself in Vim's modes
-// (`vim: wa_vim`). Not linked yet: a QR code to scan from the phone.
+// messages in the chat (j/k, yy, o, r). The field itself is a plain one (no Vim
+// modes in it: Esc leaves it). Not linked yet: a QR code to scan from the phone.
 part WhatsApp {
     prop wcol = 0 ~shape          // the list folded into faces (s, or a tool beside the view)
     follow wcol = if(wa_slim, 1, 0)
-    let wcx = ax0 + 384 - 284 * wcol   // where the chat starts (the list folded: just past the faces)…
+    let wcx = ax0 + 340 - 240 * wcol   // where the chat starts (the list folded: just past the faces)…
     let war = axr                 // …and ends
     let wmid = (wcx + war) / 2    // …and its middle
+    prop wcmd = 0 ~180ms          // the command line (:) over the field
+    follow wcmd = if(wa_cmd, 1, 0)
+    prop wlq = 0 ~220ms           // the list stepping back while the keys are on the chat
+    follow wlq = if(wa_focus or wa_typing, 1, 0)
     prop srch = 0 ~200ms
     follow srch = if(wa_search, 1, 0)
     prop wtype = 0 ~200ms
     follow wtype = if(wa_typing, 1, 0)
     prop wbar = 0 ~180ms          // where the list is, gliding after its window (the column and the scroll bar)
     follow wbar = wa_off
+    //  The scroll bars: there while their list moves, gone a moment after (macOS's overlay bars).
+    prop wsbo = 0 ~250ms
+    follow wsbo = if(wa_sb, 1, 0)
+    prop wmsbo = 0 ~250ms
+    follow wmsbo = if(wa_msb, 1, 0)
+    on change wa_off { wa_sb = true }
+    on still wa_off for 1s while wa_sb { wa_sb = false }
+    on change wfb { wa_msb = true }
+    on still wfb for 1s while wa_msb { wa_msb = false }
     prop wsy = 0 ~240ms           // catching up: shown
     follow wsy = if(wa_sync_show, 1, 0)
     prop wsp = 0 ~400ms           // …how far along, eased
@@ -29,7 +42,7 @@ part WhatsApp {
     prop wdrop = 0 ~160ms         // something carried over the view from another program
     follow wdrop = if(drag.over > 0, 1, 0)
     prop wdots = 0
-    spin wdots by if(wa_typing_in and on_wa > 0.5, 7, 0)
+    spin wdots by if(wa_typing_in and on_wa > 0.5, 330, 0)   // degrees a second: `sin` takes degrees (at 7 the dots took ~50 s a wave, and looked still)
     //  The typing bubble's room, on the same spring as a message's: when their message comes the
     //  bubble gives way as the message grows, instead of the chat dropping by it first.
     prop wtp = 0 ~200ms
@@ -54,7 +67,7 @@ part WhatsApp {
     prop wrec = 0 ~200ms          // a voice note
     follow wrec = if(wa_rec, 1, 0)
     prop wrph = 0
-    spin wrph by if(wa_rec and on_wa > 0.5, 5, 0)
+    spin wrph by if(wa_rec and on_wa > 0.5, 290, 0)          // degrees a second: the recording dot's pulse, about 1.2 s
     prop wtst = 0 ~200ms          // what just happened
     follow wtst = if(wa_toast_on, 1, 0)
     prop wnew = 0 ~200ms          // the chat showing a part far back: a way back to the newest
@@ -69,14 +82,29 @@ part WhatsApp {
             //  repainting all of it under every frame held the video to a stutter (13 ms of the card a frame).
             show: wa_linked and not (wa_qlv and wql > 0.99)
 
+            //  The chats on a sidebar of their own: a faint rounded pane inset in the card, as macOS's and
+            //  iPadOS's now float theirs (no hairline down the middle). A tint, not glass: the chosen chat's
+            //  glass and the unread counts sit on it, and glass goes one level deep. Folded, around the faces.
+            //  A little more present than a shade: a fuller tint, lit along its top, and a hairline edge;
+            //  and frostier than the card (a frost region: niri blurs what is behind it 9 px further).
+            body {
+                gradient: 0, 8 to 0, 752, ink, ink
+                opacity: 10%; light: 4%, 8, 22
+                glass: 100%; layer: 3; blur: 0%; refraction: 9
+                box { from: ax0 + 8, 8; size: wcx - ax0 - 14, 744; corner: 16 continuous }
+            }
+            box { from: ax0 + 8.5, 8.5; size: wcx - ax0 - 15, 743; corner: 15.5 continuous; stroke: 0.7; color: ink; opacity: 9% }
             //  The large title, and what is unread beside it.
             text "Chats" { at: ax0 + 22, 62; anchor: left center; size: 22; weight: 700; family: "SF Pro Display"; color: ink; opacity: 1 - smooth(0, 0.5, wcol) }
             group {
                 opacity: if(wa_unread > 0, 1, 0) * (1 - smooth(0, 0.5, wcol))
+                //  The same soft solid bead as the chats' counts.
                 body {
-                    color: im_blue; light: 6%, 54, 8
+                    gradient: 0, 54 to 0, 71, im_blue2, im_blue
+                    opacity: 94%
                     box { from: ax0 + 104, 54; size: 34, 17; corner: 8.5 continuous }
                 }
+                box { from: ax0 + 104.5, 54.5; size: 33, 16; corner: 8 continuous; stroke: 0.6; color: #ffffff; opacity: 22% }
                 text "{wa_unread}" { at: ax0 + 121, 62.7; anchor: center; size: 10; weight: 700; family: "SF Pro Display"; color: #ffffff }
             }
             //  Catching up after being away (the phone used meanwhile): what came is kept quietly and
@@ -84,85 +112,104 @@ part WhatsApp {
             //  word over a hairline of blue that fills, then "Up to date" for a moment.
             group {
                 opacity: wsy * (1 - smooth(0, 0.5, wcol))
-                text wa_sync_t { at: ax0 + 368, 55; anchor: right center; size: 10.5; weight: 600; family: "SF Pro Text"; color: ink; opacity: 55% }
-                box { from: ax0 + 272, 66; size: 96, 4; corner: 2 continuous; color: ink; opacity: 12% }
+                text wa_sync_t { at: ax0 + 324, 55; anchor: right center; size: 10.5; weight: 600; family: "SF Pro Text"; color: ink; opacity: 55% }
+                box { from: ax0 + 228, 66; size: 96, 4; corner: 2 continuous; color: ink; opacity: 12% }
                 body {
-                    gradient: ax0 + 272, 66 to ax0 + 368, 66, im_blue2, im_blue
-                    box { from: ax0 + 272, 66; size: max(4, 96 * wsp), 4; corner: 2 continuous }
+                    gradient: ax0 + 228, 66 to ax0 + 324, 66, im_blue2, im_blue
+                    box { from: ax0 + 228, 66; size: max(4, 96 * wsp), 4; corner: 2 continuous }
                 }
             }
             //  The search capsule, always there; i (or a click) writes in it.
             body {
                 color: mix(im_gray, im_gray2, 0.5 * srch); material: field
-                box { from: ax0 + 16 + 19 * wcol, 84; size: 352 - 318 * wcol, 34; corner: 17 continuous }
+                box { from: ax0 + 16 + 19 * wcol, 84; size: 308 - 274 * wcol, 34; corner: 17 continuous }
             }
-            box { from: ax0 + 16.5, 84.5; size: 351, 33; corner: 16.5 continuous; stroke: 1; color: im_blue; opacity: 55% * srch }
+            box { from: ax0 + 16.5, 84.5; size: 307, 33; corner: 16.5 continuous; stroke: 1; color: im_blue; opacity: 55% * srch }
             image ic_search { at: ax0 + 30 + 15 * wcol, 94; size: 14, 14; tint: ink; opacity: 50% }
             group {
                 opacity: 1 - smooth(0, 0.4, wcol)
-                input wa_find { at: ax0 + 52, 92.5; width: 300; size: 13; color: ink; placeholder: "Search"; label: "Search chats" }
+                input wa_find { at: ax0 + 52, 92.5; width: 256; size: 13; color: ink; placeholder: "Search"; label: "Search chats" }
             }
-            zone box wa_find_z { from: ax0 + 16 + 19 * wcol, 84; size: 352 - 318 * wcol, 34; cursor: text; label: "Search chats"; active: not wa_search }
+            zone box wa_find_z { from: ax0 + 16 + 19 * wcol, 84; size: 308 - 274 * wcol, 34; cursor: text; label: "Search chats"; active: not wa_search }
 
             //  Only the rows in sight are records: the logic moves a window over the chats (j/k, the wheel),
             //  so a chat coming to the top changes a dozen rows, not sixty.
-            zone box wcl_z { from: ax0 + 12, 128; size: 364 - 284 * wcol, 616; label: "Chats" }
-            on scroll wcl_z { emit wa_wheel(wheel) }
+            zone box wcl_z { from: ax0 + 12, 128; size: 320 - 240 * wcol, 616; label: "Chats" }
+            //  …by rows: two to a wheel's notch; under a touchpad's fingers, as far as they go (a row is 68 px).
+            on scroll wcl_z while wheel.fingers < 0.5 { emit wa_wheel(wheel * 2) }
+            on scroll wcl_z while wheel.fingers > 0.5 { emit wa_wheel(wheel * 24 / 68) }
             group {
-                clip box { from: ax0 + 12, 128; size: 364 - 284 * wcol, 616 }
+                clip box { from: ax0 + 12, 128; size: 320 - 240 * wcol, 616 }
+                //  The chosen chat: one glass that glides from row to row, as the workspace rail's.
+                Glide(ax0 + 19, 128 + (wa_sel - wbar) * 68, 306 - 240 * wcol, 66, 33, wac.count > 0, 1)
                 column wcl {
                     at: ax0 + 12, 128 + (wa_first - wbar) * 68; gap: 2
                     for c in wac { WaChat(c) }
                 }
             }
+            //  Inside the sidebar's pane, shown only while it scrolls (an overlay bar, as macOS's).
             box {
-                from: ax0 + 378 - 284 * wcol, 130 + 612 * wbar / max(1, wa_total); size: 2.5, 612 * min(1, 9 / max(1, wa_total)); corner: 1.25 continuous
-                color: ink; opacity: if(wa_total > 9, 22%, 0)
+                from: wcx - 13, 130 + 612 * wbar / max(1, wa_total); size: 2.5, 612 * min(1, 9 / max(1, wa_total)); corner: 1.25 continuous
+                color: ink; opacity: if(wa_total > 9, 30%, 0) * wsbo
             }
             text wa_list_t {
-                at: ax0 + 194, 420; anchor: center; width: 300; lines: 3; align: center
+                at: ax0 + 172, 420; anchor: center; width: 270; lines: 3; align: center
                 size: 12; weight: 500; family: "SF Pro Text"; color: ink; opacity: if(wac.count == 0, 55%, 0) * (1 - wcol)
             }
-            //  Between the list and the chat: a hairline, as iOS's split views keep.
-            line { from: wcx + 0.5, 56; to: wcx + 0.5, 740; width: 0.7; color: ink; opacity: 8% }
+
+            //  Where the keys are: with them on the chat (its messages, or the field), the list steps back
+            //  under a soft veil, and comes forward again when they return to it. A veil, not a fade: the
+            //  list's glass can't be faded (the desktop would show through), and a fading group is a layer.
+            body {
+                color: #000000; opacity: 24% * wlq
+                box { from: ax0 + 8, 8; size: wcx - ax0 - 14, 744; corner: 16 continuous }
+            }
 
             //  The messages, newest at the bottom, between the header and the field. Scrolled by
             //  hand and measured from the bottom (`wfb`): older ones put in above move nothing in
             //  sight, and a new one at the bottom is in sight the frame it comes, with nothing to
             //  put right a frame late. A short chat sits at the bottom, by the field, as iOS's do.
-            zone box wml_z { from: wcx + 16, 104; size: 624, 586; label: "Messages"; active: not wa_gal }
+            zone box wml_z { from: wcx + 16, 104; size: wcw, 586; label: "Messages"; active: not wa_gal }
+            //  Not cut off at a line at either end: they dissolve as they go (iOS's scroll edges), gone at the
+            //  name pill's foot and at the field's top, whole 28 inside. One feathered clip, not a mask: each
+            //  shape fades by itself, with no layer to paint (and one clip, not two: as cheap as the cut was).
+            //  Its sides are well outside, so only the top and bottom fade. At rest the newest is clear of it.
             group {
                 opacity: 1 - wgal
-                clip box { from: wcx + 1, 106; size: war - wcx - 2, 584 - 46 * wqp - 64 * wap }
+                clip feather 28 box { from: wcx - 200, 106; size: war - wcx + 400, 584 - 46 * wqp - 64 * wap - wfx }
                 group {
                     move: 0, wvh - wml.height + wfb
                     column wml {
-                        at: wcx + 16, 100; gap: 0
+                        at: wcx + 16, 134; gap: 0
                         for m in wam { WaMsg(m) }
-                        //  They are writing: iOS's grey bubble with its three dots.
+                        //  They are writing: not a message (no stem) but iMessage's thought — a small capsule of their
+                        //  grey, trailed by two little round ones, breathing a touch; in it three dots in a wave, each
+                        //  lifting, growing and brightening in turn, then settling. Their message takes its place.
                         group {
                             show: wtp > 0.01
-                            size: 624, 42 * wtp
+                            size: wcw, 42 * wtp
                             opacity: wtp
-                            body {
-                                color: im_gray; light: 3%, 4, 14
-                                //  The same outline as their bubbles', stem and all (h 34 from y 4: br 17, bottom 38).
-                                path {
-                                    move 45, 4; line 17, 4; curve 0, 21 via 0, 4; line 0, 28
-                                    curve -6, 38.2 via -0.3, 35.5; curve 9, 36.4 via 5, 35.1; curve 18, 38 via 14, 38
-                                    line 45, 38; curve 62, 21 via 62, 38; line 62, 21; curve 45, 4 via 62, 4; close
+                            let wdb = 1 + 0.025 * sin(wdots * 0.5)     // the breath
+                            group {
+                                pivot: 0, 36
+                                scale: wdb
+                                body {
+                                    color: im_gray; light: 6%, 4, 13; rim: 12%
+                                    box { from: 6, 4; size: 56, 30; corner: 15 continuous }
+                                    ellipse { at: 4, 33; radius: 4.6 }
+                                    ellipse { at: -2, 39; radius: 2.4 }
                                 }
+                                ellipse { at: 21 + 0 * 13, 19 - 3 * (max(0, sin(wdots)) * max(0, sin(wdots))); radius: 2.8 + 0.6 * (max(0, sin(wdots)) * max(0, sin(wdots))); color: mix(ink, #ffffff, 0.4 * (max(0, sin(wdots)) * max(0, sin(wdots)))); opacity: 36% + 62% * (max(0, sin(wdots)) * max(0, sin(wdots))) }
+                                ellipse { at: 21 + 1 * 13, 19 - 3 * (max(0, sin(wdots - 60)) * max(0, sin(wdots - 60))); radius: 2.8 + 0.6 * (max(0, sin(wdots - 60)) * max(0, sin(wdots - 60))); color: mix(ink, #ffffff, 0.4 * (max(0, sin(wdots - 60)) * max(0, sin(wdots - 60)))); opacity: 36% + 62% * (max(0, sin(wdots - 60)) * max(0, sin(wdots - 60))) }
+                                ellipse { at: 21 + 2 * 13, 19 - 3 * (max(0, sin(wdots - 120)) * max(0, sin(wdots - 120))); radius: 2.8 + 0.6 * (max(0, sin(wdots - 120)) * max(0, sin(wdots - 120))); color: mix(ink, #ffffff, 0.4 * (max(0, sin(wdots - 120)) * max(0, sin(wdots - 120)))); opacity: 36% + 62% * (max(0, sin(wdots - 120)) * max(0, sin(wdots - 120))) }
                             }
-                            ellipse { at: 18, 21; radius: 3.6; color: ink; opacity: 35% + 55% * max(0, sin(wdots)) }
-                            ellipse { at: 31, 21; radius: 3.6; color: ink; opacity: 35% + 55% * max(0, sin(wdots - 0.9)) }
-                            ellipse { at: 44, 21; radius: 3.6; color: ink; opacity: 35% + 55% * max(0, sin(wdots - 1.8)) }
                         }
                     }
                 }
             }
             box {
-                from: war - 10, 102 + (wvh - 4) * (wmax - wfb) / max(1, wml.height); size: 2.5, (wvh - 4) * min(1, wvh / max(1, wml.height)); corner: 1.25 continuous
-                color: ink; opacity: if(wmax > 4, 22%, 0) * (1 - wgal)
+                from: war - 10, 136 + (wvh - 4) * (wmax - wfb) / max(1, wml.height); size: 2.5, (wvh - 4) * min(1, wvh / max(1, wml.height)); corner: 1.25 continuous
+                color: ink; opacity: if(wmax > 4, 30%, 0) * (1 - wgal) * wmsbo
             }
             //  The chat's face, and its name on a pill of glass under it.
             group {
@@ -179,6 +226,8 @@ part WhatsApp {
                     image wa_pic { at: wmid - 19, 40; size: 38, 38 }
                 }
                 ellipse { at: wmid, 59; radius: 19; stroke: 0.6; color: ink; opacity: 12% }
+                //  …and while they are writing, a soft ring of presence round it, breathing.
+                ellipse { at: wmid, 59; radius: 22.5 + 1.2 * sin(wdots * 0.42); stroke: 1.6; color: ink; opacity: (22% + 14% * sin(wdots * 0.42)) * wtp }
                 group {
                     opacity: 1 - wcsp
                     body {
@@ -203,14 +252,12 @@ part WhatsApp {
                 image ic_search { at: war - 41, 52; size: 14, 14; tint: ink; opacity: 80% }
                 on press wh_g { emit wa_gal_open }
                 on press wh_s { wa_typing = false; wa_focus = true; wa_cs = true }
-                //  Where the keys are: the list, or this chat.
-                ellipse { at: wcx + 24, 59; radius: 3; color: im_blue; opacity: if(wa_focus, 100%, 0) }
             }
 
             //  Answering a message (r): what it answers, over the field. Escape lets it go.
             group {
                 opacity: wqp * (1 - wgal) * (1 - wrec)
-                move: 0, 8 * (1 - wqp)
+                move: 0, 8 * (1 - wqp) - wfx
                 body {
                     color: im_gray; material: field
                     box { from: wcx + 16, 652; size: war - wcx - 32, 40; corner: 20 continuous }
@@ -228,7 +275,7 @@ part WhatsApp {
             //  what goes; Enter sends them (what is written is their caption), Escape or × lets them go.
             group {
                 opacity: wap * (1 - wgal) * (1 - wrec)
-                let ay = 636 - 46 * wqp
+                let ay = 636 - 46 * wqp - wfx
                 move: 0, 8 * (1 - wap)
                 body {
                     color: im_gray; material: panel
@@ -249,32 +296,23 @@ part WhatsApp {
                 on press wa_att_x { emit wa_att_clear }
             }
 
-            //  The field: a capsule of glass, and the send arrow inside it, there once something is written.
+            //  The field: a capsule of glass, and the send arrow inside it, there once something is written. It grows
+            //  upwards a line at a time as it is written (up to six, then it scrolls); the buttons stay on its last line.
             group {
-                opacity: if(wa_open, 1, 0) * (1 - wgal) * (1 - wrec)
+                opacity: if(wa_open, 1, 0) * (1 - wgal) * (1 - wrec) * (1 - wcmd)
                 let wry = 700
                 body {
                     color: mix(im_gray, im_gray2, 0.35 * wtype); material: field
-                    box { from: wcx + 16, wry; size: war - wcx - 32, 40; corner: 20 continuous }
+                    box { from: wcx + 16, wry - wfx; size: war - wcx - 32, 40 + wfx; corner: 20 continuous }
                 }
-                box { from: wcx + 16.5, wry + 0.5; size: war - wcx - 33, 39; corner: 19.5 continuous; stroke: 1; color: ink; opacity: 8% + 10% * wtype }
-                input wa_in { at: wcx + 34, wry + 11; width: war - wcx - 160; size: 13.5; family: "SF Pro Text"; color: ink; placeholder: "Message"; label: "Message"; vim: wa_vim }
+                box { from: wcx + 16.5, wry + 0.5 - wfx; size: war - wcx - 33, 39 + wfx; corner: 19.5 continuous; stroke: 1; color: ink; opacity: 8% + 10% * wtype }
+                input wa_in { at: wcx + 34, wry + 11 - wfx; width: war - wcx - 160; lines: 6; measure: wa_in_m; size: 13.5; family: "SF Pro Text"; color: ink; placeholder: "Message"; label: "Message" }
                 zone ellipse wmic_z { at: war - 36, wry + 20; radius: 15; cursor: pointer; label: "Record a voice note"; active: wa_open and not (wa_has_in or wa_att) and not wa_rec }
                 ellipse { at: war - 36, wry + 20; radius: 14; color: im_gray2; opacity: (50% + 50% * wmic_z.hover) * (1 - wsend) }
                 image ic_mic { at: war - 43.5, wry + 12.5; size: 15, 15; tint: ink; opacity: 80% * (1 - wsend) }
                 on press wmic_z { wa_typing = false; blur; emit wa_rec_tap }
                 text "i to write" { at: war - 62, wry + 20; anchor: right center; size: 10.5; weight: 500; family: "SF Pro Text"; color: ink; opacity: 28% * (1 - wtype) * (1 - wsend) }
-                //  The field's Vim mode, while it is not inserting.
-                group {
-                    opacity: if(wa_typing and wa_vim != insert, 1, 0)
-                    body {
-                        color: if(wa_vim == visual, mix(im_gray2, im_blue, 0.45), im_gray2)
-                        box { from: war - 116, wry + 11; size: 56, 18; corner: 9 continuous }
-                    }
-                    text "NORMAL" { at: war - 88, wry + 20.5; anchor: center; size: 9; weight: 700; family: "SF Pro Display"; color: ink; opacity: if(wa_vim == normal, 1, 0) }
-                    text "VISUAL" { at: war - 88, wry + 20.5; anchor: center; size: 9; weight: 700; family: "SF Pro Display"; color: ink; opacity: if(wa_vim == visual, 1, 0) }
-                }
-                zone box wa_in_z { from: wcx + 16, wry; size: war - wcx - 80, 40; cursor: text; label: "Message"; active: not wa_typing and wa_open }
+                zone box wa_in_z { from: wcx + 16, wry - wfx; size: war - wcx - 80, 40 + wfx; cursor: text; label: "Message"; active: not wa_typing and wa_open }
                 zone ellipse wsend_z { at: war - 36, wry + 20; radius: 15; cursor: pointer; label: "Send"; active: wa_open and (wa_has_in or wa_att) }
                 body {
                     gradient: war - 51, wry + 5 to war - 51, wry + 35, im_blue2, im_blue
@@ -318,12 +356,12 @@ part WhatsApp {
             group {
                 show: wnew > 0.01
                 opacity: wnew
-                zone box wnew_z { from: war - 196, 652; size: 172, 32; corner: 16 continuous; cursor: pointer; label: "Go to the newest"; active: wa_detached }
+                zone box wnew_z { from: war - 196, 652 - wfx; size: 172, 32; corner: 16 continuous; cursor: pointer; label: "Go to the newest"; active: wa_detached }
                 body {
-                    color: im_blue; light: 6%, 652, 16; shadow: 0, 1.5, 6, 22%
-                    box { from: war - 196, 652; size: 172, 32; corner: 16 continuous }
+                    color: im_blue; light: 6%, 652 - wfx, 16; shadow: 0, 1.5, 6, 22%
+                    box { from: war - 196, 652 - wfx; size: 172, 32; corner: 16 continuous }
                 }
-                text "Newest messages  ·  G" { at: war - 110, 668.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Text"; color: #ffffff }
+                text "Newest messages  ·  G" { at: war - 110, 668.5 - wfx; anchor: center; size: 11.5; weight: 600; family: "SF Pro Text"; color: #ffffff }
                 on press wnew_z { emit wa_newest }
             }
 
@@ -409,7 +447,7 @@ part WhatsApp {
                 show: wgal > 0.01
                 opacity: wgal
                 move: 0, 10 * (1 - wgal)
-                let gx = wmid - 309
+                let gx = wmid - 281
                 //  Media ⇄ Files, as iOS's segmented control.
                 body {
                     color: im_gray; material: control
@@ -430,16 +468,17 @@ part WhatsApp {
                 image ic_x { at: war - 40, 59; size: 12, 12; tint: ink; opacity: 75% }
                 on press wg_x { wa_gal = false }
                 zone box wg_z { from: wcx + 1, 92; size: war - wcx - 2, 620; label: "Gallery"; active: wa_gal }
-                on scroll wg_z { emit wa_gwheel(wheel) }
+                on scroll wg_z while wheel.glide < 0.5 { emit wa_gwheel(wheel) }
                 group {
                     clip box { from: wcx + 1, 92; size: war - wcx - 2, 620 }
                     group {
                         show: wa_gtab == 0
-                        for t in wag { WaTile(t, gx, 150, 98) }
+                        Glide(gx - 2 + mod(wa_gc, 4) * 142, 96 + (floor(wa_gc / 4) - wgbar) * 142, 140, 140, 14, wag.count > 0, 3)
+                        for t in wag { WaTile(t, gx, 136, 98) }
                     }
                     group {
                         show: wa_gtab == 1
-                        for f in wagf { WaFileRow(f, gx, 618, 98) }
+                        for f in wagf { WaFileRow(f, gx, 562, 98) }
                     }
                 }
                 text "Nothing here yet" { at: wmid, 360; anchor: center; size: 13; weight: 600; family: "SF Pro Text"; color: ink; opacity: if(wa_gtotal == 0, 50%, 0) }
@@ -467,6 +506,7 @@ part WhatsApp {
                 }
                 image ic_search { at: wmid - 158, 209; size: 14, 14; tint: ink; opacity: 50% }
                 input wa_fwd_q { at: wmid - 136, 208; width: 290; size: 13; color: ink; placeholder: "Search"; label: "Forward to" }
+                Glide(wmid - 170, 244 + wa_fwi * 44, 340, 40, 20, wafw.count > 0, 4)
                 for r in wafw { WaFwdRow(r, wmid - 170, 340, 244) }
             }
 
@@ -496,6 +536,7 @@ part WhatsApp {
                     at: wmid - 170, 202; gap: 6
                     for t in wawt { WaWhoTab(t) }
                 }
+                Glide(wmid - 170, 240 + wa_whi * 44, 340, 40, 20, wawho.count > 0, 4)
                 for r in wawho { WaWhoRow(r, wmid - 170, 340, 240) }
                 text "Loading…" { at: wmid, 262; anchor: center; size: 12; weight: 500; family: "SF Pro Text"; color: ink; opacity: if(wawho.count == 0, 50%, 0) }
             }
@@ -506,7 +547,7 @@ part WhatsApp {
                 zone box wmenu_bg { from: ax0, 0; size: axr - ax0, 760; label: "Close the menu"; active: wa_menu >= 0 }
                 on press wmenu_bg { wa_menu = -1 }
                 on press right wmenu_bg { wa_menu = -1 }
-                let wmh = 12 + 32 * (5 + if(wa_m_save, 2, 0) + if(wa_m_edit, 1, 0))
+                let wmh = 12 + 32 * if(wa_m_fail, 3, 5 + if(wa_m_save, 2, 0) + if(wa_m_edit, 1, 0))
                 let wmx0 = clamp(wcx + 16 + wa_mx, wcx + 16, war - 214)
                 let wmy0 = clamp(wa_my, 56, 744 - wmh)
                 body {
@@ -515,22 +556,40 @@ part WhatsApp {
                 }
                 column {
                     at: wmx0 + 6, wmy0 + 6; gap: 0
-                    WaMenuItem("Reply", ic_reply, 2, false)
-                    WaMenuItem("React", ic_smile_m, 1, false)
-                    WaMenuItem("Forward", ic_fwd, 3, false)
+                    //  One that did not go: sent again, copied or deleted, nothing else.
+                    group {
+                        show: wa_m_fail
+                        size: 188, 32
+                        WaMenuItem("Try Again", ic_re_s, 9, false)
+                    }
+                    group {
+                        show: not wa_m_fail
+                        size: 188, 32
+                        WaMenuItem("Reply", ic_reply, 2, false)
+                    }
+                    group {
+                        show: not wa_m_fail
+                        size: 188, 32
+                        WaMenuItem("React", ic_smile_m, 1, false)
+                    }
+                    group {
+                        show: not wa_m_fail
+                        size: 188, 32
+                        WaMenuItem("Forward", ic_fwd, 3, false)
+                    }
                     WaMenuItem("Copy", ic_doc, 4, false)
                     group {
-                        show: wa_m_save
+                        show: wa_m_save and not wa_m_fail
                         size: 188, 32
                         WaMenuItem("Save to Downloads", ic_dl, 5, false)
                     }
                     group {
-                        show: wa_m_save
+                        show: wa_m_save and not wa_m_fail
                         size: 188, 32
                         WaMenuItem("Open in Default App", ic_ext, 8, false)
                     }
                     group {
-                        show: wa_m_edit
+                        show: wa_m_edit and not wa_m_fail
                         size: 188, 32
                         WaMenuItem("Edit", ic_note, 6, false)
                     }
@@ -652,10 +711,48 @@ part WhatsApp {
             on press wql_c { wa_ql = false }
         }
 
+        //  ── the command line (:), Vim's, over the field: a capsule that starts with its colon, and above it
+        //  the commands that fit what is written (the chosen one lit), each with what it does; under them
+        //  what the last one answered, when it had something to say. ──
+        group {
+            show: wcmd > 0.01
+            opacity: wcmd
+            move: 0, 6 * (1 - wcmd)
+            let wccy = 700
+            let wcph = 12 + 32 * wacmd.count
+            body {
+                color: im_gray2; material: field
+                box { from: wcx + 16, wccy; size: war - wcx - 32, 40; corner: 20 continuous }
+            }
+            box { from: wcx + 16.5, wccy + 0.5; size: war - wcx - 33, 39; corner: 19.5 continuous; stroke: 1; color: im_blue; opacity: 55% }
+            text ":" { at: wcx + 34, wccy + 19.5; anchor: center; size: 16; weight: 800; family: "SF Pro Display"; color: im_blue2 }
+            input wa_cmd_in { at: wcx + 44, wccy + 11; width: war - wcx - 200; size: 13.5; family: "SF Pro Text"; color: ink; placeholder: "a command: q, times, chat Kath…"; label: "Command" }
+            //  At its right the keys, or what the last command answered (an unknown one, a chat not found…).
+            text "Tab · Enter · Esc" { at: war - 36, wccy + 20; anchor: right center; size: 10; weight: 600; family: "SF Pro Text"; color: ink; opacity: if(wa_cmd_said, 0, 35%) }
+            text wa_cmd_msg { at: war - 36, wccy + 20; anchor: right center; size: 11; weight: 600; family: "SF Pro Text"; color: rose_ink; opacity: if(wa_cmd_said, 95%, 0) }
+            group {
+                show: wacmd.count > 0
+                let wcpy = wccy - 8 - wcph
+                //  Solid, not glass: glass is drawn under everything lumen draws, and the messages would show over it.
+                body {
+                    color: mix(im_gray, #000000, 0.12); light: 4%, wcpy, 14; rim: 12%; shadow: 0, 6, 24, 35%
+                    box { from: wcx + 16, wcpy; size: war - wcx - 32, wcph; corner: 18 continuous }
+                }
+                body {
+                    color: im_blue; opacity: 85%
+                    box { from: wcx + 22, wcpy + 6 + 32 * wa_cmd_sel; size: war - wcx - 44, 32; corner: 16 continuous }
+                }
+                for c in wacmd {
+                    text c.name { at: wcx + 36, wcpy + 22 + 32 * c.index; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Text"; color: if(c.index == wa_cmd_sel, #ffffff, ink) }
+                    text c.desc { at: war - 36, wcpy + 22 + 32 * c.index; anchor: right center; width: war - wcx - 260; lines: 1; align: right; size: 11.5; weight: 500; family: "SF Pro Text"; color: if(c.index == wa_cmd_sel, #ffffff, ink); opacity: if(c.index == wa_cmd_sel, 85%, 55%) }
+                }
+            }
+        }
+
         //  ── not linked: the QR code, as WhatsApp Web shows it ──
         group {
             show: not wa_linked
-            let wqx = ax0 + 520
+            let wqx = ax0 + 470
             text "Link WhatsApp" { at: wqx, 120; anchor: center; size: 20; weight: 700; family: "SF Pro Display"; color: ink }
             text "On your phone: WhatsApp → Settings → Linked devices → Link a device, then scan this." {
                 at: wqx, 150; anchor: center; width: 520; align: center; size: 12.5; weight: 500; family: "SF Pro Text"; color: ink; opacity: 70%
@@ -692,7 +789,12 @@ part WhatsApp {
     //  and the cursor is not holding a message in sight; one of ours, always.
     on change wa_tail while wfb < 160 and not (wa_focus and not wa_typing and wa_cur >= 0) { wfb: 0 ~quick }
     on change wa_mine { wfb: 0 ~quick }
-    on scroll wml_z { wfb: clamp(wfb + wheel * 70, 0, wmax) ~quick }
-    //  Near the top of what is drawn: older ones (put in above, so nothing moves).
-    on change floor(wfb / 40) while wmax > 0 and wfb > wmax - 200 { emit wa_older }
+    //  A wheel's notch glides 70 px. A touchpad's fingers move the chat as far as they move (their
+    //  pixels come 15 to a notch), held tightly, as a browser's page is: it used to go 4.7 times as
+    //  far as the fingers, a fifth of a second behind them.
+    on scroll wml_z while wheel.fingers < 0.5 { wfb: clamp(wfb + wheel * 70, 0, wmax) ~quick }
+    on scroll wml_z while wheel.fingers > 0.5 { wfb: clamp(wfb + wheel * 24, 0, wmax) ~spring(3000, 110) }
+    //  Well before the top of what is drawn (a flick's glide covers a screen and more): older ones,
+    //  put in above, so nothing moves and the scroll does not meet an end that is not one.
+    on change floor(wfb / 40) while wmax > 0 and wfb > wmax - 1400 { emit wa_older }
 }

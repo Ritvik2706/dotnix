@@ -91,5 +91,5 @@ part Mixer {
     }
 
     on press mxb { panel = home }
-    on scroll mix_list { emit mix_scroll(wheel) }
+    on scroll mix_list while wheel.glide < 0.5 { emit mix_scroll(wheel) }
 }

@@ -1,0 +1,146 @@
+// What the pill says for a moment —a copy, a device connected, idle, a colour picked, the desktop
+// landed on— drawn from its own corner, `w` wide and 34 tall (a copied picture taller), so it can
+// show in the pill or, while the middle is taken (a card open, an app up), in the capsule on the
+// right that grows into it. `v` is how far it has come in (0..1), `g` how light the glass under it is.
+part States {
+    //  A copy: a small picture or a symbol, the first line, "Copied"; a picture copied, under it.
+    //  Text read off the screen says "Scanned"; a low battery and a timer done come this way too.
+    component CopyState(w: number, g: number) {
+        size: 384, 34
+        let s_ink = mix(ink_base, ink_dark, g)
+        group {
+            show: cp_kind == 1
+            image ic_clip { at: 16, 10; size: 14, 14; tint: s_ink; opacity: 85% }
+            text "Image copied" { at: 38, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: s_ink }
+            text cp_dims { at: w - 16, 17; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"; color: s_ink; opacity: 55% }
+            let pic_x = w / 2 - cp_iw / 2
+            let pic_y = 38
+            box { from: pic_x, pic_y; size: cp_iw, cp_ih; corner: 12 continuous; color: chip_hi }
+            group {
+                clip box { from: pic_x, pic_y; size: cp_iw, cp_ih; corner: 12 continuous }
+                image cp_big { at: w / 2 - 150, pic_y + cp_ih / 2 - 85; size: 300, 170 }
+            }
+            box { from: pic_x, pic_y; size: cp_iw, cp_ih; corner: 12 continuous; stroke: 0.6; color: s_ink; opacity: 18% }
+        }
+        image ic_clip { at: 16, 10; size: 14, 14; tint: s_ink; opacity: 85%; show: cp_kind == 0 }
+        image ic_shot { at: 16, 10; size: 14, 14; tint: s_ink; opacity: 85%; show: cp_kind == 2 or cp_kind == 3 }
+        //  Low battery: a small coral battery, and how much is left on the right.
+        group {
+            show: cp_kind == 4
+            box { from: 14, 12; size: 16, 9; corner: 2.8 continuous; stroke: 1.2; color: coral }
+            box { from: 30.6, 14.6; size: 1.4, 3.8; corner: 0.7 continuous; color: coral }
+            box { from: 16, 14; size: 3, 5; corner: 1 continuous; color: coral }
+            text cp_dims { at: w - 16, 17; anchor: right center; size: 12; weight: 700; family: "SF Pro Display"; color: coral }
+        }
+        //  A timer has run out: its symbol in warm light, and how long it was.
+        group {
+            show: cp_kind == 5
+            image ic_timer { at: 16, 10; size: 14, 14; tint: warm }
+            text cp_dims { at: w - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: s_ink; opacity: 65% }
+        }
+        text cp_text {
+            at: 42, 17; anchor: left center; width: 230; lines: 1
+            size: 12.5; weight: 600; family: "SF Pro Display"; color: s_ink; opacity: if(cp_kind == 1, 0, if(cp_kind == 3, 70%, 100%)); shadow: 0, 1, 3, 35% * (1 - g)
+        }
+        text pick(min(cp_kind, 2), "Copied", "Copied", "Scanned") {
+            at: w - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"
+            color: s_ink; opacity: if(cp_kind == 0 or cp_kind == 2, 65%, 0); shadow: 0, 1, 3, 35% * (1 - g)
+        }
+    }
+
+    //  A device connected: its symbol, its name, its battery (a ring that fills, green, coral when low).
+    component DeviceState(w: number, g: number) {
+        size: 300, 34
+        let s_ink = mix(ink_base, ink_dark, g)
+        group {
+            move: 16, 8
+            image dv_head { at: 0, 0; size: 18, 18; tint: s_ink; show: dv_glyph == 0 }
+            image dv_mouse { at: 0, 0; size: 18, 18; tint: s_ink; show: dv_glyph == 1 }
+            image dv_keys { at: 0, 0; size: 18, 18; tint: s_ink; show: dv_glyph == 2 }
+            image dv_phone { at: 0, 0; size: 18, 18; tint: s_ink; show: dv_glyph == 3 }
+            image dv_other { at: 0, 0; size: 18, 18; tint: s_ink; show: dv_glyph == 4 }
+        }
+        text dv_name {
+            at: 44, 17; anchor: left center; width: 180; lines: 1
+            size: 12.5; weight: 600; family: "SF Pro Display"; color: s_ink; shadow: 0, 1, 3, 35% * (1 - g)
+        }
+        group {
+            show: dv_bat >= 0
+            let rx = w - 16 - 32 - 6 - 11
+            ellipse { at: rx, 17; radius: 9; stroke: 2.4; color: s_ink; opacity: 18% }
+            arc { at: rx, 17; radius: 9; span: clamp(dvr, 0.012, 1) * 360deg; rotate: clamp(dvr, 0.012, 1) * 180deg; width: 2.4; color: if(dv_bat <= 0.2, coral, #30d158) }
+            text number(dv_bat * 100, 0, "%") {
+                at: w - 16, 17; anchor: right center; size: 12; weight: 700; family: "SF Pro Display"
+                color: s_ink; shadow: 0, 1, 3, 35% * (1 - g)
+            }
+        }
+    }
+
+    //  Idle: a moon and how long until the lock (its ring draining); back, a tick and how long you were away.
+    component IdleState(w: number, g: number) {
+        size: 290, 34
+        let s_ink = mix(ink_base, ink_dark, g)
+        image ic_moon_i { at: 16, 8; size: 18, 18; tint: soft_l; opacity: 1 - ivb }
+        group {
+            opacity: ivb
+            pivot: 25, 17
+            scale: 0.6 + 0.4 * ivb
+            ellipse { at: 25, 17; radius: 9; color: #30d158 }
+            image ic_check_i { at: 17, 9; size: 16, 16; tint: #ffffff }
+        }
+        text "Idle" { at: 44, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: s_ink; shadow: 0, 1, 3, 35% * (1 - g); opacity: 1 - ivb }
+        text "Welcome back" { at: 44, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: s_ink; shadow: 0, 1, 3, 35% * (1 - g); opacity: ivb }
+        group {
+            opacity: 1 - ivb
+            let irx = w - 16 - 38 - 6 - 11
+            ellipse { at: irx, 17; radius: 9; stroke: 2.4; color: s_ink; opacity: 18% }
+            arc { at: irx, 17; radius: 9; span: clamp(ivr, 0.012, 1) * 360deg; rotate: clamp(ivr, 0.012, 1) * 180deg; width: 2.4; color: if(idle_left <= 60, coral, soft_l) }
+            text "{idle_left, time}" { at: w - 16, 17; anchor: right center; size: 12; weight: 700; family: "SF Pro Display"; color: s_ink; shadow: 0, 1, 3, 35% * (1 - g) }
+        }
+        text "Away {(600 - idle_left) / 60, 0} min" { at: w - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: s_ink; opacity: 65% * ivb; shadow: 0, 1, 3, 35% * (1 - g) }
+    }
+
+    //  Landed on another desktop: its apps (popping in one after another, the most recent in front) and its name.
+    component LandState(w: number, v: number, g: number) {
+        size: 300, 34
+        let e1 = clamp((v - 0.25) / 0.5, 0, 1)
+        let e2 = clamp((v - 0.35) / 0.5, 0, 1)
+        let e3 = clamp((v - 0.45) / 0.5, 0, 1)
+        let e4 = clamp((v - 0.55) / 0.45, 0, 1)
+        //  Back to front, so the first one sits on top of the stack.
+        group {
+            show: ld_n > 3
+            pivot: 71, 17; scale: 0.6 + 0.4 * e4; opacity: e4
+            image ld_i4 { at: 61, 7; size: 20, 20 }
+        }
+        group {
+            show: ld_n > 2
+            pivot: 56, 17; scale: 0.6 + 0.4 * e3; opacity: e3
+            image ld_i3 { at: 46, 7; size: 20, 20 }
+        }
+        group {
+            show: ld_n > 1
+            pivot: 41, 17; scale: 0.6 + 0.4 * e2; opacity: e2
+            image ld_i2 { at: 31, 7; size: 20, 20 }
+        }
+        group {
+            show: ld_n > 0
+            pivot: 26, 17; scale: 0.6 + 0.4 * e1; opacity: e1
+            image ld_i1 { at: 16, 7; size: 20, 20 }
+        }
+        text ld_name {
+            at: 16 + ld_iw, 17 + 2 * (1 - v); anchor: left center; width: 200; lines: 1
+            size: 13; weight: 600; family: "SF Pro Display"; color: tint_ink; shadow: 0, 1, 3, 35% * (1 - g)
+        }
+    }
+
+    //  The colour picker's answer: a swatch, its code, "Copied".
+    component PickState(w: number, g: number) {
+        size: 214, 34
+        let s_ink = mix(ink_base, ink_dark, g)
+        ellipse { at: 19, 17; radius: 9; color: rgb(pk_r, pk_g, pk_b) }
+        ellipse { at: 19, 17; radius: 9; stroke: 1; color: s_ink; opacity: 35% }
+        text pk_hex { at: 36, 17; anchor: left center; size: 13; weight: 600; family: "SF Pro Display"; color: s_ink; shadow: 0, 1, 3, 35% * (1 - g) }
+        text "Copied" { at: w - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: s_ink; opacity: 70%; shadow: 0, 1, 3, 35% * (1 - g) }
+    }
+}

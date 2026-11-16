@@ -1,7 +1,7 @@
 From ec61ac6d55675a89bb3fdb619b6b076abfe44f3c Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Mon, 2 Nov 2026 18:36:38 +0400
-Subject: [PATCH 36/38] auto-fit: columns size themselves as windows come and
+Subject: [PATCH 36/40] auto-fit: columns size themselves as windows come and
  go
 
 layout { auto-fit-columns true; } (off by default, so upstream behaviour and

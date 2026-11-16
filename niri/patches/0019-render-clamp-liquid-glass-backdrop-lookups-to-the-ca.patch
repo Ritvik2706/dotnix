@@ -1,7 +1,7 @@
 From 5d72baec316e27d19f0a30d686ea38a62658bf2d Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 12:38:05 +0400
-Subject: [PATCH 19/38] render: clamp liquid glass backdrop lookups to the
+Subject: [PATCH 19/40] render: clamp liquid glass backdrop lookups to the
  capture
 
 The rim samples outward; at the top of the screen (the island's capsules)

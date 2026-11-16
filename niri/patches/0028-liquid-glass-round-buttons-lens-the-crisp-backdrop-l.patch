@@ -1,7 +1,7 @@
 From dd307f2cc8f6e5c3068263a26c3342c019d9c930 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 18:33:50 +0400
-Subject: [PATCH 28/38] liquid glass: round buttons lens the crisp backdrop
+Subject: [PATCH 28/40] liquid glass: round buttons lens the crisp backdrop
  (layer 2), no meniscus frame on cards, lumen-glass v5 per-shape opacity
 
 ---

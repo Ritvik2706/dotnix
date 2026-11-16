@@ -21,16 +21,12 @@ part Storage {
     component StorRow(r: record) {
         size: 352, 46
         zone box row { from: 0, 0; size: if(r.can_trash, 312, 352), 46; corner: 23 continuous; cursor: pointer; label: "{r.name}, {r.size}"; active: r.dir; selected: r.sel }
+        //  Under the pointer a faint trace (one glass pill only: the chosen one); the one the keys are on is a raised, lit one.
         body {
-            color: chip_hi; opacity: 38% * row.hover * if(r.dir, 1, 0); light: 4%, 0, 23
+            color: ink; opacity: 6%; show: row.hover > 0.5 and r.dir and not r.sel
             box { from: 0, 0; size: 352, 46; corner: 23 continuous }
         }
-        //  The one the keys are on (content, not a control: no glass).
-        body {
-            gradient: 0, 0 to 352, 46, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
-            opacity: 85%; light: 4%, 0, 23; show: r.sel
-            box { from: 0, 0; size: 352, 46; corner: 23 continuous }
-        }
+        //  (The chosen one is the list's gliding glass: pages/glide.plm.)
         ellipse { at: 18, 23; radius: 5; color: pick(r.hue, #0a84ff, #bf5af2, #ff9f0a, #30d158, #ff375f, #64d2ff, #ffd60a, #5e5ce6, #ac8e68, #8e8e93, #d1d1d6) }
         text r.name {
             at: 34, 15; anchor: left center; width: if(r.can_trash, 176, 190); lines: 1
@@ -185,6 +181,7 @@ part Storage {
         group {
             show: not stor_rev
             zone box stor_list { from: ex0 + 16, 186; size: 352, 7 * 48 - 2; label: "Storage" }
+            Glide(ex0 + 16, 186 + stor_at * 48, 352, 46, 23, stor_at >= 0, 0)
             column {
                 at: ex0 + 16, 186; gap: 2
                 for r in strows { StorRow(r) }
@@ -246,5 +243,5 @@ part Storage {
     on press str { emit stor_rescan }
     on press sto { emit stor_files }
     on press ssb { stor_ins = true; focus stor_q }
-    on scroll stor_list { emit stor_scroll(wheel) }
+    on scroll stor_list while wheel.glide < 0.5 { emit stor_scroll(wheel) }
 }

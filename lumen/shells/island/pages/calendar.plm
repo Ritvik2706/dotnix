@@ -55,7 +55,7 @@ part Calendar {
     zone box cal_z { from: cl, cap_y; size: cal_w, cal_all; corner: 22 continuous; label: "Calendar"; active: cal }
     on press upn_z { emit cal_web }
     on leave cal_z while cal and not tmenu_open { cal = false }
-    on scroll cal_z while cal { emit cal_step(wheel) }
+    on scroll cal_z while cal and wheel.glide < 0.5 { emit cal_step(wheel) }
 
     //  ── the month, in the capsule grown into its card ──
     group {

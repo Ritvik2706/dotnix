@@ -1,7 +1,7 @@
 From d75aeecd379e3d7cf32d8ff5ed0fdb7538779474 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Tue, 27 Oct 2026 22:40:17 +0400
-Subject: [PATCH 07/38] render: smooth glass lensing and adapt frost for
+Subject: [PATCH 07/40] render: smooth glass lensing and adapt frost for
  readability
 
 ---

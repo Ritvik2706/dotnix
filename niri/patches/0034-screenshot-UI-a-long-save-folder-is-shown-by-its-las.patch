@@ -1,7 +1,7 @@
 From 2a57c8410808a21f08633d5bed9aa514372721e9 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Thu, 29 Oct 2026 01:49:40 +0400
-Subject: [PATCH 34/38] screenshot UI: a long save folder is shown by its last
+Subject: [PATCH 34/40] screenshot UI: a long save folder is shown by its last
  two folders
 
 ---

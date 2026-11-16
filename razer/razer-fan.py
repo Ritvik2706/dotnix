@@ -14,9 +14,13 @@
 
 `curve` leaves a cool laptop to the firmware and takes over as it heats up. It
 follows the CPU package every 3 s, and the GPU too, since a model or a render can
-work the GPU hard with the CPU cool. It also keeps the power mode and the matching
-power profile: gaming on the charger, balanced on battery, unless one is pinned
-(the island's Super+D has them; a pin lasts until reboot). Silent is for quiet
+work the GPU hard with the CPU cool. The package jumps 10+ degrees for a moment on
+next to no work, so it counts only once it has stayed hot for most of SUSTAIN ticks.
+It also keeps the power mode and the matching power profile: gaming on the charger,
+balanced on battery, unless one is pinned (the island's Super+D has them; a pin
+lasts until reboot). On the charger the profile is performance only for a pin or
+while game-guard.py says a game is open, so the desktop doesn't boost for every
+small task. Balanced still reaches 4 GHz and 95 C under a browser. Silent is for quiet
 places: the CPU is capped hard, since the firmware's silent mode alone lets a heavy
 load sit at 95 C, and the fans stay with the firmware unless the heat stays serious.
 It owns this channel, so everything else goes
@@ -31,6 +35,10 @@ command (0x0d02, which also takes and releases the fans), measured to wake it
 within 0.3 s, where reads and the speed command (0x0d01) don't: so that command is
 sent only when something has to change, and everything else is checked by reading.
 
+Held fans stay held through a suspend: the firmware keeps them spinning at that
+speed all night, with nothing awake to slow them, and flattens the battery. So the
+daemon keeps a logind delay inhibitor, and gives the fans back before every sleep.
+
 If anything goes wrong the fans go back to the firmware, which has its own
 thermal protection: on exit, and when the CPU sensor is lost. A failed command
 is retried on the next tick rather than ending the daemon.
@@ -41,7 +49,7 @@ used: this never changes the CPU/GPU boost, and it leaves the keyboard to
 razer-fx/OpenRazer (whose daemon would take it over, which is why that project's
 daemon isn't used).
 """
-import collections, fcntl, glob, json, os, re, signal, subprocess, sys, time
+import collections, fcntl, glob, json, os, re, signal, subprocess, sys, threading, time
 
 VID_PID = "00001532:0000028A"          # Blade 15 (2022), RZ09-0421
 RPM_MIN, RPM_MAX = 3500, 5000          # that model's range in the project's device table
@@ -52,8 +60,7 @@ PROFILES = {0: "balanced", 1: "performance", 2: "balanced", 3: "power-saver"}   
 
 # One rpm per level, and the temperature each sensor reaches it at. Level 0 is the
 # firmware's own control. The GPU's top step is under its own 80 C target, where it
-# starts giving up clocks: the fans should be flat out before that, not after. The
-# CPU's top step is under thermald's cap (system/thermald), for the same reason.
+# starts giving up clocks: the fans should be flat out before that, not after.
 RPMS = (0, 3500, 4000, 4500, 5000)
 CPU_AT = (0, 68, 76, 83, 89)
 GPU_AT = (0, 60, 67, 72, 77)
@@ -66,6 +73,7 @@ DOWN_MARGIN = 6                        # a step down waits for this many degrees
 DOWN_HOLD = 20                         # and for this many seconds at the level
 RELEASE_HOLD = 120                     # longer for the last step: giving the fans back wakes the dGPU
 TICK = 3
+SUSTAIN = 5                            # ticks of CPU readings; the middle one counts
 REASSERT = 30                          # sent again: a resume can reset the firmware
 SENSOR_GRACE = 3                       # ticks without the CPU sensor before giving up the fans
 WAKE_GAP = 5                           # seconds lost to suspend that count as a wake
@@ -80,6 +88,7 @@ SPEED_NODE = "/sys/devices/system/cpu/intel_pstate/max_perf_pct"   # writable th
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
 NOTE = RUNTIME + "/razer-fan.json"     # the overrides, for the daemon
 LOCK = RUNTIME + "/razer-fan.lock"     # held while the daemon runs
+GAME = RUNTIME + "/razer-game.pid"     # game-guard.py's, while a game is open
 
 SIZE = 91                              # report id + 90-byte Razer report
 OK, NOT_SUPPORTED = 0x02, 0x05
@@ -239,6 +248,12 @@ def on_charger():
     return value == "1" if value in ("0", "1") else None
 
 
+def game_open():
+    """By game-guard.py's pid, so a crash there can't leave this on."""
+    pid = read(GAME)
+    return bool(pid) and os.path.exists("/proc/" + pid)
+
+
 def set_profile(mode):
     try:
         subprocess.run(["powerprofilesctl", "set", PROFILES[mode]], capture_output=True, timeout=5, check=True)
@@ -295,7 +310,7 @@ class Governor:
     def __init__(self, blade):
         self.blade = blade
         self.level, self.changed = 0, 0.0
-        self.recent = collections.deque(maxlen=3)
+        self.recent = collections.deque(maxlen=SUSTAIN)
         self.lost = 0                  # ticks without the CPU sensor
         self.silent = False
         self.gpu, self.gpu_at = None, float("-inf")
@@ -306,6 +321,20 @@ class Governor:
         """Assume nothing about the firmware: everything is sent again."""
         self.rpm, self.sent = None, 0.0
         self.wanted, self.checked = None, float("-inf")
+        self.profile = None
+
+    def rest(self):
+        """Going to sleep: wake up cold, not at the speed the laptop left at."""
+        self.level = 0
+        self.recent.clear()
+        self.gpu = None
+        self.forget()
+
+    def heat(self):
+        """The CPU as the curve sees it. Silent asks more: hot for the last 9 s."""
+        if self.silent:
+            return min(list(self.recent)[-3:])
+        return sorted(self.recent)[(len(self.recent) - 1) // 2]
 
     def read_gpu(self, now):
         if not gpu_awake():
@@ -326,8 +355,9 @@ class Governor:
             say("CPU sensor back")
         self.lost = 0
         self.recent.append(cpu)
-        cpu = min(self.recent) if self.silent else max(self.recent)
-        readings = [(SILENT_CPU_AT if self.silent else CPU_AT, cpu)]
+        if len(self.recent) < SUSTAIN:     # just started or woken: one reading is no trend
+            return self.level
+        readings = [(SILENT_CPU_AT if self.silent else CPU_AT, self.heat())]
         self.read_gpu(now)
         if self.gpu is not None:
             readings.append((SILENT_GPU_AT if self.silent else GPU_AT, self.gpu))
@@ -342,7 +372,7 @@ class Governor:
             self.blade.hold(rpm) if rpm else self.blade.auto()
             if rpm != self.rpm:
                 gpu = "" if self.gpu is None else f", GPU {self.gpu} C"
-                cpu = f"{self.recent[-1]:.0f} C" if self.recent else "no sensor"
+                cpu = f"{self.heat():.0f} C" if self.recent else "no sensor"
                 say(f"{cpu}{gpu}: {rpm or 'firmware auto'}")
             self.rpm, self.sent = rpm, now
 
@@ -352,7 +382,8 @@ class Governor:
             None if charger is None else CHARGER_MODE if charger else BATTERY_MODE)
         if wanted is None or wanted in self.refused:
             return
-        if wanted == self.wanted and now - self.checked < REASSERT:
+        profile = wanted if wanted != CHARGER_MODE or pinned is not None or game_open() else BATTERY_MODE
+        if wanted == self.wanted and profile == self.profile and now - self.checked < REASSERT:
             return
         if self.blade.power() != wanted:
             try:
@@ -363,8 +394,10 @@ class Governor:
                 say(f"power mode: {e}")
                 return
         # Only on a change, so the island's own profile switch still works in between.
+        if profile != self.profile:
+            set_profile(profile)
+            self.profile = profile
         if wanted != self.wanted:
-            set_profile(wanted)
             set_speed(SILENT_SPEED if wanted == SILENT_MODE else 100)
         if wanted == SILENT_MODE and not self.silent:
             self.level = 0             # quiet now, not a step at a time
@@ -376,6 +409,71 @@ class Governor:
         note = load_note()
         self.power(now, {v: k for k, v in MODES.items()}.get(note.get("mode")))
         self.fans(now, note.get("floor", 0))
+
+
+class SleepWatch(threading.Thread):
+    """Gives the fans back before a suspend, and keeps the daemon's hands off them
+    until the wake. Without logind this does nothing, and the curve still runs."""
+    LOGIN1 = ("org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager")
+
+    def __init__(self, blade, governor, gate):
+        super().__init__(daemon=True)
+        self.blade, self.governor, self.gate = blade, governor, gate
+        self.asleep = False
+        self.inhibitor = None
+
+    def run(self):
+        try:
+            import gi
+            gi.require_version("Gio", "2.0")
+            from gi.repository import Gio, GLib
+            self.Gio, self.GLib = Gio, GLib
+            context = GLib.MainContext.new()
+            context.push_thread_default()
+            self.bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+            self.bus.signal_subscribe(self.LOGIN1[0], self.LOGIN1[2], "PrepareForSleep", self.LOGIN1[1],
+                                      None, Gio.DBusSignalFlags.NONE, self.on_signal)
+            self.take()
+            GLib.MainLoop(context).run()
+        except Exception as e:         # ImportError or GLib.Error: the curve matters more
+            say(f"sleep watch: {e}: fans may stay held through a suspend")
+
+    def take(self):
+        if self.inhibitor is not None:
+            return
+        try:
+            res, fds = self.bus.call_with_unix_fd_list_sync(
+                *self.LOGIN1, "Inhibit",
+                self.GLib.Variant("(ssss)", ("sleep", "razer-fan", "Give the fans back to the firmware", "delay")),
+                self.GLib.VariantType("(h)"), self.Gio.DBusCallFlags.NONE, -1, None, None)
+            self.inhibitor = fds.get(res.unpack()[0])
+        except self.GLib.Error as e:
+            say(f"sleep watch: {e.message}")
+
+    def release(self):
+        if self.inhibitor is not None:
+            os.close(self.inhibitor)
+            self.inhibitor = None
+
+    def on_signal(self, _conn, _sender, _path, _iface, _name, params):
+        if params.unpack()[0]:
+            self.sleeping()
+            self.release()
+        else:
+            with self.gate:
+                self.asleep = False
+            self.take()
+
+    def sleeping(self):
+        with self.gate:
+            self.asleep = True
+            self.governor.rest()
+            try:
+                self.blade.auto()
+                say("sleeping: fans to the firmware")
+            except BladeError as e:
+                say(f"sleeping: {e}")
+            self.blade.close()
 
 
 def daemon_running():
@@ -407,28 +505,34 @@ def curve():
 
     blade = Blade()
     governor = Governor(blade)
+    gate = threading.Lock()            # one of the two threads on the firmware at a time
+    watch = SleepWatch(blade, governor, gate)
+    watch.start()
     failing = False
     clocks = time.monotonic(), time.clock_gettime(time.CLOCK_BOOTTIME)
     try:
         while True:
             now, boot = time.monotonic(), time.clock_gettime(time.CLOCK_BOOTTIME)
-            # The monotonic clock stops in suspend and this one doesn't.
-            if (boot - clocks[1]) - (now - clocks[0]) > WAKE_GAP:
-                say("woke: sending everything again")
-                blade.close()
-                governor.forget()
-            clocks = now, boot
-            try:
-                governor.tick(now)
-                if failing:
-                    say("control interface back")
-                failing = False
-            except BladeError as e:
-                if not failing:
-                    say(f"{e}: trying again")
-                failing = True
-                blade.close()
-                governor.forget()
+            with gate:
+                # The monotonic clock stops in suspend and this one doesn't.
+                if (boot - clocks[1]) - (now - clocks[0]) > WAKE_GAP:
+                    say("woke: sending everything again")
+                    watch.asleep = False
+                    blade.close()
+                    governor.forget()
+                clocks = now, boot
+                if not watch.asleep:
+                    try:
+                        governor.tick(now)
+                        if failing:
+                            say("control interface back")
+                        failing = False
+                    except BladeError as e:
+                        if not failing:
+                            say(f"{e}: trying again")
+                        failing = True
+                        blade.close()
+                        governor.forget()
             time.sleep(TICK)
     finally:
         try:

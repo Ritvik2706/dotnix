@@ -1,7 +1,7 @@
 From 9ab6b7963edd372c8c48ee96bc9042702ffc483e Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 19:13:46 +0400
-Subject: [PATCH 30/38] liquid glass: the rim's squeezed backdrop is averaged
+Subject: [PATCH 30/40] liquid glass: the rim's squeezed backdrop is averaged
  over each pixel's footprint
 
 The lens shifts the backdrop by many backdrop pixels per screen pixel at

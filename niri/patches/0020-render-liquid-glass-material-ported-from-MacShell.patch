@@ -1,7 +1,7 @@
 From 130f2ecb3a3ea9f1752a65dad219bd9f040569f2 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 12:47:50 +0400
-Subject: [PATCH 20/38] render: liquid glass material ported from MacShell
+Subject: [PATCH 20/40] render: liquid glass material ported from MacShell
 
 The material is now a port of MacShell's liquidglass.frag
 (https://github.com/0-ss/MacShell, MIT): squircle bezel slope capped at 7

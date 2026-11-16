@@ -16,15 +16,12 @@ part Activity {
     component TaskRow(r: record) {
         size: 352, 46
         zone box row { from: 0, 0; size: if(r.can_kill, 312, 352), 46; corner: 23 continuous; cursor: pointer; label: "{r.name}, {r.cpu} CPU, {r.mem}"; active: r.group; selected: r.sel }
+        //  Under the pointer a faint trace (one glass pill only: the chosen one); the one the keys are on is a raised, lit one.
         body {
-            color: chip_hi; opacity: 38% * row.hover * if(r.group, 1, 0); light: 4%, 0, 23
+            color: ink; opacity: 6%; show: row.hover > 0.5 and r.group and not r.sel
             box { from: 0, 0; size: 352, 46; corner: 23 continuous }
         }
-        body {
-            gradient: 0, 0 to 352, 46, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
-            opacity: 85%; light: 4%, 0, 23; show: r.sel
-            box { from: 0, 0; size: 352, 46; corner: 23 continuous }
-        }
+        //  (The chosen one is the list's gliding glass: pages/glide.plm.)
         //  An app with a window: a lilac bead with its initial; the rest, grey.
         ellipse { at: 21, 23; radius: 13; color: if(r.app, mix(chip, lilac, 0.35), chip); opacity: 80% }
         text r.initial { at: 21, 23.5; anchor: center; size: 12; weight: 700; family: "SF Pro Display"; color: ink; opacity: 90% }
@@ -155,6 +152,7 @@ part Activity {
         }
 
         zone box act_list { from: ex0 + 16, 226; size: 352, 7 * 48 - 2; label: "Processes" }
+        Glide(ex0 + 16, 226 + act_at * 48, 352, 46, 23, act_at >= 0, 0)
         column {
             at: ex0 + 16, 226; gap: 2
             for r in acts { TaskRow(r) }
@@ -171,5 +169,5 @@ part Activity {
 
     on press atb while act_depth > 0 { emit act_up }
     on press asb { act_ins = true; focus act_q }
-    on scroll act_list { emit act_scroll(wheel) }
+    on scroll act_list while wheel.glide < 0.5 { emit act_scroll(wheel) }
 }

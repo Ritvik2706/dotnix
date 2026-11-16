@@ -1,7 +1,7 @@
 From 057106808eb97e75fde2b9a6d17048df276b8fde Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Mon, 2 Nov 2026 20:41:47 +0400
-Subject: [PATCH 37/38] auto-fit: Mod+F doesn't reflow, a new window ends it;
+Subject: [PATCH 37/40] auto-fit: Mod+F doesn't reflow, a new window ends it;
  half-and-half action
 
 Full width (maximize-column), maximized and fullscreen columns now count at

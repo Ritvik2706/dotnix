@@ -1,7 +1,7 @@
 From e6734d096f41103b77e800075f8d6615871b6978 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 02:23:56 +0400
-Subject: [PATCH 16/38] render: liquid glass edge bends without smearing
+Subject: [PATCH 16/40] render: liquid glass edge bends without smearing
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

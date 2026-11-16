@@ -1,7 +1,7 @@
 From b94e4394e251f086793e0df54d16fbab70487856 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Tue, 27 Oct 2026 21:06:36 +0400
-Subject: [PATCH 04/38] render: glass borders
+Subject: [PATCH 04/40] render: glass borders
 
 blur { border-glass <saturation>; border-light; border-shade; border-inactive }:
 under each border ring, the frosted backdrop that is really there (xray, or

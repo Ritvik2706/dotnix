@@ -7,7 +7,12 @@
 //     the Trash, and Empty Trash, which asks too);
 //   · a prefix searches a site in the browser: `yt cats`, `g`, `gh`, `w`, `r`,
 //     `aw`, `aur`, `maps`, `tr`, `npm`, `crates`, `amz`, `ddg` (`?` lists them);
-//   · sums (`= 2*(3+4)`, or just `12*7`): Enter copies the answer;
+//   · sums (`= 2*(3+4)`, `12*7`, `sqrt(2)*pi`, `5!`) and smart answers, all copied
+//     by Enter: money (`5000 mur eur`, `$50 to eur`, `100 eur`), units (`10 cm in
+//     inches`, `5'10"`, `100 f`, `1 gib to mb`, `2 arpents to m2`), percentages
+//     (`20% of 150`, `150 + 20%`), bases (`0xff`, `255 to hex`), time zones
+//     (`time in tokyo`, `3pm london in tokyo`), dates (`days until christmas`,
+//     `in 30 days`, `week`) and colours (`#ff8800`): island.luau's "smart answers";
 //   · an address opens it; `> command` runs it; anything else can still be
 //     searched on the web (the last row);
 //   · a leading space searches files instead.
@@ -22,15 +27,12 @@ part Launcher {
         let sw = r.kind == 3 and (r.sk == 1 or r.sk == 2 or r.sk == 3 or r.sk == 8)
         zone box row { from: 0, 0; size: 576, 52; corner: 26 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel }
 
+        //  Under the pointer a faint trace (one glass pill only: the chosen one); the chosen one is a raised, lit one (niri's glass on the card's).
         body {
-            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 26
+            color: ink; opacity: 6%; show: row.hover > 0.5 and not r.sel
             box { from: 0, 0; size: 576, 52; corner: 26 continuous }
         }
-        body {
-            gradient: 0, 0 to 576, 52, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
-            glass: 25%; blur: 0%; light: 4%, 0, 26; shadow: 0, 1.8, 7, 20%; show: r.sel
-            box { from: 0, 0; size: 576, 52; corner: 26 continuous }
-        }
+        //  (The chosen one is the list's gliding glass: pages/glide.plm.)
 
         //  An app: its own icon. A file or a folder: the island's symbols.
         image r.icon { at: 14, 12; size: 28, 28; show: r.kind == 0 }
@@ -152,6 +154,7 @@ part Launcher {
             line { from: ex0 + 22, 60; to: ex0 + 578, 60; width: 0.7; color: ink; opacity: 10% }
             //  Under the rows, so a press reaches them; the wheel works over all of it.
             zone box launch_list { from: ex0 + 12, 68; size: 576, ll_h; label: "Results"; active: not launch_q_empty }
+            Glide(ex0 + 12, 68 + launch_at * 54, 576, 52, 26, launch_at >= 0, 0)
             column llist {
                 at: ex0 + 12, 68; gap: 2
                 for r in hits { LaunchRow(r) }
@@ -163,5 +166,5 @@ part Launcher {
         }
     }
 
-    on scroll launch_list { emit launch_scroll(wheel) }
+    on scroll launch_list while wheel.glide < 0.5 { emit launch_scroll(wheel) }
 }

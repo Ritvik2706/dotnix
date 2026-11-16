@@ -1,7 +1,7 @@
 From 5e42a2a5836ef451fbb0273fd836a860c06dee07 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 18:40:31 +0400
-Subject: [PATCH 29/38] liquid glass: pills and fields lens the crisp backdrop
+Subject: [PATCH 29/40] liquid glass: pills and fields lens the crisp backdrop
  only along their edge, frosted where their words are
 
 ---

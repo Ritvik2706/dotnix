@@ -1,7 +1,7 @@
 From ae0f27872aa9ef6a400dd9fe5c0694fd76a0d9e0 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 03:08:34 +0400
-Subject: [PATCH 18/38] lumen-glass v2: lens zoom, edge falloff, rim width;
+Subject: [PATCH 18/40] lumen-glass v2: lens zoom, edge falloff, rim width;
  coloured rim
 
 Version 2 of the protocol takes 16 floats per shape (13 still accepted):

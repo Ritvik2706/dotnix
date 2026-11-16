@@ -1,5 +1,12 @@
 // Written by theme/wallpaper-theme.py for bluewhite.jpg (theme: generated).
 // Included by config.kdl.
+// The island's `captures: hidden` surfaces (the recording bar): on the
+// monitor, never in a recording, screenshot or shared screen (patched niri;
+// the rest of their rule is in niri/conf/rules/layers.kdl).
+layer-rule {
+    match namespace="^lumen-private$"
+    hide-from-capture true
+}
 // Borders have no colour of their own: each is the frost of what is really
 // behind it (border-glass), lit like a glass edge (border-light) inside a dark
 // hairline at its silhouette (border-shade), faint sheen on the focused one;

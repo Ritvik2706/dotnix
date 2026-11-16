@@ -1,7 +1,7 @@
 From 1492b6aebecbb300da5486488d122bae53c70dab Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Tue, 27 Oct 2026 21:06:36 +0400
-Subject: [PATCH 02/38] layout: touchpad swipes commit at 15% of the way, like
+Subject: [PATCH 02/40] layout: touchpad swipes commit at 15% of the way, like
  macOS
 
 Workspace and view gestures go to the next workspace / snapping point once

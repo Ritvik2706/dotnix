@@ -1,7 +1,7 @@
 From 2efba92164e945cccdd91079b06373699b243905 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 21:49:07 +0400
-Subject: [PATCH 32/38] screenshots: no "Screenshot captured" notification
+Subject: [PATCH 32/40] screenshots: no "Screenshot captured" notification
 
 lumen's island already shows the shot on the clipboard.
 ---

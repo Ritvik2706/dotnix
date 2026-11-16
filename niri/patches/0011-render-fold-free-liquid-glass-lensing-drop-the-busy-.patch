@@ -1,7 +1,7 @@
 From d5d14d3b66b6a9e32e2df7b10dc3e665c9a893b2 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 01:53:23 +0400
-Subject: [PATCH 11/38] render: fold-free liquid glass lensing; drop the busy
+Subject: [PATCH 11/40] render: fold-free liquid glass lensing; drop the busy
  measure
 
 Two artifacts: jagged polygons inside small glass over sharp edges, and

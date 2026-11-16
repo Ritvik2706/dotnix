@@ -19,9 +19,12 @@ binds {
     // ── Screenshots ──
     // Mod+V: niri's own screenshot UI (patched: a glass panel, a/w/s = area,
     // window, screen; hjkl move or jump between windows, Shift+hjkl resize;
-    // y copies, Enter saves and copies, p pointer, q/Esc cancel).
+    // y copies, Enter saves and copies, r records it, p pointer, q/Esc cancel).
     // The only one: the island's Screenshot control does the rest.
     Mod+V hotkey-overlay-title="Screenshot (niri UI)" { screenshot; }
+    // Mod+Shift+V: stops a recording; when none is running, the island's
+    // capture card opens on Record (region / window / screen).
+    Mod+Shift+V hotkey-overlay-title="Screen recording" { spawn-sh "~/.local/bin/lumen --say island 'emit rec_open' >/dev/null 2>&1 || pkill -INT -x wf-recorder"; }
 
     // ── Media and brightness ──
     // F1-F3 / F8-F11: the Razer's bare function row.

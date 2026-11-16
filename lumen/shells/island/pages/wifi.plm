@@ -9,13 +9,13 @@ part Wifi {
         zone box row { from: 0, 0; size: 360, 42; corner: 21 continuous; cursor: pointer; label: "{r.ssid}"; selected: r.active }
         //  At rest a row is flat; under the pointer it rises a little, and the
         //  network in use is a raised chip.
+        //  Under the pointer a faint trace (one glass pill only: the chosen one); the chosen one is a raised, lit one (niri's glass on the card's).
         body {
-            color: chip_hi; opacity: 38% * row.hover + 30% * r.asking + 22% * grow; light: 4%, 0, 21
+            color: ink; opacity: 6%; show: (row.hover > 0.5 or r.asking or grow > 0.02) and not r.active
             box { from: 0, 0; size: 360, 42 + 40 * grow; corner: 21 continuous }
         }
         body {
-            gradient: 0, 0 to 360, 42, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
-            glass: 25%; blur: 0%; light: 4%, 0, 21; shadow: 0, 1.8, 7, 20%; show: r.active
+            color: mix(chip_hi, lilac, 0.14); material: control; opacity: lgb_fill + 12%; show: r.active
             box { from: 0, 0; size: 360, 42; corner: 21 continuous }
         }
 

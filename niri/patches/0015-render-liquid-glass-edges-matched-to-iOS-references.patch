@@ -1,7 +1,7 @@
 From 382d5a8bce93e7d5c47966e2ab1faf3009c577dc Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 02:18:07 +0400
-Subject: [PATCH 15/38] render: liquid glass edges matched to iOS references
+Subject: [PATCH 15/40] render: liquid glass edges matched to iOS references
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

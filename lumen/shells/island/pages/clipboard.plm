@@ -10,15 +10,12 @@ part Clipboard {
         zone box row { from: 0, 0; size: 380, 44; corner: 22 continuous; cursor: pointer; label: "{r.text}"; selected: r.sel }
 
         //  Under the pointer it rises; the chosen one is a raised chip.
+        //  Under the pointer a faint trace (one glass pill only: the chosen one); the chosen one is a raised, lit one (niri's glass on the card's).
         body {
-            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 22
+            color: ink; opacity: 6%; show: row.hover > 0.5 and not r.sel
             box { from: 0, 0; size: 380, 44; corner: 22 continuous }
         }
-        body {
-            gradient: 0, 0 to 380, 44, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
-            glass: 25%; blur: 0%; light: 4%, 0, 22; shadow: 0, 1.8, 7, 20%; show: r.sel
-            box { from: 0, 0; size: 380, 44; corner: 22 continuous }
-        }
+        //  (The chosen one is the list's gliding glass: pages/glide.plm.)
 
         //  A text: its first line. A picture: a small one of it, and its size.
         text r.text {
@@ -119,6 +116,7 @@ part Clipboard {
 
         //  The rows in sight; the wheel and ↑ ↓ move which ones those are.
         zone box clip_list { from: clx + 12, 88; size: 380, clip_lh; label: "Clipboard history" }
+        Glide(clx + 12, 88 + clip_at * 46, 380, 44, 22, clip_at >= 0, 0)
         column clist {
             at: clx + 12, 88; gap: 2
             for r in clips { ClipRow(r) }
@@ -174,6 +172,6 @@ part Clipboard {
     on press csb { clip_insert = true; focus clip_q }
     on press ccopy { emit clip_pick }
     on hold clr for 700ms { emit clip_clear }
-    on scroll clip_list { emit clip_scroll(wheel) }
+    on scroll clip_list while wheel.glide < 0.5 { emit clip_scroll(wheel) }
     on leave clip_list { emit clip_hover(-1) }
 }

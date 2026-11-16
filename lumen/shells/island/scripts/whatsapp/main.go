@@ -25,6 +25,7 @@
 //        {"op": "gallery", "jid": "…", "kind": "media" | "files"}
 //        {"op": "save", "jid": "…", "id": "…"}                   its file, into ~/Downloads
 //        {"op": "file", …, "ptt": true, "secs": 4}               a voice note recorded here
+//        {"op": "decline", "id": "…"}                           the call ringing now (calls.go)
 //        {"op": "logout"}
 //   out  {"t": "state", "state": "pair" | "qr" | "connecting" | "ok" | "offline", "msg": "…", "qr": "/…/qr-3.png"}
 //        {"t": "chats", "unread": 4, "chats": [{jid, name, last, ts, unread, group, muted, pinned, pic}, …]}  pinned, then newest
@@ -40,6 +41,10 @@
 //        {"t": "saved", "jid": "…", "id": "…", "path": "…", "msg": "…"}
 //        {"t": "reacts", "jid": "…", "id": "…", "list": [{emoji, name, pic, me}, …]}   newest first
 //        {"t": "sync", "on": true, "done": 40, "total": 312}     catching up after being away; "on": false once caught up
+//        {"t": "face", "jid": "…", "path": "/…"}                  someone's profile picture, fetched (group rows carry sjid, spic)
+//        {"t": "call", "on": true, "id": "…", "jid": "…", "name": "…", "video": false, "group": false}   ringing (calls.go)
+//   Kinds of row: text image video audio sticker doc note deleted, call ("Missed voice call"), and what stands in
+//   for a message: waiting (not here yet), viewonce (for the phone only), unsupported (a kind not shown here).
 //   A message also carries "react" ("👍❤️ 3"), "mine" (our reaction) and "edited".
 //
 // Kept outside the dotfiles: ~/.local/share/lumen/whatsapp (the device's keys
@@ -80,6 +85,7 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 var (
@@ -113,9 +119,9 @@ var (
 	syncRun   atomic.Int64
 
 	fetchMu      sync.Mutex
-	fetching     = map[string]bool{}        // chat/id: media on its way
-	retrying     = map[string]string{}      // id → chat: media the phone was asked to send again
-	previewSlots = make(chan struct{}, 2)   // ffmpeg making previews, two at a time
+	fetching     = map[string]bool{}      // chat/id: media on its way
+	retrying     = map[string]string{}    // id → chat: media the phone was asked to send again
+	previewSlots = make(chan struct{}, 2) // ffmpeg making previews, two at a time
 )
 
 // Only what goes wrong, to stderr: stdout is the island's.
@@ -270,6 +276,9 @@ func schema() {
 	db.Exec(`CREATE TABLE IF NOT EXISTS reacts (chat TEXT NOT NULL, msg TEXT NOT NULL, sender TEXT NOT NULL,
 		emoji TEXT NOT NULL, ts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (chat, msg, sender))`)
 	db.Exec(`UPDATE chats SET ts = COALESCE((SELECT MAX(ts) FROM msgs WHERE chat = chats.jid), 0) WHERE ts = 0`)
+	// What stands in for a message has a kind of its own (they used to be "note", drawn as messages).
+	db.Exec(`UPDATE msgs SET kind = 'unsupported' WHERE kind = 'note' AND text LIKE 'This message can''t be shown here%'`)
+	db.Exec(`UPDATE msgs SET kind = 'viewonce' WHERE kind = 'note' AND (text LIKE '◉ View once%' OR text LIKE 'View once%')`)
 }
 
 // ── what the island asks ──────────────────────────────────────────
@@ -333,6 +342,8 @@ func command(op map[string]any) {
 			}
 			cli.SendPresence(ctx, p)
 		}
+	case "decline":
+		go decline(str("id"))
 	case "logout":
 		cli.Logout(ctx)
 		db.Exec(`DELETE FROM msgs`)
@@ -732,6 +743,7 @@ func handle(evt any) {
 		}
 	case *events.Connected:
 		state("ok", "")
+		go askAgain()
 		lastChats = "" // sent again, now with the pictures it can ask for
 		if cli.Store.PushName != "" {
 			cli.SendPresence(ctx, types.PresenceUnavailable) // not "online" until the view is looked at
@@ -756,6 +768,19 @@ func handle(evt any) {
 		quit(0) // the island starts it again, with a fresh device
 	case *events.Message:
 		message(e, true)
+	case *events.UndecryptableMessage:
+		undecryptable(e)
+	case *events.CallOffer:
+		_, video := e.Data.GetOptionalChildByTag("video")
+		callOffer(e.BasicCallMeta, video, false)
+	case *events.CallOfferNotice:
+		callOffer(e.BasicCallMeta, e.Media == "video", e.Type == "group")
+	case *events.CallAccept:
+		callAnswered(e.CallID)
+	case *events.CallTerminate:
+		callEnd(e.CallID, e.Reason)
+	case *events.CallReject:
+		callEnd(e.CallID, "rejected")
 	case *events.MediaRetry:
 		go mediaRetried(e)
 	case *events.HistorySync:
@@ -837,6 +862,20 @@ func message(e *events.Message, live bool) {
 	if m == nil {
 		return
 	}
+	// A picture of an album (several sent at once) comes wrapped, tied to the album's header (which
+	// shows nothing itself): it is a picture like any other here, and they stack as the island's do.
+	for m.GetAssociatedChildMessage().GetMessage() != nil {
+		m = m.GetAssociatedChildMessage().GetMessage()
+	}
+	// A round video note is a video like any other here (it is drawn, fetched and played as one).
+	if v := m.GetPtvMessage(); v != nil && m.VideoMessage == nil {
+		m.VideoMessage, m.PtvMessage = v, nil
+	}
+	// The call log the phone sends after a call: a call's row (calls.go).
+	if l := m.GetCallLogMesssage(); l != nil {
+		callLog(jid, info.ID, info.Timestamp.Unix(), info.IsFromMe, l, live && !syncing.Load())
+		return
+	}
 	// Deleted for everyone, or edited: the one already kept changes.
 	if pm := m.GetProtocolMessage(); pm != nil {
 		id := pm.GetKey().GetID()
@@ -873,12 +912,28 @@ func message(e *events.Message, live bool) {
 	}
 	text, kind := describe(m)
 	if kind == "" {
-		return // a reaction, a key exchange, a poll vote…: nothing to show as a message
+		// Something with content this does not know how to show: said, not lost silently.
+		what := unknownContent(m)
+		if what == "" {
+			return // a reaction, a key exchange, a poll vote…: nothing to show as a message
+		}
+		fmt.Fprintf(os.Stderr, "lumen-wa: a message of a kind not shown here (%s) in %s\n", what, jid)
+		text, kind = "This message can't be shown here · open it on your phone", "unsupported"
+	}
+	// It stood in for this one (it came without its text, or of a kind not shown, and the phone has
+	// sent it again): it takes its place, as read as it was, counted once.
+	wasSeen := -1
+	db.QueryRow(`SELECT seen FROM msgs WHERE chat = ? AND id = ? AND kind IN ('waiting', 'unsupported')`, jid, info.ID).Scan(&wasSeen)
+	if wasSeen >= 0 {
+		db.Exec(`DELETE FROM msgs WHERE chat = ? AND id = ?`, jid, info.ID)
+		if live && !syncing.Load() {
+			db.Exec(`UPDATE chats SET unread = MAX(0, unread - 1) WHERE jid = ?`, jid)
+		}
 	}
 	sender := canon(info.Sender, info.SenderAlt)
 	r := row{
 		Chat: jid, ID: info.ID, Sender: sender.String(), Me: info.IsFromMe, Text: text,
-		TS: info.Timestamp.Unix(), Kind: kind, St: b2i(info.IsFromMe), Seen: info.IsFromMe || !live,
+		TS: info.Timestamp.Unix(), Kind: kind, St: b2i(info.IsFromMe), Seen: info.IsFromMe || !live || wasSeen == 1,
 	}
 	if info.IsGroup && !info.IsFromMe {
 		r.SName = nameOf(sender, info.PushName)
@@ -894,7 +949,7 @@ func message(e *events.Message, live bool) {
 		r.W, r.H = int(s.GetWidth()), int(s.GetHeight())
 	}
 	var raw []byte
-	if kind != "text" && kind != "deleted" && kind != "note" {
+	if kind != "text" && kind != "deleted" && kind != "note" && kind != "viewonce" {
 		raw, _ = proto.Marshal(m)
 	}
 	if e.IsEdit {
@@ -938,6 +993,23 @@ func message(e *events.Message, live bool) {
 func describe(m *waE2E.Message) (string, string) {
 	if m == nil {
 		return "", ""
+	}
+	// View once: for the phone only (a linked device is not given the picture).
+	if m.ViewOnceMessage != nil || m.ViewOnceMessageV2 != nil || m.ViewOnceMessageV2Extension != nil {
+		inner := m.GetViewOnceMessage().GetMessage()
+		if inner == nil {
+			inner = m.GetViewOnceMessageV2().GetMessage()
+		}
+		if inner == nil {
+			inner = m.GetViewOnceMessageV2Extension().GetMessage()
+		}
+		if inner == nil {
+			inner = &waE2E.Message{}
+		}
+		return viewOnce(inner)
+	}
+	if m.GetImageMessage().GetViewOnce() || m.GetVideoMessage().GetViewOnce() || m.GetAudioMessage().GetViewOnce() {
+		return viewOnce(m)
 	}
 	switch {
 	case m.Conversation != nil:
@@ -986,14 +1058,72 @@ func describe(m *waE2E.Message) (string, string) {
 		return "📊 " + m.GetPollCreationMessage().GetName(), "note"
 	case m.PollCreationMessageV3 != nil:
 		return "📊 " + m.GetPollCreationMessageV3().GetName(), "note"
-	case m.ViewOnceMessage != nil:
-		return describe(m.GetViewOnceMessage().GetMessage())
-	case m.ViewOnceMessageV2 != nil:
-		return "View once (open on your phone)", "note"
+	case m.PollCreationMessageV2 != nil:
+		return "📊 " + m.GetPollCreationMessageV2().GetName(), "note"
+	case m.PollCreationMessageV4 != nil:
+		return describe(m.GetPollCreationMessageV4().GetMessage())
+	case m.PollCreationMessageV5 != nil:
+		return "📊 " + m.GetPollCreationMessageV5().GetName(), "note"
 	case m.EphemeralMessage != nil:
 		return describe(m.GetEphemeralMessage().GetMessage())
+	case m.GroupMentionedMessage != nil:
+		return describe(m.GetGroupMentionedMessage().GetMessage())
+	case m.LottieStickerMessage != nil:
+		return describe(m.GetLottieStickerMessage().GetMessage())
+	case m.GroupInviteMessage != nil:
+		return "👥 Invitation to join " + m.GetGroupInviteMessage().GetGroupName(), "note"
+	case m.EventMessage != nil:
+		return "📅 " + m.GetEventMessage().GetName(), "note"
+	case m.ScheduledCallCreationMessage != nil:
+		return "📞 Scheduled call · " + m.GetScheduledCallCreationMessage().GetTitle(), "note"
+	case m.StickerPackMessage != nil:
+		return "Sticker pack · " + m.GetStickerPackMessage().GetName(), "note"
+	case m.ButtonsMessage != nil:
+		return m.GetButtonsMessage().GetContentText(), "text"
+	case m.TemplateMessage != nil:
+		return m.GetTemplateMessage().GetHydratedTemplate().GetHydratedContentText(), "text"
+	case m.ListMessage != nil:
+		return m.GetListMessage().GetDescription(), "text"
+	case m.InteractiveMessage != nil:
+		return m.GetInteractiveMessage().GetBody().GetText(), "text"
+	case m.ButtonsResponseMessage != nil:
+		return m.GetButtonsResponseMessage().GetSelectedDisplayText(), "text"
+	case m.TemplateButtonReplyMessage != nil:
+		return m.GetTemplateButtonReplyMessage().GetSelectedDisplayText(), "text"
+	case m.ListResponseMessage != nil:
+		return m.GetListResponseMessage().GetTitle(), "text"
+	case m.RequestPhoneNumberMessage != nil:
+		return "📱 Asked for your phone number", "note"
+	case m.ProductMessage != nil, m.OrderMessage != nil:
+		return "🛍 Product · open it on your phone", "note"
+	case m.SendPaymentMessage != nil, m.RequestPaymentMessage != nil, m.PaymentInviteMessage != nil:
+		return "💳 Payment · open it on your phone", "note"
 	}
 	return "", ""
+}
+
+// The parts of a message nothing here shows, by name, when it has any: what a message
+// that is not a key exchange, a receipt of some kind or a vote carries.
+var invisible = map[string]bool{
+	"senderKeyDistributionMessage": true, "fastRatchetKeySenderKeyDistributionMessage": true, "messageContextInfo": true,
+	"protocolMessage": true, "reactionMessage": true, "encReactionMessage": true, "pollUpdateMessage": true,
+	"keepInChatMessage": true, "pinInChatMessage": true, "encEventResponseMessage": true, "encCommentMessage": true,
+	"secretEncryptedMessage": true, "deviceSentMessage": true, "editedMessage": true, "albumMessage": true,
+	"statusMentionMessage": true, "messageHistoryBundle": true, "messageHistoryNotice": true, "placeholderMessage": true,
+	"botInvokeMessage": true, "pollResultSnapshotMessage": true, "eventCoverImage": true, "commentMessage": true,
+	"call": true, "chat": true, "highlyStructuredMessage": true,
+}
+
+func unknownContent(m *waE2E.Message) string {
+	what := ""
+	m.ProtoReflect().Range(func(f protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+		if n := string(f.Name()); !invisible[n] {
+			what = n
+			return false
+		}
+		return true
+	})
+	return what
 }
 
 // What a message answers, if it is a reply: who said it ("You" for this account) and its first line.
@@ -1109,7 +1239,7 @@ func history(e *events.HistorySync) {
 		msgs := conv.GetMessages()
 		for i, hm := range msgs {
 			wm := hm.GetMessage()
-			if wm == nil {
+			if wm == nil || callStub(jid, wm) {
 				continue
 			}
 			ev, err := cli.ParseWebMessage(j, wm)
@@ -1297,6 +1427,8 @@ func fetchPicture(j types.JID, path string) {
 	}
 	if os.WriteFile(path, data, 0o600) == nil {
 		touch()
+		// Someone's face in a group chat, come late: the rows that show it take it.
+		emit(map[string]any{"t": "face", "jid": j.String(), "path": path})
 	}
 }
 
@@ -1327,9 +1459,41 @@ func (r row) save(raw []byte) bool {
 
 func (r row) json() map[string]any {
 	react, mine := reactionsOf(r.Chat, r.ID)
-	return map[string]any{"id": r.ID, "me": r.Me, "from": r.SName, "text": r.Text, "ts": r.TS,
+	m := map[string]any{"id": r.ID, "me": r.Me, "from": r.SName, "text": r.Text, "ts": r.TS,
 		"kind": r.Kind, "media": r.Media, "w": r.W, "h": r.H, "st": r.St, "qfrom": r.QFrom, "qtext": r.QText,
-		"react": react, "mine": mine, "edited": r.Edited, "pic": r.pic(), "file": r.file(), "qpic": r.qpic()}
+		"react": react, "mine": mine, "edited": r.Edited, "pic": r.pic(), "file": r.file(), "qpic": r.qpic(), "qid": r.QID}
+	// A voice note: its length, and its waveform as a picture.
+	if r.Kind == "audio" {
+		secs, bars, wave := voiceOf(r)
+		m["secs"], m["bars"], m["wave"] = secs, bars, wave
+	}
+	// Answering a link: what its card says (its title and site, shown in the quote in place of the address).
+	if r.QText != "" {
+		qid := r.QID
+		if qid == "" {
+			qid = guessQuoted(r)
+		}
+		if q, ok := loadRow(r.Chat, qid); qid != "" && ok {
+			if lp, has := previewOf(q); has && lp.Title != "" {
+				m["qltitle"], m["qlsite"] = lp.Title, lp.Site
+			}
+		}
+	}
+	// A link: where it goes, and its card once there is one (else it is being made, and comes as "linkpv").
+	if lp, ok := previewOf(r); lp.URL != "" {
+		m["lurl"], m["lsite"] = lp.URL, lp.Site
+		if ok {
+			m["ltitle"], m["ldesc"], m["lpic"], m["lw"], m["lh"] = lp.Title, lp.Desc, lp.Pic, lp.W, lp.H
+		}
+	}
+	// In a group, who said it, and their face (fetched if not here yet: a "face" comes when it is).
+	if strings.HasSuffix(r.Chat, "@g.us") && !r.Me && r.Sender != "" {
+		if sj, err := types.ParseJID(r.Sender); err == nil {
+			m["sjid"] = r.Sender
+			m["spic"] = picture(sj)
+		}
+	}
+	return m
 }
 
 // What the chat draws for it: a picture's or video's preview once there is one,
@@ -1368,6 +1532,10 @@ func (r row) qpic() string {
 	src := ""
 	if q, ok := loadRow(r.Chat, r.QID); ok && q.Kind != "deleted" {
 		src = q.pic()
+		// A link: its card's picture.
+		if lp, has := previewOf(q); src == "" && has && lp.Pic != "" {
+			src = lp.Pic
+		}
 	}
 	if p := quotePath(r.QID); src == "" && exists(p) {
 		src = p
@@ -1604,6 +1772,8 @@ func sendChats() {
 				last = "🎤 " + last
 			} else if p[3] == "doc" {
 				last = "📄 " + last
+			} else if p[3] == "call" {
+				last = "📞 " + last
 			}
 			if p[1] == "1" {
 				last = "You: " + last

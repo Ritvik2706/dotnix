@@ -1,7 +1,7 @@
 From 983226ac330b473eb820373d1975570cc1656504 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Mon, 2 Nov 2026 20:59:43 +0400
-Subject: [PATCH 38/38] half-and-half: pressed again on the same pair, puts
+Subject: [PATCH 38/40] half-and-half: pressed again on the same pair, puts
  them back
 
 Remembers the pair's widths, preferences and full-width state; a second

@@ -1,7 +1,7 @@
 From e7d03a05b63053da4db059c7ce20e15d3b825a1a Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 01:11:41 +0400
-Subject: [PATCH 09/38] render: liquid glass adapts to what is behind it (iOS
+Subject: [PATCH 09/40] render: liquid glass adapts to what is behind it (iOS
  27)
 
 Busy content behind the glass (text, fine detail) is diffused more: how

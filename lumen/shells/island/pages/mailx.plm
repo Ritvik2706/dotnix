@@ -32,6 +32,11 @@ part MailX {
             at: ax0 + 12, 96; view: 364, 728; gap: 2; step: 54
             for m in mail { MailRowX(m) }
         }
+        //  (Glass is drawn behind what the card paints: after the list in the file, under it on screen.)
+        group {
+            clip box { from: ax0 + 12, 96; size: 364, 728 }
+            Glide(ax0 + 12, 96 + mx_sel * 54 - mlx.scroll, 364, 52, 26, mx_sel >= 0 and mail.count > 0, 0)
+        }
         box {
             from: ax0 + 378, 98 + 724 * mlx.scroll / max(1, mlx.content); size: 2.5, 724 * min(1, 728 / max(1, mlx.content)); corner: 1.25 continuous
             color: ink; opacity: if(mlx.content > 732, 22%, 0)

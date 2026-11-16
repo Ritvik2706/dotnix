@@ -1,7 +1,7 @@
 From 251051fcf6ff70f8bc64d956a3817c039ef0bb81 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 14:50:14 +0400
-Subject: [PATCH 26/38] liquid glass: glass on glass is light or dark as the
+Subject: [PATCH 26/40] liquid glass: glass on glass is light or dark as the
  glass under it
 
 Controls (layer 1) decided light or dark each from its own reading, so a

@@ -5,7 +5,7 @@ part Notes {
         size: 360, 60
         zone box row { from: 0, 0; size: 360, 60; corner: 24 continuous; cursor: pointer; label: "{r.title}" }
         body {
-            color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 30
+            color: ink; opacity: 6%; show: row.hover > 0.5
             box { from: 0, 0; size: 360, 60; corner: 24 continuous }
         }
 
@@ -82,5 +82,5 @@ part Notes {
 
     on press nbk { emit go_home }
     on press nclr { emit notes_clear }
-    on scroll notes_list { emit notes_scroll(wheel) }
+    on scroll notes_list while wheel.glide < 0.5 { emit notes_scroll(wheel) }
 }

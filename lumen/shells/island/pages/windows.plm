@@ -17,7 +17,7 @@ part Windows {
             opacity: st
             move: 0, 10 * (1 - st) - 2 * max(lift, 0) + 0.8 * t.pressed
             //  The chosen one: a ring of softly tinted glass, a little away.
-            box { from: -3.5, -3.5; size: 163, 95; corner: 15.5 continuous; stroke: 2; color: mix(soft_l, soft_s, 0.4); opacity: 95% * on }
+            //  (Its ring is the grid's, gliding: pages/glide.plm.)
             body {
                 color: mix(chip, chip_hi, max(lift, 0)); shadow: 0, 2 + 2 * max(lift, 0), 8 + 6 * max(lift, 0), 24% + 8% * max(lift, 0)
                 box { from: 0, 0; size: 156, 88; corner: 12 continuous }
@@ -76,6 +76,7 @@ part Windows {
         line { from: wl + 16, 48.5; to: wl + wv_w - 16, 48.5; width: 0.7; color: ink; opacity: 10% * wo }
 
         zone box win_grid { from: wl + 16, 62; size: wv_w - 32, wn_h; label: "Windows"; active: wv }
+        Glide(wl + 12.5 + mod(win_at, 3) * 168, 58.5 + floor(win_at / 3) * 144, 163, 95, 15.5, win_at >= 0, 2)
         grid {
             at: wl + 16, 62; columns: 3; width: wv_w - 32; gap: 12; row: 132
             for r in wins { WinTile(r) }
@@ -86,5 +87,5 @@ part Windows {
         }
     }
 
-    on scroll win_grid { emit win_scroll(wheel) }
+    on scroll win_grid while wheel.glide < 0.5 { emit win_scroll(wheel) }
 }

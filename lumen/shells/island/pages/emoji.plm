@@ -3,16 +3,20 @@
 // move, gg G go to the ends, Ctrl+d Ctrl+u half a page, [ ] the categories,
 // Enter or y types the chosen one into the window you were in (and copies
 // it), i searches (insert, as in vim), q Esc close. The logic hands it only the 32 in sight.
+// Opened from a field being typed in (Ctrl+. or Super+E in WhatsApp, a mail's reply): the same
+// grid, the last one used chosen; Enter (or a click) puts the emoji into that field at its cursor
+// and you are writing again; Shift+Enter puts it in and stays for more; i or / searches (Enter
+// there picks and closes too; the arrows, Tab / Shift+Tab and Ctrl+h j k l move meanwhile);
+// Escape, q or Ctrl+. go back to the field with nothing added.
 part Emoji {
     component Emo(r: record) {
         size: 44, 44
         zone box c { from: 0, 0; size: 44, 44; corner: 22 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel }
-        box { from: 2, 2; size: 40, 40; corner: 20 continuous; color: chip_hi; opacity: 45% * c.hover }
         body {
-            gradient: 2, 2 to 42, 42, mix(chip_hi, lilac, 0.22), mix(chip_hi, sunset, 0.18)
-            glass: 25%; blur: 0%; light: 4%, 2, 20; shadow: 0, 1.5, 6, 20%; show: r.sel
+            color: ink; opacity: 6%; show: c.hover > 0.5 and not r.sel
             ellipse { at: 22, 22; radius: 20 }
         }
+        //  (The chosen one is the grid's gliding glass: pages/glide.plm.)
         text r.e { at: 22, 23; anchor: center; size: 24 + 2 * c.hover; family: "Apple Color Emoji" }
         on press c { emit emo_pick_cell(r.index) }
     }
@@ -21,10 +25,8 @@ part Emoji {
     component Cat(k: number, glyph: text, lit: bool) {
         size: 36, 28
         zone box z { from: 0, 0; size: 36, 28; corner: 14 continuous; cursor: pointer; label: "Category" }
-        body {
-            color: mix(chip, chip_hi, max(z.hover, 0)); material: control; show: lit or z.hover
-            box { from: 0, 0; size: 36, 28; corner: 14 continuous }
-        }
+        //  (The lit one is the row's gliding glass; under the pointer, a trace.)
+        box { from: 0, 0; size: 36, 28; corner: 14 continuous; color: ink; opacity: if(z.hover > 0.5 and not lit, 6%, 0) }
         text glyph { at: 18, 14.5; anchor: center; size: 15; family: "Apple Color Emoji"; opacity: if(lit, 100%, 62%) }
         on press z { emit emo_cat(k) }
     }
@@ -67,7 +69,7 @@ part Emoji {
             image ic_search { at: 327 - 275 * esx, 11; size: 14, 14; tint: ink; opacity: 85% - 25% * esx * (1 - e_ins) }
             group {
                 opacity: smooth(0.55, 1, esx)
-                input emo_q { at: 74, 9; width: 266; size: 13.5; color: ink; placeholder: ""; label: "Search emoji" }
+                input emo_q { at: 74, 9; width: 266; size: 13.5; color: ink; placeholder: ""; label: "Search emoji"; pass: Left, Right }
                 text "Search emoji" {
                     at: 74, 18; anchor: left center; size: 13.5; weight: 500; family: "SF Pro Display"
                     color: ink; opacity: 40%; show: emo_q_empty
@@ -76,6 +78,10 @@ part Emoji {
             zone box esb { from: efl, 0; size: 352 - efl, 36; corner: 18 continuous; cursor: pointer; label: "Search (i)"; active: not emo_insert }
         }
 
+        //  The category in sight, and the chosen emoji: each one glass that glides (pages/glide.plm).
+        let cat_i = if(emo_cat_at == -1, 0, if(emo_cat_at < 2, emo_cat_at + 1, emo_cat_at))
+        Glide(emx0 + 18 + cat_i * 38, 88, 36, 28, 14, true, 0)
+        Glide(emx0 + 18 + mod(emo_at, 8) * 44, 126 + floor(emo_at / 8) * 44, 40, 40, 20, emo_at >= 0, 0)
         row cats {
             at: emx0 + 18, 88; gap: 2
             Cat(-1, "🕘", emo_cat_at == -1)
@@ -108,5 +114,5 @@ part Emoji {
     on press eb while not side { emit go_home }
     on press eb while side { side = false }
     on press esb { emo_insert = true; focus emo_q }
-    on scroll emo_grid { emit emo_scroll(wheel) }
+    on scroll emo_grid while wheel.glide < 0.5 { emit emo_scroll(wheel) }
 }

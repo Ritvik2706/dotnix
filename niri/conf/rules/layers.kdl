@@ -10,6 +10,17 @@ layer-rule {
     }
 }
 
+// The island's surfaces marked `captures: hidden` (the recording bar):
+// on the monitor, left out of every recording, screenshot and shared screen,
+// with nothing in their place. That part (hide-from-capture) is patched-niri
+// only, so ../../theme.kdl has it (theme/wallpaper-theme.py), not here.
+layer-rule {
+    match namespace="^lumen-private$"
+    background-effect {
+        xray false
+    }
+}
+
 // Rounded display corners (scripts/screen-corners.py): plain black masks.
 layer-rule {
     match namespace="^screen-corners$"

@@ -1,7 +1,7 @@
 From 2b91d04ff46ebe7fa483d500e450c72bd0b269c0 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 14:27:33 +0400
-Subject: [PATCH 25/38] liquid glass: 32 shapes a layer, controls never melt
+Subject: [PATCH 25/40] liquid glass: 32 shapes a layer, controls never melt
  together
 
 Every control of lumen's island is glass now: 32 per layer (48 a surface),

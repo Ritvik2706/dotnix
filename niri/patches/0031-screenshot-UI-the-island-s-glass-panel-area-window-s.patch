@@ -1,7 +1,7 @@
 From 121f6db8d6da35854cf3c6f550bafc84135483e0 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 21:20:10 +0400
-Subject: [PATCH 31/38] screenshot UI: the island's glass panel,
+Subject: [PATCH 31/40] screenshot UI: the island's glass panel,
  area/window/screen modes, vim keys
 
 The help panel is a liquid glass card (the island's open card, its values

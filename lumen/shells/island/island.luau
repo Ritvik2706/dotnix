@@ -563,6 +563,8 @@ local function clip_show()
         }
     end
     model.clips = rows
+    -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+    do local at = -1; for k, x in ipairs(rows) do if x.sel then at = k - 1 end end; fact.clip_at = at end
     fact.clip_total = n
     fact.clip_off = clip_off
     if clip_preview then clip_preview(clip_hits[clip_sel + 1]) end
@@ -712,7 +714,7 @@ local function side_put(words, picture)
         if picture then wa_hook.stage(picture) else wa_hook.insert(words) end
         return true
     elseif fact.app == "mailx" and fact.mr_rep and words then
-        text.mr_in = (text.mr_in or "") .. words
+        insert("mr_in", words)   -- at its cursor (kept while a picker was over it)
         return true
     end
     return false
@@ -723,7 +725,7 @@ local function clip_take(i)
     pcall(sys.call, "clipboard.pick", c.id)
     if fact.app ~= "none" then
         local words = c.kind ~= "image" and (clip_full[c.id] or c.text) or nil
-        side_put(words and string.gsub(words, "[\r\n\t]+", " ") or nil, c.kind == "image" and c.image or nil)
+        side_put(words and (string.gsub(words, "\r\n?", "\n")) or nil, c.kind == "image" and c.image or nil)
     end
     fact.expanded = false
 end
@@ -815,6 +817,8 @@ local function launch_show()
             sk = h.sk or 0, on = h.on == true, val = h.val or "" }
     end
     model.hits = rows
+    -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+    do local at = -1; for k, x in ipairs(rows) do if x.sel then at = k - 1 end end; fact.launch_at = at end
     fact.launch_total = n
     fact.launch_off = launch_off
 end
@@ -910,39 +914,83 @@ for _, st in ipairs(lx.SITES) do lx.SITE_BY[st.p] = st end
 lx.urlencode = function(str)
     return (string.gsub(str, "[^%w%-_%.~]", function(c) return string.format("%%%02X", string.byte(c)) end))
 end
--- A sum, read by hand (the sandbox has no `load`): + - * / % ^, brackets, pi.
-lx.calc = function(expr)
-    local e = string.gsub(string.gsub(expr, "%s+", ""), "×", "*")
-    e = string.gsub(e, "pi", "(3.14159265358979)")
-    if e == "" or string.find(e, "[^%d%.%+%-%*/%%%^%(%)]") then return nil end
-    if not string.find(e, "[%+%-%*/%%%^]") then return nil end    -- a bare number is not a sum
+-- ── smart answers ───────────────────────────────────────────────────
+-- What the launcher works out from what is typed, each a row Enter copies:
+--   sums with functions (`sqrt(2)*pi`, `5!`, `2^10`, `3 x 4`);
+--   money (`5000 mur eur`, `$50 to eur`, `100 eur`: rates from open.er-api.com,
+--   kept in rates.json, fetched again after 6 hours);
+--   units (`10 cm in inches`, `5'10" to cm`, `70 kg`, `100 f`, `1 gib to mb`):
+--   length, mass, volume, area, speed, time, data, energy, power, pressure,
+--   angle and temperature; with no target, the usual other side;
+--   percentages (`20% of 150`, `150 + 20%`, `30 of 120 in %`);
+--   bases (`0xff`, `0b1010`, `255 to hex`);
+--   time zones (`time in tokyo`, `3pm london in tokyo`, `15:00 utc to mur`);
+--   dates (`days until 25 dec`, `days since 2026-01-01`, `in 30 days`, `100 days ago`);
+--   colours (`#ff8800`, `rgb(255, 136, 0)`).
+-- All of it lives in `lx` (the logic is at Luau's limit of 200 top-level locals).
+lx.HOME_CUR = "MUR"                      -- what a bare amount is shown in first
+lx.FN = {
+    sqrt = math.sqrt, abs = math.abs, exp = math.exp, ln = math.log,
+    log = function(x) return math.log(x, 10) end, log2 = function(x) return math.log(x, 2) end,
+    sin = math.sin, cos = math.cos, tan = math.tan, asin = math.asin, acos = math.acos, atan = math.atan,
+    floor = math.floor, ceil = math.ceil, round = function(x) return math.floor(x + 0.5) end,
+}
+lx.CONST = { pi = math.pi, e = math.exp(1), tau = 2 * math.pi }
+-- A sum's value, read by hand (the sandbox has no `load`): + - * / % ^ !, brackets,
+-- functions, constants, implicit products (`2pi`, `3(4+1)`). nil: not a sum it can read.
+lx.eval = function(expr)
+    local e = string.lower(expr)
+    e = string.gsub(e, "×", "*")
+    e = string.gsub(e, "÷", "/")
+    e = string.gsub(e, "%*%*", "^")
+    e = string.gsub(e, "%s+x%s+", "*")
+    e = string.gsub(e, "(%d),(%d%d%d)", "%1%2")
+    e = string.gsub(e, "(%d),(%d%d%d)", "%1%2")
+    e = string.gsub(e, "%s+", "")
+    if e == "" or string.find(e, "[^%w%.%+%-%*/%%%^%(%)!]") then return nil end
     local i = 1
     local expr_
-    local function num()
-        local m = string.match(e, "^%d*%.?%d+", i)
-        if not m then return nil end
-        i += #m
-        return tonumber(m)
-    end
+    local function peek() return string.sub(e, i, i) end
     local function atom()
-        local c = string.sub(e, i, i)
+        local c = peek()
         if c == "(" then
-            i += 1
+            i = i + 1
             local v = expr_()
-            if string.sub(e, i, i) ~= ")" then return nil end
-            i += 1
+            if v == nil or peek() ~= ")" then return nil end
+            i = i + 1
             return v
-        elseif c == "-" then i += 1; local v = atom(); return v and -v
-        elseif c == "+" then i += 1; return atom()
+        elseif c == "-" then i = i + 1; local v = atom(); return v and -v
+        elseif c == "+" then i = i + 1; return atom()
         end
-        return num()
+        local m = string.match(e, "^%d*%.?%d+e[%+%-]?%d+", i) or string.match(e, "^%d*%.?%d+", i)
+        if m then i = i + #m; return tonumber(m) end
+        local id = string.match(e, "^%a[%a%d]*", i)
+        if not id then return nil end
+        i = i + #id
+        if lx.FN[id] then
+            if peek() ~= "(" then return nil end
+            local v = atom()
+            return v and lx.FN[id](v)
+        end
+        return lx.CONST[id]
+    end
+    local function postfix()
+        local v = atom()
+        while v ~= nil and peek() == "!" do
+            i = i + 1
+            if v < 0 or v > 170 or v ~= math.floor(v) then return nil end
+            local f = 1
+            for k = 2, v do f = f * k end
+            v = f
+        end
+        return v
     end
     local function power()
-        local b = atom()
+        local b = postfix()
         if b == nil then return nil end
-        if string.sub(e, i, i) == "^" then
-            i += 1
-            local x = power()
+        if peek() == "^" then
+            i = i + 1
+            local x = (function() local c = peek(); if c == "-" then i = i + 1; local p = power(); return p and -p end; return power() end)()
             if x == nil then return nil end
             return b ^ x
         end
@@ -951,21 +999,26 @@ lx.calc = function(expr)
     local function term()
         local v = power()
         while v ~= nil do
-            local c = string.sub(e, i, i)
-            if c ~= "*" and c ~= "/" and c ~= "%" then break end
-            i += 1
-            local r = power()
-            if r == nil then return nil end
-            v = c == "*" and v * r or (c == "/" and v / r or v % r)
+            local c = peek()
+            if c == "*" or c == "/" or c == "%" then
+                i = i + 1
+                local r = power()
+                if r == nil then return nil end
+                v = c == "*" and v * r or (c == "/" and v / r or v % r)
+            elseif c == "(" or string.match(c, "%a") then
+                local r = power()               -- side by side: a product
+                if r == nil then return nil end
+                v = v * r
+            else break end
         end
         return v
     end
     expr_ = function()
         local v = term()
         while v ~= nil do
-            local c = string.sub(e, i, i)
+            local c = peek()
             if c ~= "+" and c ~= "-" then break end
-            i += 1
+            i = i + 1
             local r = term()
             if r == nil then return nil end
             v = c == "+" and v + r or v - r
@@ -974,11 +1027,736 @@ lx.calc = function(expr)
     end
     local ok, v = pcall(expr_)
     if not ok or v == nil or i <= #e or v ~= v or v == math.huge or v == -math.huge then return nil end
-    if math.abs(v - math.floor(v + 0.5)) < 1e-9 then return string.format("%d", math.floor(v + 0.5)) end
-    return (string.gsub(string.format("%.8f", v), "%.?0+$", ""))
+    return v
 end
--- What the typed text asks for besides apps and settings: a site's search, a sum,
--- an address, a command. Each a row (kind 3) that knows what Enter does.
+-- A number as it is copied (plain) and as it is shown (grouped): `money` keeps cents.
+lx.fmt = function(v, money)
+    local a = math.abs(v)
+    local s
+    if a ~= 0 and (a >= 1e15 or a < 1e-6) then
+        s = string.format("%.6g", v)
+        return s, s
+    end
+    local dec
+    if a == 0 then dec = 0
+    elseif a >= 1 then dec = money and 2 or math.max(a >= 1000 and 2 or 0, 5 - math.floor(math.log(a, 10)))
+    else dec = math.min(12, -math.floor(math.log(a, 10)) + (money and 2 or 5)) end
+    s = string.format("%." .. dec .. "f", v)
+    if not (money and a >= 1) then s = string.gsub(s, "%.?0+$", "") end
+    if s == "-0" then s = "0" end
+    local sign, int, frac = string.match(s, "^(%-?)(%d+)(.*)$")
+    local g = string.reverse((string.gsub(string.reverse(int), "(%d%d%d)", "%1,")))
+    g = string.gsub(g, "^,", "")
+    return s, sign .. g .. frac
+end
+-- A sum, as the "=" row shows it: nil for a bare number or a word alone.
+lx.calc = function(expr)
+    local e = string.gsub(expr, "%s+", "")
+    if not (string.find(e, "[%+%*/%%%^%(!×÷]") or string.find(e, "^.+%-") or string.find(e, "^%-")
+        or (string.find(e, "%d") and string.find(e, "%a")) or string.find(expr, "%d%s+x%s+%d")) then return nil end
+    local v = lx.eval(expr)
+    if not v then return nil end
+    return (lx.fmt(v))
+end
+
+-- Units: per dimension, each a factor to its base, its names (spaces dropped,
+-- lower case), the symbol it is shown with, and where a bare amount goes.
+lx.UNITS = {}
+lx.UNIT_BY = {}
+do
+    local function u(dim, f, sym, names, to)
+        local x = { dim = dim, f = f, sym = sym, to = to }
+        lx.UNITS[#lx.UNITS + 1] = x
+        for _, n in ipairs(names) do
+            local l = lx.UNIT_BY[n] or {}
+            l[#l + 1] = x
+            lx.UNIT_BY[n] = l
+        end
+        x.key = names[1]
+    end
+    -- length (m)
+    u("length", 1e-9, "nm", { "nm", "nanometer", "nanometers", "nanometre", "nanometres" })
+    u("length", 1e-6, "µm", { "um", "µm", "micron", "microns", "micrometer", "micrometers" })
+    u("length", 1e-3, "mm", { "mm", "millimeter", "millimeters", "millimetre", "millimetres" }, "in")
+    u("length", 1e-2, "cm", { "cm", "centimeter", "centimeters", "centimetre", "centimetres" }, "in")
+    u("length", 1, "m", { "m", "meter", "meters", "metre", "metres" }, "ft")
+    u("length", 1000, "km", { "km", "kilometer", "kilometers", "kilometre", "kilometres", "kms" }, "mi")
+    u("length", 0.0254, "in", { "in", "inch", "inches", "\"", "''" }, "cm")
+    u("length", 0.3048, "ft", { "ft", "foot", "feet", "'" }, "m")
+    u("length", 0.9144, "yd", { "yd", "yard", "yards", "yds" }, "m")
+    u("length", 1609.344, "mi", { "mi", "mile", "miles" }, "km")
+    u("length", 1852, "nmi", { "nmi", "nauticalmile", "nauticalmiles" }, "km")
+    u("length", 9.4607304725808e15, "ly", { "ly", "lightyear", "lightyears" }, "km")
+    -- mass (kg)
+    u("mass", 1e-6, "mg", { "mg", "milligram", "milligrams" })
+    u("mass", 1e-3, "g", { "g", "gram", "grams", "gr", "gm" }, "oz")
+    u("mass", 1, "kg", { "kg", "kilo", "kilos", "kilogram", "kilograms", "kgs" }, "lb")
+    u("mass", 1000, "t", { "t", "tonne", "tonnes", "ton", "tons", "metricton" }, "lb")
+    u("mass", 0.028349523125, "oz", { "oz", "ounce", "ounces" }, "g")
+    u("mass", 0.45359237, "lb", { "lb", "lbs", "pound", "pounds" }, "kg")
+    u("mass", 6.35029318, "st", { "st", "stone", "stones" }, "kg")
+    -- volume (l)
+    u("volume", 1e-3, "ml", { "ml", "milliliter", "milliliters", "millilitre", "millilitres", "cc", "cm3" }, "floz")
+    u("volume", 1e-2, "cl", { "cl", "centiliter", "centilitre" }, "floz")
+    u("volume", 0.1, "dl", { "dl", "deciliter", "decilitre" }, "floz")
+    u("volume", 1, "l", { "l", "liter", "liters", "litre", "litres", "ltr" }, "gal")
+    u("volume", 1000, "m³", { "m3", "m³", "cubicmeter", "cubicmeters", "cubicmetre", "cubicmetres" }, "gal")
+    u("volume", 0.00492892159375, "tsp", { "tsp", "teaspoon", "teaspoons" }, "ml")
+    u("volume", 0.01478676478125, "tbsp", { "tbsp", "tablespoon", "tablespoons" }, "ml")
+    u("volume", 0.0295735295625, "fl oz", { "floz", "fluidounce", "fluidounces", "oz" }, "ml")
+    u("volume", 0.2365882365, "cup", { "cup", "cups" }, "ml")
+    u("volume", 0.473176473, "pt", { "pt", "pint", "pints" }, "l")
+    u("volume", 0.946352946, "qt", { "qt", "quart", "quarts" }, "l")
+    u("volume", 3.785411784, "gal", { "gal", "gallon", "gallons", "usgal" }, "l")
+    u("volume", 4.54609, "imp gal", { "impgal", "ukgal", "imperialgallon", "imperialgallons" }, "l")
+    -- area (m²)
+    u("area", 1e-4, "cm²", { "cm2", "cm²", "sqcm", "squarecentimeter", "squarecentimeters" }, "sqin")
+    u("area", 1, "m²", { "m2", "m²", "sqm", "squaremeter", "squaremeters", "squaremetre", "squaremetres" }, "sqft")
+    u("area", 1e6, "km²", { "km2", "km²", "sqkm", "squarekilometer", "squarekilometers" }, "sqmi")
+    u("area", 1e4, "ha", { "ha", "hectare", "hectares" }, "acre")
+    u("area", 4046.8564224, "acre", { "acre", "acres", "ac" }, "ha")
+    u("area", 6.4516e-4, "in²", { "sqin", "in2", "in²", "squareinch", "squareinches" }, "cm2")
+    u("area", 0.09290304, "ft²", { "sqft", "ft2", "ft²", "squarefoot", "squarefeet" }, "m2")
+    u("area", 0.83612736, "yd²", { "sqyd", "yd2", "yd²", "squareyard", "squareyards" }, "m2")
+    u("area", 2589988.110336, "mi²", { "sqmi", "mi2", "mi²", "squaremile", "squaremiles" }, "km2")
+    u("area", 4220.87, "arpent", { "arpent", "arpents" }, "m2")
+    -- speed (m/s)
+    u("speed", 1, "m/s", { "m/s", "mps", "meterspersecond", "metrespersecond" }, "km/h")
+    u("speed", 1 / 3.6, "km/h", { "km/h", "kmh", "kph", "kmph", "kilometersperhour", "kilometresperhour" }, "mph")
+    u("speed", 0.44704, "mph", { "mph", "mi/h", "milesperhour" }, "km/h")
+    u("speed", 1852 / 3600, "kn", { "kn", "kt", "knot", "knots" }, "km/h")
+    u("speed", 0.3048, "ft/s", { "ft/s", "fps", "feetpersecond" }, "m/s")
+    u("speed", 340.29, "Mach", { "mach" }, "km/h")
+    -- time (s)
+    u("time", 1e-3, "ms", { "ms", "millisecond", "milliseconds" }, "s")
+    u("time", 1, "s", { "s", "sec", "secs", "second", "seconds" }, "min")
+    u("time", 60, "min", { "min", "mins", "minute", "minutes" }, "h")
+    u("time", 3600, "h", { "h", "hr", "hrs", "hour", "hours" }, "min")
+    u("time", 86400, "days", { "day", "days" }, "h")
+    u("time", 604800, "weeks", { "wk", "wks", "week", "weeks" }, "day")
+    u("time", 2629746, "months", { "mo", "month", "months" }, "day")
+    u("time", 31556952, "years", { "yr", "yrs", "year", "years" }, "day")
+    -- data (bytes)
+    u("data", 0.125, "bit", { "bit", "bits", "b" }, "byte")
+    u("data", 1, "B", { "byte", "bytes" }, "bit")
+    u("data", 1e3, "kB", { "kb", "kilobyte", "kilobytes" }, "kib")
+    u("data", 1e6, "MB", { "mb", "megabyte", "megabytes" }, "mib")
+    u("data", 1e9, "GB", { "gb", "gigabyte", "gigabytes", "gigs", "gig" }, "gib")
+    u("data", 1e12, "TB", { "tb", "terabyte", "terabytes" }, "tib")
+    u("data", 1024, "KiB", { "kib", "kibibyte", "kibibytes" }, "kb")
+    u("data", 1048576, "MiB", { "mib", "mebibyte", "mebibytes" }, "mb")
+    u("data", 1073741824, "GiB", { "gib", "gibibyte", "gibibytes" }, "gb")
+    u("data", 1099511627776, "TiB", { "tib", "tebibyte", "tebibytes" }, "tb")
+    u("data", 125, "kbit", { "kbit", "kbits", "kbps", "kbit/s", "kilobit", "kilobits" }, "kb")
+    u("data", 125000, "Mbit", { "mbit", "mbits", "mbps", "mbit/s", "megabit", "megabits" }, "mb")
+    u("data", 125000000, "Gbit", { "gbit", "gbits", "gbps", "gbit/s", "gigabit", "gigabits" }, "mb")
+    -- energy (J)
+    u("energy", 1, "J", { "j", "joule", "joules" }, "cal")
+    u("energy", 1000, "kJ", { "kj", "kilojoule", "kilojoules" }, "kcal")
+    u("energy", 4.184, "cal", { "cal", "calorie", "calories" }, "j")
+    u("energy", 4184, "kcal", { "kcal", "kilocalorie", "kilocalories", "cals" }, "kj")
+    u("energy", 3600, "Wh", { "wh", "watthour", "watthours" }, "j")
+    u("energy", 3.6e6, "kWh", { "kwh", "kilowatthour", "kilowatthours" }, "mj")
+    u("energy", 1e6, "MJ", { "mj", "megajoule", "megajoules" }, "kwh")
+    u("energy", 1.602176634e-19, "eV", { "ev", "electronvolt", "electronvolts" }, "j")
+    -- power (W)
+    u("power", 1, "W", { "w", "watt", "watts" }, "hp")
+    u("power", 1000, "kW", { "kw", "kilowatt", "kilowatts" }, "hp")
+    u("power", 1e6, "MW", { "mw", "megawatt", "megawatts" }, "kw")
+    u("power", 745.69987158227, "hp", { "hp", "horsepower", "bhp" }, "kw")
+    u("power", 735.49875, "PS", { "ps", "metrichorsepower" }, "kw")
+    -- pressure (Pa)
+    u("pressure", 1, "Pa", { "pa", "pascal", "pascals" }, "psi")
+    u("pressure", 1000, "kPa", { "kpa", "kilopascal", "kilopascals" }, "psi")
+    u("pressure", 100, "hPa", { "hpa", "mbar", "millibar", "millibars" }, "inhg")
+    u("pressure", 1e5, "bar", { "bar", "bars" }, "psi")
+    u("pressure", 6894.757293168, "psi", { "psi" }, "bar")
+    u("pressure", 101325, "atm", { "atm", "atmosphere", "atmospheres" }, "kpa")
+    u("pressure", 133.322387415, "mmHg", { "mmhg", "torr" }, "kpa")
+    u("pressure", 3386.389, "inHg", { "inhg" }, "hpa")
+    -- angle (rad)
+    u("angle", math.pi / 180, "°", { "deg", "degree", "degrees", "°" }, "rad")
+    u("angle", 1, "rad", { "rad", "radian", "radians" }, "deg")
+    u("angle", math.pi / 200, "grad", { "grad", "gon", "gradian", "gradians" }, "deg")
+    u("angle", 2 * math.pi, "turns", { "turn", "turns", "rev", "revs", "revolution", "revolutions" }, "deg")
+    -- temperature (its own sums, below)
+    u("temp", 0, "°C", { "c", "°c", "celsius", "centigrade", "degc", "degreesc", "degreescelsius" }, "f")
+    u("temp", 0, "°F", { "f", "°f", "fahrenheit", "degf", "degreesf", "degreesfahrenheit" }, "c")
+    u("temp", 0, "K", { "k", "kelvin", "kelvins" }, "c")
+end
+-- The arpent above is Mauritius's own (4,220.87 m²), the island's unit for land.
+lx.to_kelvin = { ["°C"] = function(v) return v + 273.15 end, ["°F"] = function(v) return (v - 32) * 5 / 9 + 273.15 end, K = function(v) return v end }
+lx.from_kelvin = { ["°C"] = function(v) return v - 273.15 end, ["°F"] = function(v) return (v - 273.15) * 9 / 5 + 32 end, K = function(v) return v end }
+lx.unit_convert = function(v, a, b)
+    if a.dim == "temp" then return lx.from_kelvin[b.sym](lx.to_kelvin[a.sym](v)) end
+    return v * a.f / b.f
+end
+
+-- Money: rates per US dollar, kept in the scene's folder.
+lx.rates = sys.ask("files.read", "rates.json", "json")
+if type(lx.rates) ~= "table" or type(lx.rates.rates) ~= "table" then lx.rates = nil end
+lx.rates_busy = false
+lx.refresh = function() end              -- (launch_refresh, once it exists: an answer came in)
+lx.rates_check = function()
+    if lx.rates_busy then return end
+    if lx.rates and os.time() - (lx.rates.at or 0) < 6 * 3600 then return end
+    lx.rates_busy = true
+    run("curl", { "-sfL", "--max-time", "10", "https://open.er-api.com/v6/latest/USD" }, function(out, code)
+        lx.rates_busy = false
+        local ok, d = pcall(json.decode, out or "")
+        if code ~= 0 or not ok or type(d) ~= "table" or type(d.rates) ~= "table" then return end
+        lx.rates = { at = os.time(), updated = d.time_last_update_unix or os.time(), rates = d.rates }
+        pcall(sys.call, "files.write", "rates.json", lx.rates)
+        lx.refresh()
+    end)
+end
+lx.CUR_WORDS = {
+    ["$"] = "USD", ["us$"] = "USD", dollar = "USD", dollars = "USD", bucks = "USD", usd = "USD",
+    ["€"] = "EUR", euro = "EUR", euros = "EUR", ["£"] = "GBP", quid = "GBP", sterling = "GBP",
+    ["¥"] = "JPY", yen = "JPY", yuan = "CNY", rmb = "CNY", ["₹"] = "INR", ["₩"] = "KRW", won = "KRW",
+    rs = "MUR", rupee = "MUR", rupees = "MUR", roupie = "MUR", roupies = "MUR",
+    ["a$"] = "AUD", ["c$"] = "CAD", ["r"] = "ZAR", rand = "ZAR", franc = "CHF", francs = "CHF",
+    dirham = "AED", dirhams = "AED", ["₽"] = "RUB", rouble = "RUB", ruble = "RUB", baht = "THB", ["₺"] = "TRY", lira = "TRY",
+    pound = "GBP", pounds = "GBP", -- also mass: the other side decides
+}
+-- What a typed word may mean: units (and money), each with its dimension.
+lx.lookup = function(word)
+    local w = string.gsub(string.lower(word), "%s+", "")
+    if w == "" then return {} end
+    local found = {}
+    for _, x in ipairs(lx.UNIT_BY[w] or {}) do found[#found + 1] = x end
+    if not lx.UNIT_BY[w] then
+        -- A plural nobody listed.
+        local s = string.match(w, "^(.-)e?s$")
+        if s and lx.UNIT_BY[s] then for _, x in ipairs(lx.UNIT_BY[s]) do found[#found + 1] = x end end
+    end
+    local code = lx.CUR_WORDS[w] or (string.match(w, "^%a%a%a$") and string.upper(w))
+    if code and (not lx.rates or lx.rates.rates[code]) then
+        found[#found + 1] = { dim = "money", sym = code, code = code }
+    end
+    return found
+end
+-- Two words that can be converted one into the other: the first pair that agrees.
+lx.pair = function(a, b)
+    for _, x in ipairs(lx.lookup(a)) do
+        for _, y in ipairs(lx.lookup(b)) do
+            if x.dim == y.dim and x ~= y and not (x.code and x.code == y.code) then return x, y end
+        end
+    end
+end
+-- The amount at the head of a phrase: `5000`, `5,000.50`, `-40`, `1.5k`, `$50`, `€ 3`, `2*3`.
+lx.amount = function(s)
+    local sym, rest = string.match(s, "^([%$€£¥₹₩₽])%s*(.*)$")
+    if not sym then
+        local p, r = string.match(s, "^(%a%a?%$)%s*(.*)$")      -- us$ a$ c$
+        if p then sym, rest = p, r else rest = s end
+    end
+    local num, tail = string.match(rest, "^(%-?%.?%d[%d%.,]*)(.*)$")
+    if not num then return nil end
+    local v = lx.eval(num)
+    if not v then return nil end
+    -- `5k`, `2.5m` of money only (alone `m` is metres, `k` kelvin): the caller tries both.
+    local mult = string.match(tail, "^([kKmM])%s") or string.match(tail, "^([kKmM])$")
+    return v, tail, sym, mult
+end
+lx.money_row = function(v, from, to)
+    local r = lx.rates.rates
+    local out = v / r[from] * r[to]
+    local plain, shown = lx.fmt(out, true)
+    local one = select(2, lx.fmt(r[to] / r[from]))
+    local d = os.date("*t", lx.rates.updated or lx.rates.at)
+    local age = string.format("rates of %d %s", d.day, os.date("%b", lx.rates.updated or lx.rates.at))
+    return { kind = 3, sk = 21, name = shown .. " " .. to, val = "Currency", copy = plain,
+        sub = select(2, lx.fmt(v)) .. " " .. from .. "  ·  1 " .. from .. " = " .. one .. " " .. to .. "  ·  " .. age .. "  ·  Enter copies" }
+end
+lx.unit_row = function(v, a, b)
+    local out = lx.unit_convert(v, a, b)
+    local plain, shown = lx.fmt(out)
+    local sep = (b.dim == "temp" or b.sym == "°") and "" or " "
+    local asep = (a.dim == "temp" or a.sym == "°") and "" or " "
+    local dims = { length = "Length", mass = "Weight", volume = "Volume", area = "Area", speed = "Speed", time = "Time",
+        data = "Data", energy = "Energy", power = "Power", pressure = "Pressure", angle = "Angle", temp = "Temperature" }
+    return { kind = 3, sk = 21, name = shown .. sep .. b.sym, val = dims[b.dim], copy = plain,
+        sub = select(2, lx.fmt(v)) .. asep .. a.sym .. "  ·  Enter copies" }
+end
+-- `<amount> <unit> [to|in|as|=|->] <unit>`, or `<amount> <unit>` alone.
+lx.convert = function(q)
+    local v, tail, sym, mult
+    -- `5'10"`, `5 ft 10 in`: feet and inches.
+    local ft, inch, rest = string.match(q, "^(%d+)%s*'%s*(%d+%.?%d*)%s*\"?%s*(.*)$")
+    if not ft then ft, inch, rest = string.match(q, "^(%d+)%s*ft%s*(%d+%.?%d*)%s*in%s+(.*)$") end
+    if not ft then ft, inch, rest = string.match(q, "^(%d+)%s*ft%s*(%d+%.?%d*)%s*in()$") end
+    if ft then v, tail = tonumber(ft) * 12 + tonumber(inch), "in " .. rest
+    else v, tail, sym, mult = lx.amount(q) end
+    if not v then return nil end
+    tail = string.gsub(string.gsub(tail, "^%s+", ""), "%s+$", "")
+    if sym then tail = sym .. " " .. tail end
+    if tail == "" then return nil end
+    -- Split into `from` and `to`: at a joining word, else at each space in turn.
+    local tries = {}
+    local a, b
+    local low = string.lower(tail)
+    for _, j in ipairs({ "%s+to%s+", "%s+into%s+", "%s+in%s+", "%s+as%s+", "%s*%->%s*", "%s*→%s*", "%s*=%s*", "%s*>%s*" }) do
+        local s0, e0 = string.find(low, j)
+        if s0 and s0 > 1 and e0 < #tail then a, b = string.sub(tail, 1, s0 - 1), string.sub(tail, e0 + 1); break end
+    end
+    if a then
+        tries[1] = { a, b }
+        if sym then tries[1] = { sym, b } end
+    else
+        local words = {}
+        for w in string.gmatch(tail, "%S+") do words[#words + 1] = w end
+        for k = 1, #words - 1 do
+            tries[#tries + 1] = { table.concat(words, " ", 1, k), table.concat(words, " ", k + 1) }
+        end
+    end
+    local function attempt(val, from, to)
+        if not from or not to then return nil end
+        if from.dim == "money" then
+            if not lx.rates then lx.rates_check(); return { kind = 3, sk = 21, name = "…", val = "Currency", sub = "Fetching exchange rates" } end
+            return lx.money_row(val, from.code, to.code)
+        end
+        return lx.unit_row(val, from, to)
+    end
+    for _, t in ipairs(tries) do
+        local x, y = lx.pair(t[1], t[2])
+        -- `5k mur eur`: thousands, when that reads as money.
+        if mult and not (x and x.dim ~= "money") then
+            local x2, y2 = lx.pair(string.gsub(t[1], "^[kKmM]%s*", ""), t[2])
+            if x2 and x2.dim == "money" then
+                x, y = x2, y2
+                v = v * ((mult == "k" or mult == "K") and 1e3 or 1e6)
+            end
+        end
+        local row = attempt(v, x, y)
+        if row then return { row }, true end
+    end
+    if a then return nil end
+    -- Alone: the usual other side (money: home, then dollars and euros).
+    local multv = v
+    local words = tail
+    if mult then
+        local w2 = string.gsub(tail, "^[kKmM]%s*", "")
+        for _, x in ipairs(lx.lookup(w2)) do
+            if x.dim == "money" then words = w2; multv = v * ((mult == "k" or mult == "K") and 1e3 or 1e6) end
+        end
+    end
+    local rows = {}
+    for _, x in ipairs(lx.lookup(words)) do
+        if x.dim == "money" then
+            if not lx.rates then lx.rates_check(); return { { kind = 3, sk = 21, name = "…", val = "Currency", sub = "Fetching exchange rates" } }, false end
+            for _, c in ipairs({ lx.HOME_CUR, "USD", "EUR" }) do
+                if c ~= x.code and #rows < 3 then rows[#rows + 1] = lx.money_row(multv, x.code, c) end
+            end
+            return rows, false
+        elseif x.to then
+            local y = lx.UNIT_BY[x.to] and lx.UNIT_BY[x.to][1]
+            if y and y.dim ~= x.dim then for _, z in ipairs(lx.UNIT_BY[x.to]) do if z.dim == x.dim then y = z end end end
+            if y and y.dim == x.dim then return { lx.unit_row(v, x, y) }, false end
+        end
+    end
+    return nil
+end
+
+-- Percentages: `20% of 150`, `150 + 20%`, `150 - 20%`, `30 of 120 in %`, `30 / 120 %`.
+lx.percent = function(q)
+    local function row(v, sub)
+        local plain, shown = lx.fmt(v)
+        return { { kind = 3, sk = 21, name = shown, val = "Percent", copy = plain, sub = sub .. "  ·  Enter copies" } }, true
+    end
+    local p, x = string.match(q, "^([%d%.]+)%s*%%%s*of%s+(.+)$")
+    if p then
+        local pv, xv = tonumber(p), lx.eval(x)
+        if pv and xv then return row(pv / 100 * xv, p .. "% of " .. select(2, lx.fmt(xv))) end
+    end
+    local base, op, pc = string.match(q, "^(.-)%s*([%+%-])%s*([%d%.]+)%s*%%$")
+    if base and base ~= "" then
+        local bv, pv = lx.eval(base), tonumber(pc)
+        if bv and pv then return row(op == "+" and bv * (1 + pv / 100) or bv * (1 - pv / 100), select(2, lx.fmt(bv)) .. " " .. op .. " " .. pc .. "%") end
+    end
+    local a, b = string.match(q, "^(.-)%s+of%s+(.-)%s+in%s*%%$")
+    if not a then a, b = string.match(q, "^(.-)%s+of%s+(.-)%s+as%s*%%$") end
+    if a then
+        local av, bv = lx.eval(a), lx.eval(b)
+        if av and bv and bv ~= 0 then
+            local plain, shown = lx.fmt(av / bv * 100)
+            return { { kind = 3, sk = 21, name = shown .. "%", val = "Percent", copy = plain .. "%", sub = a .. " of " .. b .. "  ·  Enter copies" } }, true
+        end
+    end
+    return nil
+end
+
+-- Bases: `0xff`, `0b1010`, `0o17`, and `255 to hex|bin|oct|dec`.
+lx.bases = function(q)
+    local l = string.gsub(string.lower(q), "%s+", "")
+    local function bin(n)
+        if n == 0 then return "0" end
+        local t = {}
+        while n > 0 do t[#t + 1] = tostring(n % 2); n = math.floor(n / 2) end
+        return string.reverse(table.concat(t))
+    end
+    local function rows(n, from)
+        local all = {
+            { "dec", tostring(n), "Decimal" },
+            { "hex", string.format("0x%X", n), "Hexadecimal" },
+            { "bin", "0b" .. bin(n), "Binary" },
+            { "oct", string.format("0o%o", n), "Octal" },
+        }
+        local out = {}
+        for _, x in ipairs(all) do
+            if x[1] ~= from then out[#out + 1] = { kind = 3, sk = 21, name = x[2], val = x[3], copy = x[2], sub = q .. "  ·  Enter copies" } end
+        end
+        return out, true
+    end
+    local h = string.match(l, "^0x(%x+)$")
+    if h and #h <= 13 then return rows(tonumber(h, 16), "hex") end
+    local b = string.match(l, "^0b([01]+)$")
+    if b and #b <= 52 then return rows(tonumber(b, 2), "bin") end
+    local o = string.match(l, "^0o([0-7]+)$")
+    if o and #o <= 17 then return rows(tonumber(o, 8), "oct") end
+    local n, to = string.match(l, "^(%d+)[%a]*(hex)$")
+    if not n then n, to = string.match(l, "^(%d+)to(%a+)$") end
+    if not n then n, to = string.match(l, "^(%d+)in(%a+)$") end
+    if n and #n <= 15 then
+        local which = ({ hex = "hex", hexadecimal = "hex", bin = "bin", binary = "bin", oct = "oct", octal = "oct" })[to]
+        if which then
+            local out = rows(tonumber(n), "dec")
+            for _, r in ipairs(out) do if string.find(string.lower(r.val), "^" .. which) then return { r }, true end end
+        end
+    end
+    return nil
+end
+
+-- Time zones: a place's offset from UTC comes from `date` (once an hour each);
+-- the place from the zone names (`timedatectl list-timezones`) or a few short ones.
+lx.ZONE_WORDS = {
+    utc = "UTC", gmt = "UTC", zulu = "UTC", est = "America/New_York", edt = "America/New_York", et = "America/New_York",
+    cst = "America/Chicago", cdt = "America/Chicago", mst = "America/Denver", mdt = "America/Denver",
+    pst = "America/Los_Angeles", pdt = "America/Los_Angeles", pt = "America/Los_Angeles",
+    bst = "Europe/London", cet = "Europe/Paris", cest = "Europe/Paris", eet = "Europe/Athens",
+    ist = "Asia/Kolkata", jst = "Asia/Tokyo", kst = "Asia/Seoul", aest = "Australia/Sydney", aedt = "Australia/Sydney",
+    sgt = "Asia/Singapore", hkt = "Asia/Hong_Kong", mut = "Indian/Mauritius", mur = "Indian/Mauritius", gst = "Asia/Dubai",
+    nyc = "America/New_York", ny = "America/New_York", la = "America/Los_Angeles", sf = "America/Los_Angeles",
+    ["san francisco"] = "America/Los_Angeles", seattle = "America/Los_Angeles", boston = "America/New_York",
+    washington = "America/New_York", miami = "America/New_York", atlanta = "America/New_York", dallas = "America/Chicago",
+    houston = "America/Chicago", austin = "America/Chicago", ["silicon valley"] = "America/Los_Angeles",
+    india = "Asia/Kolkata", delhi = "Asia/Kolkata", ["new delhi"] = "Asia/Kolkata", mumbai = "Asia/Kolkata",
+    bangalore = "Asia/Kolkata", bengaluru = "Asia/Kolkata", chennai = "Asia/Kolkata", hyderabad = "Asia/Kolkata",
+    uk = "Europe/London", england = "Europe/London", britain = "Europe/London", france = "Europe/Paris",
+    germany = "Europe/Berlin", spain = "Europe/Madrid", italy = "Europe/Rome", netherlands = "Europe/Amsterdam",
+    switzerland = "Europe/Zurich", geneva = "Europe/Zurich", portugal = "Europe/Lisbon", ireland = "Europe/Dublin",
+    china = "Asia/Shanghai", beijing = "Asia/Shanghai", japan = "Asia/Tokyo", korea = "Asia/Seoul",
+    australia = "Australia/Sydney", canberra = "Australia/Sydney", ["new zealand"] = "Pacific/Auckland", nz = "Pacific/Auckland",
+    uae = "Asia/Dubai", ["abu dhabi"] = "Asia/Dubai", ["south africa"] = "Africa/Johannesburg", ["cape town"] = "Africa/Johannesburg",
+    reunion = "Indian/Reunion", ["réunion"] = "Indian/Reunion", madagascar = "Indian/Antananarivo",
+    canada = "America/Toronto", brazil = "America/Sao_Paulo", ["sao paulo"] = "America/Sao_Paulo", ["são paulo"] = "America/Sao_Paulo",
+    russia = "Europe/Moscow", turkey = "Europe/Istanbul", egypt = "Africa/Cairo", kenya = "Africa/Nairobi",
+    pakistan = "Asia/Karachi", bangladesh = "Asia/Dhaka", indonesia = "Asia/Jakarta", thailand = "Asia/Bangkok",
+    vietnam = "Asia/Ho_Chi_Minh", philippines = "Asia/Manila", malaysia = "Asia/Kuala_Lumpur", taiwan = "Asia/Taipei",
+    mexico = "America/Mexico_City", argentina = "America/Argentina/Buenos_Aires", ["buenos aires"] = "America/Argentina/Buenos_Aires",
+    here = "local", ["local"] = "local", me = "local",
+}
+lx.zones = {}                                -- "tokyo" → "Asia/Tokyo", from the zone list
+run("timedatectl", { "list-timezones" }, function(out)
+    for z in string.gmatch(out or "", "[^\n]+") do
+        local city = string.match(z, "([^/]+)$")
+        if city then
+            local k = string.lower(string.gsub(city, "_", " "))
+            if not lx.zones[k] then lx.zones[k] = z end
+            lx.zones[string.lower(z)] = z
+        end
+    end
+end)
+lx.tz_off = {}                               -- zone → { off = seconds east of UTC, at = when asked }
+lx.zone = function(w)
+    local k = string.lower(string.gsub(string.gsub(w, "^%s+", ""), "%s+$", ""))
+    return lx.ZONE_WORDS[k] or lx.zones[k] or lx.zones[string.gsub(k, " ", "_")]
+end
+-- Seconds east of UTC, or nil while `date` is asked (the rows come again then).
+lx.offset = function(zone)
+    local c = lx.tz_off[zone]
+    if c and c.off and os.time() - c.at < 3600 then return c.off end
+    if not (c and c.busy) then
+        lx.tz_off[zone] = { off = c and c.off, at = c and c.at or 0, busy = true }
+        local args = zone == "local" and { "date", "+%z" } or { "TZ=" .. zone, "date", "+%z" }
+        run("env", args, function(out)
+            local s, h, m = string.match(out or "", "([%+%-])(%d%d)(%d%d)")
+            if s then
+                local off = (tonumber(h) * 3600 + tonumber(m) * 60) * (s == "-" and -1 or 1)
+                lx.tz_off[zone] = { off = off, at = os.time() }
+                lx.refresh()
+            else
+                lx.tz_off[zone] = nil
+            end
+        end)
+    end
+    return c and c.off
+end
+lx.zone_name = function(z)
+    if z == "local" then return "Here" end
+    if z == "UTC" then return "UTC" end
+    return (string.gsub(string.match(z, "([^/]+)$") or z, "_", " "))
+end
+-- `3pm`, `3:30 pm`, `15:00`, `noon`, `now`: minutes into the day, or "now".
+lx.clock = function(s)
+    s = string.lower(string.gsub(string.gsub(s, "^%s+", ""), "%s+$", ""))
+    if s == "now" or s == "" then return "now" end
+    if s == "noon" or s == "midday" then return 720 end
+    if s == "midnight" then return 0 end
+    local h, m, ap = string.match(s, "^(%d%d?):(%d%d)%s*([ap]%.?m?%.?)$")
+    if not h then h, ap = string.match(s, "^(%d%d?)%s*([ap]%.?m?%.?)$"); m = "0" end
+    if not h then h, m = string.match(s, "^(%d%d?):(%d%d)$") end
+    if not h then h, m = string.match(s, "^(%d%d)h(%d%d)$") end
+    if not h then return nil end
+    h, m = tonumber(h), tonumber(m)
+    if ap then
+        if h < 1 or h > 12 then return nil end
+        if string.sub(ap, 1, 1) == "p" and h ~= 12 then h = h + 12 end
+        if string.sub(ap, 1, 1) == "a" and h == 12 then h = 0 end
+    end
+    if h > 23 or m > 59 then return nil end
+    return h * 60 + m
+end
+lx.times = function(q)
+    local l = string.lower(q)
+    local when, from, to
+    local place = string.match(l, "^time%s+in%s+(.+)$") or string.match(l, "^time%s+at%s+(.+)$") or string.match(l, "^now%s+in%s+(.+)$")
+        or string.match(l, "^(.+)%s+time$") or string.match(l, "^what time is it in%s+(.+)$")
+    if place then
+        when, from, to = "now", "local", lx.zone(place)
+        if not to then return nil end
+    else
+        -- `<clock> [<zone>] to|in <zone>`
+        local left, right = string.match(l, "^(.-)%s+to%s+(.+)$")
+        if not left then left, right = string.match(l, "^(.-)%s+in%s+(.+)$") end
+        if not left then return nil end
+        to = lx.zone(right)
+        if not to then return nil end
+        when = lx.clock(left)
+        from = "local"
+        if not when then
+            -- the clock, then its zone: try each split.
+            local words = {}
+            for w in string.gmatch(left, "%S+") do words[#words + 1] = w end
+            for k = 1, #words - 1 do
+                local c = lx.clock(table.concat(words, " ", 1, k))
+                local z = lx.zone(table.concat(words, " ", k + 1))
+                if c and z then when, from = c, z; break end
+            end
+        end
+        if not when then return nil end
+    end
+    local ofrom, oto = lx.offset(from), lx.offset(to)
+    if ofrom == nil or oto == nil then
+        return { { kind = 3, sk = 21, name = "…", val = "Time", sub = "Looking up " .. lx.zone_name(to) } }, true
+    end
+    local now = os.time()
+    local mins, shift
+    if when == "now" then
+        local t = os.date("!*t", now + oto)
+        mins, shift = t.hour * 60 + t.min, 0
+        local here = os.date("!*t", now + ofrom)
+        shift = (t.year * 400 + t.yday) - (here.year * 400 + here.yday)
+        if shift > 1 then shift = -1 elseif shift < -1 then shift = 1 end   -- across a year's end
+    else
+        local m = when - ofrom / 60 + oto / 60
+        shift = math.floor(m / 1440)
+        mins = m - shift * 1440
+    end
+    local hh, mm = math.floor(mins / 60), math.floor(mins % 60)
+    local shown = string.format("%02d:%02d", hh, mm)
+    local diff = (oto - ofrom) / 3600
+    local dtxt = diff == 0 and "same time" or ((diff > 0 and "+" or "−") .. select(2, lx.fmt(math.abs(diff))) .. " h")
+    local day = shift == 1 and "tomorrow" or (shift == -1 and "yesterday" or "today")
+    local sub
+    if when == "now" then sub = "Now in " .. lx.zone_name(to) .. "  ·  " .. day .. "  ·  " .. dtxt .. " from here"
+    else sub = string.format("%02d:%02d %s → %s", math.floor(when / 60), when % 60, lx.zone_name(from), lx.zone_name(to)) .. "  ·  " .. day .. "  ·  " .. dtxt end
+    return { { kind = 3, sk = 21, name = shown, val = lx.zone_name(to), copy = shown, sub = sub } }, true
+end
+
+-- Dates, counted in whole days on the proleptic calendar (no clocks, no zones).
+lx.MONTHS = { jan = 1, feb = 2, mar = 3, apr = 4, may = 5, jun = 6, jul = 7, aug = 8, sep = 9, oct = 10, nov = 11, dec = 12 }
+lx.days_from_civil = function(y, m, d)
+    if m <= 2 then y = y - 1 end
+    local era = math.floor(y / 400)
+    local yoe = y - era * 400
+    local mp = (m + 9) % 12
+    local doy = math.floor((153 * mp + 2) / 5) + d - 1
+    local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+    return era * 146097 + doe - 719468
+end
+lx.civil_from_days = function(z)
+    z = z + 719468
+    local era = math.floor(z / 146097)
+    local doe = z - era * 146097
+    local yoe = math.floor((doe - math.floor(doe / 1460) + math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)
+    local y = yoe + era * 400
+    local doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))
+    local mp = math.floor((5 * doy + 2) / 153)
+    local d = doy - math.floor((153 * mp + 2) / 5) + 1
+    local m = mp < 10 and mp + 3 or mp - 9
+    if m <= 2 then y = y + 1 end
+    return y, m, d
+end
+lx.day_text = function(n)
+    local y, m, d = lx.civil_from_days(n)
+    local wd = ({ "Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed" })[(n % 7) + 1]
+    local mn = ({ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" })[m]
+    return string.format("%s %d %s %d", wd, d, mn, y)
+end
+lx.today = function()
+    local t = os.date("*t")
+    return lx.days_from_civil(t.year, t.month, t.day), t.year
+end
+-- `2026-12-25`, `25/12/2026`, `25 dec [2026]`, `dec 25 [2026]`, `christmas`: a day
+-- number, and whether a year was given (none: the next one to come).
+lx.date = function(s)
+    s = string.lower(string.gsub(string.gsub(s, "^%s+", ""), "%s+$", ""))
+    local today, year = lx.today()
+    if s == "today" then return today, true end
+    if s == "tomorrow" then return today + 1, true end
+    if s == "yesterday" then return today - 1, true end
+    local special = ({ christmas = { 12, 25 }, xmas = { 12, 25 }, ["new year"] = { 1, 1 }, ["new years"] = { 1, 1 },
+        ["new year's"] = { 1, 1 }, halloween = { 10, 31 }, valentines = { 2, 14 }, ["valentine's"] = { 2, 14 } })[s]
+    local y, m, d
+    if special then m, d = special[1], special[2]
+    else
+        y, m, d = string.match(s, "^(%d%d%d%d)%-(%d%d?)%-(%d%d?)$")
+        if not y then d, m, y = string.match(s, "^(%d%d?)/(%d%d?)/(%d%d%d%d)$") end
+        if not y then
+            local mw
+            d, mw, y = string.match(s, "^(%d%d?)%a*%s+(%a+)%.?,?%s*(%d*)$")
+            if not d then mw, d, y = string.match(s, "^(%a+)%.?%s+(%d%d?)%a*,?%s*(%d*)$") end
+            m = mw and lx.MONTHS[string.sub(mw, 1, 3)]
+            if not m then return nil end
+            if y == "" then y = nil end
+        end
+    end
+    m, d = tonumber(m), tonumber(d)
+    if not m or not d or m < 1 or m > 12 or d < 1 or d > 31 then return nil end
+    if y then return lx.days_from_civil(tonumber(y), m, d), true end
+    local n = lx.days_from_civil(year, m, d)
+    if n < today then n = lx.days_from_civil(year + 1, m, d) end
+    return n, false
+end
+lx.dates = function(q)
+    local l = string.lower(q)
+    local today = lx.today()
+    local function row(name, sub, val) return { { kind = 3, sk = 21, name = name, val = val or "Date", copy = name, sub = sub .. "  ·  Enter copies" } }, true end
+    local function plural(n, w) return select(2, lx.fmt(n)) .. " " .. w .. (n == 1 and "" or "s") end
+    local which, what = string.match(l, "^(%a+)%s+until%s+(.+)$")
+    if not which then which, what = string.match(l, "^(%a+)%s+till%s+(.+)$") end
+    if not which then which, what = string.match(l, "^(%a+)%s+to%s+(.+)$") end
+    local since
+    if not which then which, what = string.match(l, "^(%a+)%s+since%s+(.+)$"); since = which ~= nil end
+    if which and (which == "days" or which == "weeks") then
+        local n = lx.date(what)
+        if n then
+            local diff = since and today - n or n - today
+            local name = which == "weeks" and plural(math.floor(diff / 7 * 10 + 0.5) / 10, "week") or plural(diff, "day")
+            return row(name, (since and "since " or "until ") .. lx.day_text(n))
+        end
+    end
+    -- `in 30 days`, `30 days from now`, `100 days ago`, `today + 2 weeks`, `25 dec + 10 days`
+    local n, unit, ago = string.match(l, "^in%s+(%d+)%s*(%a+)$")
+    if not n then n, unit = string.match(l, "^(%d+)%s*(%a+)%s+from%s+now$") end
+    if not n then n, unit = string.match(l, "^(%d+)%s*(%a+)%s+from%s+today$") end
+    if not n then n, unit = string.match(l, "^(%d+)%s*(%a+)%s+ago$"); ago = n ~= nil end
+    local base = today
+    if not n then
+        local b, op, k, u = string.match(l, "^(.-)%s*([%+%-])%s*(%d+)%s*(%a+)$")
+        if b and b ~= "" then
+            local bn = lx.date(b)
+            if bn then base, n, unit, ago = bn, k, u, op == "-" end
+        end
+    end
+    if n then
+        n = tonumber(n)
+        local s = string.match(unit, "^(.-)s?$")
+        local y, m, d = lx.civil_from_days(base)
+        local sign = ago and -1 or 1
+        local t
+        if s == "day" or s == "d" then t = base + sign * n
+        elseif s == "week" or s == "wk" or s == "w" then t = base + sign * n * 7
+        elseif s == "month" or s == "mo" then
+            local mm = m - 1 + sign * n
+            local yy = y + math.floor(mm / 12)
+            mm = mm % 12 + 1
+            local last = lx.days_from_civil(mm == 12 and yy + 1 or yy, mm == 12 and 1 or mm + 1, 1) - lx.days_from_civil(yy, mm, 1)
+            t = lx.days_from_civil(yy, mm, math.min(d, last))
+        elseif s == "year" or s == "yr" or s == "y" then
+            t = lx.days_from_civil(y + sign * n, m, (m == 2 and d == 29) and 28 or d)
+        end
+        if not t and (s == "minute" or s == "min" or s == "hour" or s == "hr" or s == "h") and base == today then
+            local secs = os.time() + sign * n * ((s == "hour" or s == "hr" or s == "h") and 3600 or 60)
+            local shown = os.date("%H:%M", secs)
+            local dd = lx.days_from_civil(os.date("*t", secs).year, os.date("*t", secs).month, os.date("*t", secs).day) - today
+            return row(shown, plural(n, (s == "hour" or s == "hr" or s == "h") and "hour" or "minute") .. (ago and " ago" or " from now")
+                .. (dd == 1 and "  ·  tomorrow" or (dd == -1 and "  ·  yesterday" or "")), "Time")
+        end
+        if t then return row(lx.day_text(t), plural(n, s == "d" and "day" or (s == "wk" or s == "w") and "week" or (s == "mo" and "month") or ((s == "yr" or s == "y") and "year") or s) .. (ago and " before " or " after ") .. (base == today and "today" or lx.day_text(base))) end
+    end
+    if l == "today" or l == "date" or l == "what day is it" then return row(lx.day_text(today), "Today") end
+    if l == "week" or l == "week number" or l == "what week is it" then
+        -- ISO week: the Thursday of this week decides its year.
+        local wd = (today + 3) % 7                           -- Monday 0
+        local thu = today - wd + 3
+        local y = lx.civil_from_days(thu)
+        local wk = math.floor((thu - lx.days_from_civil(y, 1, 1)) / 7) + 1
+        return row("Week " .. wk, lx.day_text(today))
+    end
+    return nil
+end
+
+-- Colours: `#ff8800`, `#f80`, `rgb(255, 136, 0)`: the other ways to write it.
+lx.colors = function(q)
+    local l = string.lower(string.gsub(q, "%s+", ""))
+    local r, g, b
+    local h = string.match(l, "^#(%x+)$")
+    if h and #h == 3 then r, g, b = tonumber(string.rep(string.sub(h, 1, 1), 2), 16), tonumber(string.rep(string.sub(h, 2, 2), 2), 16), tonumber(string.rep(string.sub(h, 3, 3), 2), 16)
+    elseif h and (#h == 6 or #h == 8) then r, g, b = tonumber(string.sub(h, 1, 2), 16), tonumber(string.sub(h, 3, 4), 16), tonumber(string.sub(h, 5, 6), 16)
+    else
+        r, g, b = string.match(l, "^rgba?%((%d+),(%d+),(%d+)[,%d%.]*%)$")
+        r, g, b = tonumber(r), tonumber(g), tonumber(b)
+        if not r or r > 255 or g > 255 or b > 255 then return nil end
+    end
+    if not r then return nil end
+    local hex = string.format("#%02x%02x%02x", r, g, b)
+    local rgb = string.format("rgb(%d, %d, %d)", r, g, b)
+    local R, G, B = r / 255, g / 255, b / 255
+    local mx, mn = math.max(R, G, B), math.min(R, G, B)
+    local L = (mx + mn) / 2
+    local S, H = 0, 0
+    if mx ~= mn then
+        local d = mx - mn
+        S = L > 0.5 and d / (2 - mx - mn) or d / (mx + mn)
+        if mx == R then H = (G - B) / d + (G < B and 6 or 0) elseif mx == G then H = (B - R) / d + 2 else H = (R - G) / d + 4 end
+        H = H * 60
+    end
+    local hsl = string.format("hsl(%d, %d%%, %d%%)", math.floor(H + 0.5), math.floor(S * 100 + 0.5), math.floor(L * 100 + 0.5))
+    local out = {}
+    for _, x in ipairs({ { hex, "Hex" }, { rgb, "RGB" }, { hsl, "HSL" } }) do
+        if string.gsub(x[1], "%s+", "") ~= l then out[#out + 1] = { kind = 3, sk = 21, name = x[1], val = x[2], copy = x[1], sub = q .. "  ·  Enter copies" } end
+    end
+    return out, true
+end
+
+-- All of it, in turn: the first that reads the text answers. `only`: hide apps.
+lx.smart = function(q)
+    q = string.gsub(string.gsub(q, "^=%s*", ""), "%s+$", "")
+    local l = string.lower(q)
+    -- Cheap first: only text with a number, a sign, or one of the words these read.
+    if q == "" then return nil end
+    if not string.find(q, "[%d#$€£¥₹₩₽]") and not string.find(l, "time") and not string.find(l, "week")
+        and not string.find(l, "^days ") and l ~= "today" and l ~= "date" and l ~= "what day is it" then return nil end
+    for _, f in ipairs({ lx.colors, lx.bases, lx.percent, lx.dates, lx.times, lx.convert }) do
+        local ok, rows, only = pcall(f, q)
+        if ok and rows and #rows > 0 then return rows, only end
+    end
+    return nil
+end
+-- What the typed text asks for besides apps and settings: a site's search, a smart
+-- answer or a sum, an address, a command. Each a row (kind 3) that knows what Enter does.
 lx.search_specials = function(raw)
     local rows = {}
     local q = string.gsub(raw, "^%s+", "")
@@ -998,6 +1776,11 @@ lx.search_specials = function(raw)
     if not p and lx.SITE_BY[string.lower(q)] then
         local st = lx.SITE_BY[string.lower(q)]
         rows[#rows + 1] = { kind = 3, sk = 20, name = st.name, sub = "Type what to search after “" .. st.p .. " ”  ·  Tab", val = st.p, fill = st.p .. " " }
+    end
+    local smart, sonly = lx.smart(q)
+    if smart then
+        for _, r in ipairs(smart) do rows[#rows + 1] = r end
+        return rows, sonly
     end
     local sum = lx.calc(string.gsub(q, "^=", ""))
     if sum then
@@ -1205,7 +1988,9 @@ lx.disarm = function()
 end
 on("text:launch_q", function() lx.armed = nil; launch_sel, launch_off = 0, 0; launch_refresh() end)
 on("fact:expanded", function(e) if not e then lx.armed = nil end end)
-on("fact:panel", function(p) if p == "launch" then lx.mode_read() end end)
+on("fact:panel", function(p) if p == "launch" then lx.mode_read(); lx.rates_check() end end)
+-- An answer that was being fetched (rates, a zone's offset) came in: show it.
+lx.refresh = function() if fact.panel == "launch" and fact.expanded and (text.launch_q or "") ~= "" then launch_refresh() end end
 -- A switch changed (here, or by its key elsewhere): the rows say so.
 for _, f in ipairs({ "dnd", "night", "awake", "kbd", "profile", "bright" }) do
     on("fact:" .. f, function() if fact.panel == "launch" and fact.expanded and (text.launch_q or "") ~= "" then launch_refresh() end end)
@@ -1429,6 +2214,8 @@ end)
             end
         end
         model.projs = rows
+        -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+        do local at = -1; for k, x in ipairs(rows) do if x.sel then at = k - 1 end end; fact.proj_at = at end
         fact.proj_state = n == 0 and (#all == 0 and 2 or 1) or 0
         if hits[sel + 1] and hits[sel + 1].head then return end
         preview()
@@ -1584,6 +2371,8 @@ end)()
                 sel = (i - 1) == sel }
         end
         model.strows = rows
+        -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+        do local at = -1; for k, x in ipairs(rows) do if x.sel then at = k - 1 end end; fact.stor_at = at end
     end
 
     local load_big
@@ -2028,6 +2817,8 @@ end)()
                 force = asked[it.key] ~= nil and now - asked[it.key] >= 2, sel = it.key == sel_key }
         end
         model.acts = rows
+        -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+        do local at = -1; for k, x in ipairs(rows) do if x.sel then at = k - 1 end end; fact.act_at = at end
     end
 
     local function machine()
@@ -2346,6 +3137,8 @@ end)
 on("fact:banner", function(b) if not b then batch = {}; fact.n_more = 0 end end)
 on("note_dismiss", function()
     if banner_note and not banner_note.mail and not banner_note.wa then pcall(sys.call, "notifications.dismiss", banner_note.id) end
+    -- A call's banner put away: the call is ignored here (it still rings on the phone).
+    if banner_note and banner_note.call and wa_hook.act then wa_hook.act(banner_note.jid, "ignore") end
     fact.banner = false
 end)
 on("note_act", function(i)
@@ -2449,19 +3242,93 @@ end)
 
 -- ── emoji ───────────────────────────────────────────────────────────
 -- 1906 emoji (emoji.tsv beside the scene: emoji, category, name, keywords),
--- read once. Nothing typed: the recent ones, then all of them in order; typed:
--- names that start with it, then a word that does, then keywords. Enter types
--- the chosen one into the window that was in front (and copies it).
+-- read once. Nothing typed: the recent ones, then all of them in order. Typed:
+-- every word must match a word of the name or the keywords (from its start, a
+-- plural too: "hearts"), ranked by how well (the whole name, a name word, a
+-- keyword), then by how often you chose it, then by how common it is; ":)" and
+-- friends are understood; with nothing found, a word may be one letter off.
+-- Enter types the chosen one into the window that was in front (and copies it);
+-- opened over a field being typed in (`emo_from`), into that field at its
+-- cursor, and the picker closes (Shift+Enter: it stays for more).
 local EMO_COLS = 8
 local EMO_ROWS = 4    -- 7 in the taller card beside a large view
 local emo_all, emo_hits = {}, {}
 local emo_sel, emo_off = 0, 0          -- the chosen one, and the first row in sight
 local emo_recent = (sys.ask("files.read", "emoji.json", "json") or {}).recent or {}
+-- How often each was chosen (emoji.json `uses`), and the most common ones in chats, most first.
+emo_all.uses = (sys.ask("files.read", "emoji.json", "json") or {}).uses or {}
+emo_all.pop = {}
+do
+    local i = 0
+    for e in string.gmatch("😂 ❤️ 🤣 👍 😭 🙏 😘 🥰 😍 😊 🎉 😁 💕 🥺 😅 🔥 ☺️ 🤦 🤷 🙄 😆 🤗 😉 🎂 🤔 👏 🙂 😳 🥳 😎 👌 💜 😔 💪 ✨ 💖 👀 😋 😏 😢 👉 💗 😩 💯 🌹 💞 🎈 💙 😃 😡 💐 😜 🙈 🤞 😄 🤤 🙌 🤪 ❣️ 😀 💋 💀 👇 💔 😌 💓 🤩 🙃 😬 😱 😴 🤭 😐 🌞 😒 😇 🌸 😈 🎶 ✌️ 🎊 🥵 😞 💚 ☀️ 🖤 💰 😚 👑 🎁 💥 🙋 ☹️ 😑 🥴 👈 💩 ✅ 👋 🤝 😮 😲 😤 🫶 🥲 🫠 🤌 🤯 🫡 😵 🤓 😶", "%S+") do
+        i += 1
+        emo_all.pop[e] = i
+    end
+end
+-- What people type for some of them.
+emo_all.alias = {
+    [":)"] = "🙂", [":-)"] = "🙂", [":("] = "🙁", [":-("] = "🙁", [":d"] = "😃", [":-d"] = "😃", [";)"] = "😉", [";-)"] = "😉",
+    [":p"] = "😛", [":-p"] = "😛", [":o"] = "😮", [":-o"] = "😮", [":'("] = "😢", [":|"] = "😐", [":/"] = "😕", ["<3"] = "❤️",
+    ["</3"] = "💔", ["xd"] = "😆", ["+1"] = "👍", ["-1"] = "👎", [":*"] = "😘", ["^^"] = "😊", ["lol"] = "😂", ["lmao"] = "🤣",
+    ["ok"] = "👌", ["laugh"] = "😂", ["heart"] = "❤️", ["cool"] = "😎", ["thanks"] = "🙏", ["thx"] = "🙏", ["ty"] = "🙏", ["omg"] = "😱", ["idk"] = "🤷", ["smh"] = "🤦", ["fire"] = "🔥", ["100"] = "💯",
+}
+-- One letter off (or two swapped): for a word typed a little wrong.
+emo_all.near = function(a, b)
+    local la, lb = #a, #b
+    if math.abs(la - lb) > 1 or la < 4 then return false end
+    local i, j, edits = 1, 1, 0
+    while i <= la and j <= lb do
+        if string.sub(a, i, i) == string.sub(b, j, j) then
+            i += 1; j += 1
+        else
+            edits += 1
+            if edits > 1 then return false end
+            if la > lb then i += 1 elseif lb > la then j += 1
+            elseif string.sub(a, i + 1, i + 1) == string.sub(b, j, j) and string.sub(a, i, i) == string.sub(b, j + 1, j + 1) then i += 2; j += 2
+            else i += 1; j += 1 end
+        end
+    end
+    return edits + (la - i + 1) + (lb - j + 1) <= 1
+end
+-- How well one emoji answers the words typed (nil: it does not). `fuzzy`: a word may be one letter off.
+emo_all.score = function(x, words, q, fuzzy)
+    local total = 0
+    for _, w in ipairs(words) do
+        local stem = (#w > 3 and string.sub(w, -1) == "s") and string.sub(w, 1, -2) or nil
+        local best = 0
+        for _, n in ipairs(x.nw) do
+            if n == w or n == stem then best = math.max(best, 10)
+            elseif string.sub(n, 1, #w) == w then best = math.max(best, 7)
+            elseif fuzzy and emo_all.near(n, w) then best = math.max(best, 3) end
+        end
+        if best < 10 then
+            for _, t in ipairs(x.tw) do
+                if t == w or t == stem then best = math.max(best, 6)
+                elseif string.sub(t, 1, #w) == w then best = math.max(best, 4)
+                elseif fuzzy and best < 3 and emo_all.near(t, w) then best = math.max(best, 2) end
+            end
+        end
+        if best == 0 and #w >= 3 and string.find(x.low, w, 1, true) then best = 1 end
+        if best == 0 then return nil end
+        total += best
+    end
+    if x.low == q then total += 30 elseif string.sub(x.low, 1, #q) == q then total += 4 end
+    local used = emo_all.uses[x.e] or 0
+    if used > 0 then total += math.min(9, 3 * math.log(1 + used, 2)) end
+    local p = emo_all.pop[x.e]
+    if p then total += 10 * (1 - p / 140) end
+    return total
+end
 
 run("cat", { HOME .. "/.config/lumen/shells/island/emoji.tsv" }, function(out)
     for line in string.gmatch(out or "", "[^\n]+") do
         local e, g, name, tags = string.match(line, "^([^\t]+)\t(%d+)\t([^\t]*)\t?(.*)$")
-        if e then emo_all[#emo_all + 1] = { e = e, g = tonumber(g), name = name, low = string.lower(name), tags = " " .. string.lower(tags) .. " " } end
+        if e then
+            local x = { e = e, g = tonumber(g), name = name, low = string.lower(name), tags = " " .. string.lower(tags) .. " ", nw = {}, tw = {}, at = #emo_all + 1 }
+            for w in string.gmatch(x.low, "[%w']+") do x.nw[#x.nw + 1] = w end
+            for w in string.gmatch(x.tags, "[%w']+") do x.tw[#x.tw + 1] = w end
+            emo_all[#emo_all + 1] = x
+        end
     end
 end)
 
@@ -2478,6 +3345,8 @@ local function emo_show()
         cells[#cells + 1] = { e = h.e, name = h.name, sel = (i - 1) == emo_sel }
     end
     model.emo = cells
+    -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+    do local at = -1; for k, x in ipairs(cells) do if x.sel then at = k - 1 end end; fact.emo_at = at end
     local cur = emo_hits[emo_sel + 1]
     text.emo_name = cur and cur.name or ""
     -- Which category the first row in sight is in (the recent ones count as -1).
@@ -2486,7 +3355,7 @@ local function emo_show()
 end
 
 local function emo_search()
-    local q = string.lower(string.gsub(text.emo_q or "", "^%s+", ""))
+    local q = string.lower(string.gsub(string.gsub(text.emo_q or "", "^%s+", ""), "%s+$", ""))
     fact.emo_q_empty = q == ""
     emo_hits = {}
     if q == "" then
@@ -2497,14 +3366,26 @@ local function emo_search()
         end
         for _, x in ipairs(emo_all) do emo_hits[#emo_hits + 1] = x end
     else
-        local a, b, c = {}, {}, {}
-        local pq = q:gsub("%p", "%%%0")
-        for _, x in ipairs(emo_all) do
-            if string.sub(x.low, 1, #q) == q then a[#a + 1] = x
-            elseif string.find(x.low, " " .. pq) then b[#b + 1] = x
-            elseif string.find(x.tags, " " .. pq) or string.find(x.low, q, 1, true) then c[#c + 1] = x end
+        local words = {}
+        for w in string.gmatch(q, "[%w']+") do words[#words + 1] = w end
+        local scored = {}
+        local function rank(fuzzy)
+            for _, x in ipairs(emo_all) do
+                local sc = #words > 0 and emo_all.score(x, words, q, fuzzy) or nil
+                if sc then scored[#scored + 1] = { x = x, s = sc } end
+            end
         end
-        for _, t in ipairs({ a, b, c }) do for _, x in ipairs(t) do emo_hits[#emo_hits + 1] = x end end
+        rank(false)
+        if #scored == 0 then rank(true) end
+        table.sort(scored, function(a, b) if a.s ~= b.s then return a.s > b.s end return a.x.at < b.x.at end)
+        -- An emoticon or a word people type for one: that one first.
+        local alias = emo_all.alias[q]
+        if alias then
+            for _, x in ipairs(emo_all) do if x.e == alias then emo_hits[1] = x end end
+        end
+        for _, r in ipairs(scored) do
+            if r.x.e ~= alias then emo_hits[#emo_hits + 1] = r.x end
+        end
     end
     emo_show()
 end
@@ -2517,6 +3398,9 @@ local function emo_fresh(rows)
     emo_search()
 end
 on("fact:panel", function(p) if p == "emoji" then emo_fresh(4) end end)
+-- Opened again before the card had gone back to its home page (it does 400 ms after closing):
+-- the page did not change, and it must still start afresh, what was just used first.
+on("fact:expanded", function(e) if e and fact.panel == "emoji" then emo_fresh(4) end end)
 -- A tool opening beside a large view: as fresh as its page in the centre card.
 local function side_open()
     if not fact.side then return end
@@ -2543,13 +3427,24 @@ on("emo_cat", function(k)
     end
 end)
 
-local function emo_take(i)
+local function emo_take(i, more)
     local h = emo_hits[i + 1]
     if not h then return end
     for k = #emo_recent, 1, -1 do if emo_recent[k] == h.e then table.remove(emo_recent, k) end end
     table.insert(emo_recent, 1, h.e)
-    while #emo_recent > 16 do table.remove(emo_recent) end
-    pcall(sys.call, "files.write", "emoji.json", { recent = emo_recent })
+    while #emo_recent > 24 do table.remove(emo_recent) end
+    emo_all.uses[h.e] = (emo_all.uses[h.e] or 0) + 1
+    pcall(sys.call, "files.write", "emoji.json", { recent = emo_recent, uses = emo_all.uses })
+    -- Opened over a field being typed in: into it, where its cursor was, and back to writing
+    -- (the card closing gives the field the keys again); asked to stay, it does, for more.
+    if fact.emo_from and side_put(h.e) then
+        if more then
+            text.emo_name = "Added " .. h.e .. "  ·  Esc back to writing"
+        else
+            fact.expanded = false
+        end
+        return
+    end
     -- Over an app: into its field, or copied.
     if fact.app ~= "none" then
         if not side_put(h.e) then pcall(sys.call, "clipboard.set", h.e) end
@@ -2561,7 +3456,7 @@ local function emo_take(i)
     -- Typed once the keyboard is back with the window that had it.
     after(180, function() run("wtype", { h.e }, nil, { output = false }) end)
 end
-on("emo_pick", function() emo_take(emo_sel) end)
+on("emo_pick", function(more) emo_take(emo_sel, more == 1) end)
 on("emo_pick_cell", function(i) emo_take(emo_off * EMO_COLS + i) end)
 
 -- ── volume and brightness gauge (pages/osd.plm) ─────────────────────
@@ -2624,6 +3519,8 @@ local function wall_show()
         cells[#cells + 1] = { thumb = w.thumb, name = w.name, sel = (i - 1) == wall_sel, cur = w.path == wall_cur }
     end
     model.walls = cells
+    -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+    do local at = -1; for k, x in ipairs(cells) do if x.sel then at = k - 1 end end; fact.wall_at = at end
     fact.wall_total = n
     local w = walls_all[wall_sel + 1]
     text.wall_name = w and w.name or ""
@@ -2930,6 +3827,8 @@ local function win_show()
         cells[#cells + 1] = { picture = pic, icon = icon, has_icon = icon ~= "", title = title, app = app, ws = ws, sel = (i - 1) == win_sel, has_pic = pic ~= "" }
     end
     model.wins = cells
+    -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+    do local at = -1; for k, x in ipairs(cells) do if x.sel then at = k - 1 end end; fact.win_at = at end
     fact.wins_total = n
     if fact.wv then pcall(sys.call, "thumbnails.want", want) end
 end
@@ -3010,27 +3909,44 @@ local function rec_tick()
     after(1000, rec_tick)
 end
 
-on("cap_take", function(which)
-    -- After the card has gone, so it is not in the picture.
-    after(380, function()
-        if not fact.cap_rec then
-            run(SHOT, { TARGETS[which] or "area", fact.cap_save and "save" or "copy" }, nil, { output = false })
-        elseif not rec_id then
-            rec_id = spawn(SCRIPTS .. "record.sh", { REC_TARGETS[which] or "screen" }, function(line)
-                if line == "started" then
-                    rec_start = os.time()
-                    text.rec_time = "0:00"
-                    fact.recording = true
-                    after(1000, rec_tick)
-                end
-            end, function()
-                rec_id = nil
-                fact.recording = false
-            end)
-        end
+-- In a block: the file is at Luau's 200 top-level-locals limit.
+do
+    local function rec_begin(args)
+        if rec_id then return end
+        rec_id = spawn(SCRIPTS .. "record.sh", args, function(line)
+            if line == "started" then
+                rec_start = os.time()
+                text.rec_time = "0:00"
+                fact.recording = true
+                after(1000, rec_tick)
+            end
+        end, function()
+            rec_id = nil
+            fact.recording = false
+        end)
+    end
+
+    on("cap_take", function(which)
+        -- After the card has gone, so it is not in the picture.
+        after(380, function()
+            if not fact.cap_rec then
+                run(SHOT, { TARGETS[which] or "area", fact.cap_save and "save" or "copy" }, nil, { output = false })
+            else
+                rec_begin({ REC_TARGETS[which] or "screen" })
+            end
+        end)
     end)
-end)
-on("rec_stop", function() if rec_id then kill(rec_id, "int") end end)
+    -- niri's screenshot UI (its r key) hands over what it has selected:
+    -- "at WxH+X+Y" (logical layout pixels) or "output NAME".
+    on("text:rec_at", function(v)
+        local kind, what = string.match(v, "^(%a+) (.+)$")
+        if kind == "at" or kind == "output" then rec_begin({ kind, what }) end
+    end)
+end
+-- TERM, not INT: the island inherits SIGINT ignored (lumen-session starts it in
+-- the background), and a shell can't trap what it was started ignoring.
+-- record.sh turns it into the SIGINT wf-recorder saves on.
+on("rec_stop", function() if rec_id then kill(rec_id, "term") end end)
 
 -- ── the mixer ───────────────────────────────────────────────────
 local mix_outs, mix_apps = {}, {}
@@ -3199,6 +4115,10 @@ end
 sys.watch("window", function(w)
     -- A fullscreen window covers the island: the level gauge comes on its own then (surface hud).
     fact.fs = (w and w.fullscreen) == true
+    -- A page takes the keyboard and niri then reports no focused window, but the
+    -- fullscreen one is still under it.
+    local page = fact.expanded or fact.app ~= "none" or fact.pw_open
+    if (w and w.class ~= "") or not page then fact.fs_under = fact.fs end
     front_class = (w and w.class ~= "" and w.class) or nil
     front_show()
     -- The apps service may not have spoken yet at startup.
@@ -3793,6 +4713,8 @@ local function fnd_show()
             drag = (fnd_marked[e.path] and fnd_nmarks > 1) and marked_paths or e.path }
     end
     model.fhits = rows
+    -- Where the chosen one is among those in sight (-1: none): the list's one gliding glass goes there.
+    do local at = -1; for k, x in ipairs(rows) do if x.sel then at = k - 1 end end; fact.fnd_at = at end
     text.fnd_title = fnd_scope and tilde(fnd_scope) or "Files"
     fact.fnd_scoped = fnd_scope ~= nil
     text.fnd_sort = SORT_LABEL[SORTS[fnd_sort_i]] .. (fnd_sort_rev and " ↓" or " ↑")
@@ -5686,12 +6608,72 @@ end)()
         text.wa_pic_path = c.pic or ""
         -- Typing shows as iOS's bubble in the chat; the corner says only what just happened (Copied…).
         fact.wa_typing_in = typing[c.jid] == true
-        text.wa_sub = ""
-        fact.wa_has_sub = false
+        -- Calling now: the corner says so (answered on the phone; declined from the banner).
+        local ring = X.ringing and X.ringing(c.jid)
+        text.wa_sub = ring and (ring.video and "📹 Video call…" or "📞 Calling…") or ""
+        fact.wa_has_sub = ring ~= nil
     end
 
     local function has_file(m) return (m.file or "") ~= "" end
-    local function row_of(m, img, from, tail, stack)
+    -- One to three emoji and nothing else (spaces aside): drawn large, on no bubble, as iMessage does.
+    -- What joins or dresses an emoji (ZWJ sequences, skin tones, variation selectors, tags, a keycap)
+    -- does not count as one more; two regional indicators are one flag.
+    local function emoji_only(s)
+        if s == "" or #s > 80 then return false end
+        local ok, n = pcall(function()
+            local n, joined, ri = 0, false, false
+            for _, cp in utf8.codes(s) do
+                if cp == 0x200D then joined = true
+                elseif cp == 0xFE0F or cp == 0xFE0E or cp == 0x20E3 or (cp >= 0x1F3FB and cp <= 0x1F3FF) or (cp >= 0xE0020 and cp <= 0xE007F) then
+                    -- dresses the one before
+                elseif cp == 0x20 then
+                    joined, ri = false, false
+                elseif cp >= 0x1F1E6 and cp <= 0x1F1FF then
+                    if not ri then n += 1 end
+                    ri = not ri
+                    joined = false
+                elseif (cp >= 0x1F000 and cp <= 0x1FAFF) or (cp >= 0x2600 and cp <= 0x27BF) or (cp >= 0x2B00 and cp <= 0x2BFF)
+                    or (cp >= 0x2300 and cp <= 0x23FF) or (cp >= 0x2190 and cp <= 0x21FF) or cp == 0xA9 or cp == 0xAE
+                    or cp == 0x203C or cp == 0x2049 or cp == 0x2122 or cp == 0x2139 or cp == 0x3030 or cp == 0x303D
+                    or cp == 0x3297 or cp == 0x3299 then
+                    if not joined then n += 1 end
+                    joined, ri = false, false
+                else
+                    return 0
+                end
+            end
+            return n
+        end)
+        return ok and n >= 1 and n <= 3
+    end
+    -- A text with a link in it is drawn as markdown, so the link can be followed (a click: `on("link")`):
+    -- everything else escaped (it reads as before), each address shown short —no scheme, no www, cut
+    -- at 36— and going to the whole of it.
+    local function md_escape(t) return (string.gsub(t, "([%*_`%[%]\\#])", "\\%1")) end
+    local function link_label(u)
+        local l = string.gsub(string.gsub(u, "^[Hh][Tt][Tt][Pp][Ss]?://", ""), "^www%.", "")
+        if #l > 38 then l = string.sub(l, 1, 36) .. "…" end
+        return l
+    end
+    local function linkify(body)
+        local out, pos = {}, 1
+        while true do
+            local a, b = string.find(body, "[Hh][Tt][Tt][Pp][Ss]?://[^%s<>\"']+", pos)
+            if not a then break end
+            local u = string.sub(body, a, b)
+            local trail = string.match(u, "[%.,;:!%?%)%]}'\"]+$") or ""
+            u = string.sub(u, 1, #u - #trail)
+            out[#out + 1] = md_escape(string.sub(body, pos, a - 1))
+            out[#out + 1] = "[" .. md_escape(link_label(u)) .. "](" .. u .. ")"
+            out[#out + 1] = md_escape(trail)
+            pos = b + 1
+        end
+        if pos == 1 then return nil end
+        out[#out + 1] = md_escape(string.sub(body, pos))
+        return table.concat(out)
+    end
+    -- `grp`: the chat is a group, so what others say goes beside their face (on the last of a run), as iMessage.
+    local function row_of(m, img, from, tail, stack, grp)
         local dw, dh = 0, 0
         if img then
             local w, h = m.w or 0, m.h or 0
@@ -5707,20 +6689,56 @@ end)()
         elseif m.kind == "video" and not img then body = "🎥  Video" .. (body ~= "" and (" · " .. body) or ""); file = true
         elseif m.kind == "image" and not img then body = "📷  Photo" .. (body ~= "" and (" · " .. body) or ""); file = true
         elseif m.kind == "sticker" then body = img and "" or "Sticker"
+        elseif m.kind == "waiting" then body = "Waiting for this message"
+        elseif m.kind == "deleted" then body = m.me and "You deleted this message" or "This message was deleted"
+        elseif m.kind == "viewonce" then body = string.gsub(body, " · open it on your phone$", "")
+        elseif m.kind == "unsupported" then body = "Open WhatsApp on your phone to see this message"
         end
+        -- Standing in for a message: drawn as an empty outline, not a bubble of words.
+        local ghost = m.kind == "deleted" or m.kind == "waiting" or m.kind == "viewonce" or m.kind == "unsupported"
+        local md = (m.kind == "text" and not ghost) and linkify(body) or nil
+        -- Its link's card (the helper's: the one it came with, or one made from the page).
+        local lw, lh = tonumber(m.lw) or 0, tonumber(m.lh) or 0
+        local has_lp = md ~= nil and ((m.ltitle or "") ~= "" or (m.lpic or "") ~= "")
         local n = utf8.len(body)
         local react = m.react or ""
         return {
             text = body, has_text = body ~= "", me = m.me,
+            -- A voice note: drawn as one (play, its waveform, its length), not as a file's line.
+            voice = m.kind == "audio", vwave = m.wave or "", has_vwave = (m.wave or "") ~= "",
+            vbars = tonumber(m.bars) or 34,   -- its bars: more the longer it is (helper voice.go barsFor)
+            vsecs = (tonumber(m.secs) or 0) > 0 and tonumber(m.secs) or (function()
+                local mm, ss = string.match(m.text or "", "(%d+):(%d%d)%s*$")
+                return mm and (tonumber(mm) * 60 + tonumber(ss)) or 0
+            end)(),
+            vtime = (tonumber(m.secs) or 0) > 0 and string.format("%d:%02d", tonumber(m.secs) // 60, tonumber(m.secs) % 60)
+                or (string.match(m.text or "", "(%d+:%d%d)%s*$") or ""),   -- an older helper's row: the length from its words
+            md = md or "", has_link = md ~= nil,
+            has_lp = has_lp, ltitle = m.ltitle or "", has_ltitle = (m.ltitle or "") ~= "",
+            ldesc = m.ldesc or "", has_ldesc = (m.ldesc or "") ~= "", lsite = m.lsite or "",
+            lpic = m.lpic or "", has_lpic = (m.lpic or "") ~= "",
+            -- A wide picture is a banner over the card (lr: its height to its width), else a square beside it.
+            lbig = lw >= 300 and lw >= lh * 1.3, lr = lw > 0 and lh / lw or 0.5,
             long = n == nil or n > 50 or string.find(body, "\n", 1, true) ~= nil,
-            from = from, has_from = from ~= "", time = (m.edited and body ~= "" and "Edited · " or "") .. os.date("%H:%M", m.ts), tail = tail,
+            from = from, has_from = from ~= "", clock = os.date("%H:%M", m.ts), tail = tail,
+            jumbo = m.kind == "text" and (m.qtext or "") == "" and not ghost and emoji_only(body),
             react = react, has_react = react ~= "", edited = m.edited == true,
+            rmine = (m.mine or "") ~= "",   -- one of the reactions is ours: its bead is blue
             -- What its menu offers besides the rest.
             can_edit = m.me and m.kind == "text" and string.sub(m.id, 1, 4) ~= "tmp-" and os.time() - m.ts < 20 * 60,
             can_save = string.sub(m.id, 1, 4) ~= "tmp-" and (m.kind == "image" or m.kind == "video" or m.kind == "sticker" or m.kind == "audio" or m.kind == "doc"),
-            faint = m.kind == "deleted" or m.failed == true, img = img, sticker = m.kind == "sticker", pic = img and (m.pic or "") or "", dw = dw, dh = dh, file = file,
+            faint = m.failed == true, ghost = ghost,
+            -- In a group, theirs sit beside a column for faces; the last of a run shows whose.
+            grp = grp == true and not m.me, has_face = grp == true and not m.me and tail,
+            face = (grp and not m.me and tail) and (m.spic or "") or "", finit = initials(m.from or ""),
+            -- Its symbol (pages: island.plm `ic_g_*`): 1 on its way, 2 view once, 3 on the phone, 4 deleted.
+            gi = ({ waiting = 1, viewonce = 2, unsupported = 3, deleted = 4 })[m.kind] or 0, img = img, sticker = m.kind == "sticker", pic = img and (m.pic or "") or "", dw = dw, dh = dh, file = file,
             video = img and m.kind == "video",
             has_q = (m.qtext or "") ~= "", qfrom = m.qfrom or "", qtext = m.qtext or "",
+            -- Whose the quoted one was (its ghost takes that side's colour).
+            qme = m.qfrom == "You",
+            -- Answering a link with a card: its title and site in the quote, not the address.
+            has_qlt = (m.qltitle or "") ~= "", qltitle = m.qltitle or "", qlsite = m.qlsite or "",
             qpic = m.qpic or "", has_qpic = (m.qpic or "") ~= "",
             -- With its picture showing, "📷 Photo" says nothing more: only a caption stays.
             has_qtext = (m.qtext or "") ~= "" and not ((m.qpic or "") ~= "" and (m.qtext == "📷 Photo" or m.qtext == "🎥 Video" or m.qtext == "Sticker")),
@@ -5757,12 +6775,12 @@ end)()
         rows_of = {}
         -- A run: messages from the same side (and person) within three minutes, on the same day.
         local function same_run(a, b)
-            return a and b and a.me == b.me and (a.from or "") == (b.from or "") and math.abs(b.ts - a.ts) < 180
+            return a and b and a.kind ~= "call" and b.kind ~= "call" and a.me == b.me and (a.from or "") == (b.from or "") and math.abs(b.ts - a.ts) < 180
                 and os.date("%Y%m%d", a.ts) == os.date("%Y%m%d", b.ts)
         end
         local last_me = nil
         for i = #msgs, start, -1 do
-            if msgs[i].me then last_me = i; break end
+            if msgs[i].me and msgs[i].kind ~= "call" then last_me = i; break end
         end
         local last_day = nil
         stack_of = {}
@@ -5781,6 +6799,13 @@ end)()
                 rows[#rows + 1] = { text = day_of(m.ts), time = os.date("%H:%M", m.ts), day = true }
                 rows_of[#rows] = false
             end
+            -- A call: a quiet line across the chat, as the day's, not a bubble.
+            if m.kind == "call" then
+                local video = string.find(m.text or "", "ideo call", 1, true) ~= nil
+                rows[#rows + 1] = { text = (video and "📹  " or "📞  ") .. (m.text or "Call"), time = os.date("%H:%M", m.ts), day = true }
+                rows_of[#rows] = false
+                continue
+            end
             local first = not same_run(msgs[i - 1], m) or i == start
             local from = (first and not m.me and (m.from or "") ~= "") and m.from or ""
             local stack, last = nil, i
@@ -5792,7 +6817,8 @@ end)()
                     skip_to = last
                 end
             end
-            local r = row_of(m, drawn[i] == true, from, not same_run(msgs[last], msgs[last + 1]), stack)
+            local r = row_of(m, drawn[i] == true, from, not same_run(msgs[last], msgs[last + 1]), stack,
+                open_jid ~= nil and string.sub(open_jid, -5) == "@g.us")
             -- Under the last one sent, as iMessage says it.
             if last_me and last_me >= i and last_me <= last then
                 m = msgs[last_me]
@@ -5818,6 +6844,7 @@ end)()
         end
         nrows = #rows
         model.wam = rows
+        if X.voice_rows then X.voice_rows() end
     end
 
     local function read_soon(jid)
@@ -5909,10 +6936,12 @@ end)()
     local function announce(d)
         if (fact.expanded and fact.panel == "notes") or fact.dnd or d.muted then return end
         if (d.msg.ts or 0) < os.time() - 120 then return end   -- what queued up while offline is not news
+        if fact.banner and banner_note and banner_note.call then return end   -- a call ringing keeps its banner
         local c = nil
         for _, x in ipairs(chats) do if x.jid == d.jid then c = x end end
         local body = d.msg.text or ""
         if body == "" then body = ({ image = "📷 Photo", video = "🎥 Video", sticker = "Sticker" })[d.msg.kind] or "" end
+        if d.msg.kind == "call" then body = "📞 " .. body end
         show_banner({
             wa = true, jid = d.jid, id = -1, app = "WhatsApp", icon = ICON,
             image = c and c.pic or "", title = d.name ~= "" and d.name or (c and c.name or "WhatsApp"), body = body,
@@ -5921,9 +6950,12 @@ end)()
     end
 
     local function open_file(path, kind)
-        if kind == "audio" then
+        if kind == "voice" then
+            if X.voice_came then X.voice_came(path) end
+        elseif kind == "audio" then
             if player then kill(player); player = nil end
-            player = spawn("mpv", { "--no-video", "--really-quiet", path }, function() end, function() player = nil end)
+            -- Without the user's mpv config: its scripts (uosc…) hung a player started from here, silent.
+            player = spawn("mpv", { "--no-config", "--no-video", "--really-quiet", "--no-input-terminal", path }, function() end, function() player = nil end)
         else
             run("xdg-open", { path }, nil, { output = false })
             fact.app = "none"
@@ -6072,6 +7104,25 @@ end)()
                     if sync_n == n then fact.wa_sync_p = 0 end
                 end)
             end
+        elseif d.t == "call" then
+            if X.call then X.call(d) end
+        elseif d.t == "linkpv" then
+            -- A link's card, made after its message was shown: every copy of that message takes it.
+            local function take(m)
+                if m.id ~= d.id then return end
+                m.ltitle, m.ldesc, m.lsite, m.lpic, m.lw, m.lh, m.lurl = d.ltitle, d.ldesc, d.lsite, d.lpic, d.lw, d.lh, d.lurl
+            end
+            for _, m in ipairs(cache[d.jid] or {}) do take(m) end
+            for _, m in ipairs(msgs) do take(m) end
+            if d.jid == open_jid then msgs_show() end
+        elseif d.t == "face" then
+            -- Someone's face, come late: every row of theirs kept here takes it.
+            local any = false
+            for _, list in pairs(cache) do
+                for _, m in ipairs(list) do if m.sjid == d.jid then m.spic = d.path; any = true end end
+            end
+            for _, m in ipairs(msgs) do if m.sjid == d.jid then m.spic = d.path; any = true end end
+            if any and open_jid then msgs_show() end
         elseif d.t == "typing" then
             if (typing[d.jid] == true) ~= (d.on == true) then
                 typing[d.jid] = d.on or nil
@@ -6118,15 +7169,146 @@ end)()
                 after(wa_state == "pair" and 3000 or 30000, start_helper)   -- logged out: back at once, to be linked again
                 show_state("offline", "Can't reach WhatsApp")
             end, { stdin = "open" })
+            -- A helper (re)started may have changed what it keeps (a new build that reads old messages
+            -- anew): what was cached here is forgotten, and the open chat asked for again.
+            cache = {}
+            if open_jid then
+                resync = open_jid
+                send({ op = "open", jid = open_jid })
+            end
         end)
     end
     start_helper()
 
+    -- ── the command line (:), as Vim's ──
+    -- Each command: its names (the first is the one shown), what it takes, what it does, and how. A
+    -- command answers nothing when done (the line closes), or a few words to show (it stays open).
+    -- More are a line each.
+    ;(function()
+        local function go_chat(q)
+            if q == "" then return "Which chat?" end
+            local best = nil
+            for _, c in ipairs(chats) do
+                if matches(c.name, q) then best = c; break end
+            end
+            if not best then return "No chat called \u{201C}" .. q .. "\u{201D}" end
+            text.wa_find = ""
+            fact.wa_search = false
+            filter()
+            local k = nil
+            for i, c in ipairs(shown) do if c.jid == best.jid then k = i - 1 end end
+            if k then choose(k) else open_chat(best.jid); header() end
+            fact.wa_focus = true
+            fact.wa_typing = true
+        end
+        local function need_chat() if not open_jid then return "Open a chat first" end end
+        local CMDS = {
+            { names = { "q", "quit", "close" }, desc = "Close WhatsApp", run = function() fact.app = "none" end },
+            { names = { "chat", "open" }, args = "name", desc = "Open a chat by its name", run = go_chat },
+            { names = { "search", "find" }, args = "words", desc = "Search this chat", run = function(a)
+                if need_chat() then return need_chat() end
+                if a == "" then return "Search for what?" end
+                X.search(a)
+            end },
+            { names = { "times" }, desc = "Every message's time, out or away (t)", run = function() fact.wa_times = not fact.wa_times end },
+            { names = { "fold" }, desc = "Fold the chat list into faces, or back (s)", run = function() fact.wa_rail = not fact.wa_rail end },
+            { names = { "media", "photos" }, desc = "This chat's photos and videos", run = function()
+                if need_chat() then return need_chat() end
+                X.gal("media")
+            end },
+            { names = { "files" }, desc = "This chat's files", run = function()
+                if need_chat() then return need_chat() end
+                X.gal("files")
+            end },
+            { names = { "top" }, desc = "The oldest message here", run = function()
+                if need_chat() then return need_chat() end
+                fact.wa_typing = false; fact.wa_focus = true; emit("wa_first")
+            end },
+            { names = { "bottom", "newest" }, desc = "The newest message", run = function()
+                if need_chat() then return need_chat() end
+                fact.wa_typing = false; fact.wa_focus = true; emit("wa_last")
+            end },
+            { names = { "help" }, desc = "Every command (this list)", run = function() return "" end },
+        }
+        local fits = {}
+        local function parse()
+            local w, rest = string.match(text.wa_cmd_in or "", "^%s*:?(%S*)%s*(.-)%s*$")
+            return string.lower(w or ""), rest or ""
+        end
+        local function show()
+            local w = parse()
+            fits = {}
+            for _, c in ipairs(CMDS) do
+                local hit = w == ""
+                for _, n in ipairs(c.names) do if string.sub(n, 1, #w) == w then hit = true end end
+                if hit then fits[#fits + 1] = c end
+            end
+            local recs = {}
+            for i, c in ipairs(fits) do
+                if i > 10 then break end
+                recs[i] = { name = ":" .. c.names[1] .. (c.args and (" \u{2039}" .. c.args .. "\u{203A}") or ""), desc = c.desc }
+            end
+            model.wacmd = recs
+            fact.wa_cmd_sel = math.clamp(fact.wa_cmd_sel, 0, math.max(0, #recs - 1))
+        end
+        on("fact:wa_cmd", function(open)
+            if open then
+                text.wa_cmd_in = ""
+                text.wa_cmd_msg = ""; fact.wa_cmd_said = text.wa_cmd_msg ~= ""
+                fact.wa_cmd_sel = 0
+                show()
+            end
+        end)
+        on("text:wa_cmd_in", function()
+            text.wa_cmd_msg = ""; fact.wa_cmd_said = text.wa_cmd_msg ~= ""
+            fact.wa_cmd_sel = 0
+            show()
+        end)
+        on("wa_cmd_move", function(d) fact.wa_cmd_sel = math.clamp(fact.wa_cmd_sel + d, 0, math.max(0, math.min(#fits, 10) - 1)) end)
+        on("wa_cmd_tab", function()
+            local c = fits[fact.wa_cmd_sel + 1]
+            if not c then return end
+            local _, rest = parse()
+            text.wa_cmd_in = ""
+            insert("wa_cmd_in", c.names[1] .. ((c.args or rest ~= "") and " " or "") .. rest)
+        end)
+        on("wa_cmd_run", function()
+            local w, rest = parse()
+            if w == "" then fact.wa_cmd = false; return end
+            local cmd = nil
+            for _, c in ipairs(CMDS) do
+                for _, n in ipairs(c.names) do if n == w then cmd = c end end
+            end
+            -- Not a whole name: the chosen one of those that fit (`:ti` runs :times).
+            if not cmd then cmd = fits[fact.wa_cmd_sel + 1] end
+            if not cmd then
+                text.wa_cmd_msg = "Not a command: " .. w; fact.wa_cmd_said = text.wa_cmd_msg ~= ""
+                return
+            end
+            local said = cmd.run(rest)
+            if said then
+                text.wa_cmd_msg = said; fact.wa_cmd_said = text.wa_cmd_msg ~= ""
+                if said == "" then text.wa_cmd_in = ""; show() end   -- :help: every one, listed
+                return
+            end
+            fact.wa_cmd = false
+        end)
+    end)()
+
     on("wa_pick", function(i) choose(math.max(0, off - ABOVE) + i) end)
     on("wa_move", function(dlt) choose(sel + dlt) end)
+    -- The wheel over the list, in rows (the scene says how many: a touchpad sends a fraction of one
+    -- many times a second, and each used to move it two whole rows). Whole rows move the window; what
+    -- is left of one waits for the next.
+    local wheel_rows = 0
     on("wa_wheel", function(w)
-        off = off + (w > 0 and -2 or 2)
-        list_show()
+        wheel_rows += w
+        local n = wheel_rows >= 0 and math.floor(wheel_rows) or math.ceil(wheel_rows)
+        if n == 0 then return end
+        wheel_rows -= n
+        local was = off
+        off = math.clamp(off - n, 0, math.max(0, #shown - SEEN))
+        if off ~= was then list_show() else wheel_rows = 0 end
     end)
     -- Scrolled up to the top of what is drawn: 30 older ones (from the helper once all it sent is drawn).
     on("wa_older", function()
@@ -6310,7 +7492,7 @@ end)()
             elseif not fact.wa_typing then
                 run("wl-paste", { "-n" }, function(words, c)
                     if c ~= 0 or (words or "") == "" then return end
-                    text.wa_in = (text.wa_in or "") .. string.gsub(words, "[\r\n\t]+", " ")
+                    text.wa_in = (text.wa_in or "") .. (string.gsub(string.gsub(words, "\r\n?", "\n"), "\t", "    "))
                     fact.wa_has_in = true
                     fact.wa_typing = true
                 end)
@@ -6321,7 +7503,7 @@ end)()
         if mime == "text/uri-list" or string.match(data or "", "^file://") then
             take_uris(data)
         elseif (data or "") ~= "" then
-            text.wa_in = (text.wa_in or "") .. string.gsub(data, "[\r\n\t]+", " ")
+            text.wa_in = (text.wa_in or "") .. (string.gsub(string.gsub(data, "\r\n?", "\n"), "\t", "    "))
             fact.wa_has_in = true
             fact.wa_typing = true
         end
@@ -6351,7 +7533,9 @@ end)()
             msgs[#msgs + 1] = { id = tmp, me = true, from = "", text = shown_text, ts = os.time(), kind = f.kind,
                 media = f.kind == "image" and f.path or "", pic = f.kind == "image" and f.path or "", w = f.w, h = f.h, st = 0,
                 qfrom = (i == 1 and q) and q.from or "", qtext = (i == 1 and q) and q.text or "" }
-            send({ op = "file", jid = open_jid, path = f.path, caption = cap, tmp = tmp, quote = (i == 1 and q) and q.id or "" })
+            local req = { op = "file", jid = open_jid, path = f.path, caption = cap, tmp = tmp, quote = (i == 1 and q) and q.id or "" }
+            msgs[#msgs].again = req     -- kept with it: what to ask again if it does not go
+            send(req)
         end
         staged = {}
         att_show()
@@ -6404,7 +7588,9 @@ end)()
         unquote()
         msgs_show()
         fact.wa_mine = fact.wa_mine + 1
-        send({ op = "send", jid = open_jid, text = body, tmp = tmp, quote = q and q.id or "" })
+        local req = { op = "send", jid = open_jid, text = body, tmp = tmp, quote = q and q.id or "" }
+        msgs[#msgs].again = req
+        send(req)
     end)
     -- A picture or video in the program that opens it, a voice note (played here), or a file.
     local function open_media(m)
@@ -6477,7 +7663,9 @@ end)()
     on("wa_look_at", function(i) look_row(i) end)
     -- A press on a picture or video views it here; on a voice note or file, opens it.
     on("wa_media", function(i)
-        if not look_row(i) then open_media(rows_of[i + 1]) end
+        local m = rows_of[i + 1]
+        if m and m.kind == "audio" and X.voice_toggle then X.voice_toggle(i); return end
+        if not look_row(i) then open_media(m) end
     end)
     on("wa_ql_step", function(n)
         local k = ql_i + n
@@ -6495,6 +7683,7 @@ end)()
     on("fact:wa_cur", function(c)
         local m = rows_of[(c or -1) + 1]
         fact.wa_cur_media = m ~= nil and m ~= false and (m.kind == "image" or m.kind == "sticker" or m.kind == "video")
+        fact.wa_cur_fail = m ~= nil and m ~= false and m.failed == true
         if not fact.wa_ql then return end
         if fact.wa_cur_media then look_row(c) end
     end)
@@ -6686,13 +7875,15 @@ end)()
             end
         end
         local function gal_item() return gal[fact.wa_gc + 1] end
-        on("wa_gal_open", function()
+        local function gal_open(kind)
             if not open_jid then return end
             asked = {}      -- asked again each time: the phone may have it now
             fact.wa_typing = false
             fact.wa_gal = true
-            gal_load("media")
-        end)
+            gal_load(kind or "media")
+        end
+        on("wa_gal_open", function() gal_open("media") end)
+        X.gal = gal_open    -- the command line's :media and :files
         on("wa_gtabs", function() gal_load(gal_kind == "files" and "media" or "files") end)
         on("wa_gmove", function(n)
             local per = gal_kind == "files" and 1 or 4
@@ -6859,7 +8050,36 @@ end)()
 
         -- ── deleting (dd) ──
         local del_on = nil
+        -- One of ours that never left (WhatsApp never had it): taken off here, nothing to ask anyone.
+        -- Still on its way, it can't be called back.
+        local function unsent_drop(m)
+            if not m.failed then toast("Still sending…"); return end
+            for _, list in ipairs({ cache[open_jid] or {}, msgs }) do
+                for i = #list, 1, -1 do if list[i] == m then table.remove(list, i) end end
+            end
+            snap()
+            msgs_show()
+            X.gone()
+        end
+        -- …or sent again: as a new message, the newest (it goes now, not when it was written).
+        local function retry(m)
+            if not m or real(m) or not m.failed or not open_jid then return end
+            if not m.again then toast("That can't be sent again"); return end
+            if wa_state ~= "ok" then toast("Not connected"); return end
+            local list = cache[open_jid] or msgs
+            for i = #list, 1, -1 do if list[i] == m then table.remove(list, i) end end
+            m.failed, m.ts = false, os.time()
+            list[#list + 1] = m
+            if detached then X.newest() end
+            snap()
+            msgs_show()
+            fact.wa_cur = -1
+            fact.wa_mine = fact.wa_mine + 1
+            send(m.again)
+        end
+        on("wa_retry", function() retry(under_cursor()) end)
         local function del_ask(m)
+            if m and not real(m) then unsent_drop(m); return end
             if not real(m) then return end
             del_on = m
             -- Ours, for everyone, for as long as WhatsApp allows (two days); anything else only here.
@@ -6900,7 +8120,7 @@ end)()
         end
         local function fwd_open(m)
             if not real(m) then return end
-            if m.kind == "deleted" or m.kind == "note" then toast("That can't be forwarded"); return end
+            if m.kind == "deleted" or m.kind == "note" or m.kind == "waiting" or m.kind == "viewonce" or m.kind == "unsupported" then toast("That can't be forwarded"); return end
             fwd_on = m
             text.wa_fwd_q = ""
             fact.wa_fwi = 0
@@ -6946,15 +8166,37 @@ end)()
         end
         local want_id = nil
         -- The cursor to it: from the newest, a row a step (as j/k go), so the chat scrolls up to it.
+        -- A step is taken once a frame: steps sent faster than the frames come (a busy card) were lost and
+        -- the cursor stopped short. So the next goes once the last has landed, until it is on that row
+        -- (a step that never lands is sent again after a moment; a day's row passes the cursor on by itself).
+        local step_n = 0
         local function step_to(id)
-            local r, below = row_of_id(id)
+            local r = row_of_id(id)
             if not r then return false end
             fact.wa_typing = false
             fact.wa_focus = true
             emit("wa_last")
-            for i = 1, math.min(below, 118) do
-                after(i * 24, function() emit("wa_k") end)
+            step_n += 1
+            local mine, goal, last, waited, n, started = step_n, r - 1, nil, 0, 0, false
+            local function tick()
+                n += 1
+                if mine ~= step_n or n > 600 then return end
+                local cur = fact.wa_cur
+                -- First the jump to the newest has to land (the cursor may have been anywhere before).
+                if not started then
+                    if cur ~= nrows - 1 and n < 12 then after(30, tick); return end
+                    started = true
+                end
+                if cur >= 0 and cur <= goal then return end
+                if cur ~= last or waited >= 6 then
+                    last, waited = cur, 0
+                    emit("wa_k")
+                else
+                    waited += 1
+                end
+                after(30, tick)
             end
+            after(60, tick)
             return true
         end
         local function go_to(id)
@@ -7016,13 +8258,151 @@ end)()
             text.wa_cs_t = ""
         end
         on("wa_cs_close", cs_close)
+        -- The command line's :search: the chat's search, asked at once and taken to its first hit.
+        X.search = function(words)
+            fact.wa_typing = false
+            fact.wa_focus = true
+            fact.wa_cs = true
+            text.wa_cq = words
+            asked_q, hits, hit_i, go_when_found = words, {}, 0, true
+            send({ op = "find", jid = open_jid, q = words })
+        end
 
         -- The pointer's: the bar beside a message, or its menu (row × 10 + what it does).
-        local ACT = { rx_open, reply_to, fwd_open, yank, save, edit, del_ask, open_media }
+        local ACT = { rx_open, reply_to, fwd_open, yank, save, edit, del_ask, open_media, retry }
         on("wa_act", function(v)
             local m = rows_of[v // 10 + 1]
             local f = ACT[v % 10]
             if m and f then f(m) end
+        end)
+        -- A reply's quoted message pressed: to the original. By its id when the helper says it; else the
+        -- nearest earlier message from the same side whose first line is what the quote shows.
+        -- ── voice notes, played in their bubble ──
+        -- The scene shows where it is (`wa_vplay` the row, `wa_vgo` running, `wa_vfrom` where this run
+        -- began; it counts on from there itself at `wa_vspeed`, `wa_vseq` saying a run began). Pausing,
+        -- jumping and changing the speed start mpv again from the place; at its end, the next voice note
+        -- from the same side plays (iMessage's). Kept by id, so rows coming in above don't lose it.
+        local vp = { id = nil, from = 0, started = 0, speed = 1, gen = 0, tick = nil, want = nil }
+        local function vp_secs(m)
+            local s = tonumber(m.secs) or 0
+            if s <= 0 then
+                local mm, ss = string.match(m.text or "", "(%d+):(%d%d)%s*$")
+                s = mm and (tonumber(mm) * 60 + tonumber(ss)) or 0
+            end
+            return math.max(1, s)
+        end
+        local function vp_row()
+            for r = 1, nrows do local m = rows_of[r]; if m and m.id == vp.id then return r - 1, m end end
+        end
+        local function vp_pos()
+            if not fact.wa_vgo then return vp.from end
+            return vp.from + (os.clock() - vp.started) * vp.speed
+        end
+        local function vp_left(m) local l = math.max(0, math.floor(vp_secs(m) - vp_pos() + 0.5)); text.wa_vleft = string.format("%d:%02d", l // 60, l % 60) end
+        local function vp_halt()
+            vp.gen += 1
+            if vp.tick then cancel(vp.tick); vp.tick = nil end
+            if player then kill(player); player = nil end
+        end
+        local function vp_done()
+            vp_halt()
+            vp.id = nil
+            fact.wa_vgo = false
+            fact.wa_vplay = -1
+        end
+        local vp_start
+        vp_start = function(i, m, from)
+            vp_halt()
+            vp.id = m.id
+            if not has_file(m) then
+                -- Not here yet: fetched, then played from there.
+                vp.want = { id = m.id, from = from }
+                fact.wa_vplay, fact.wa_vgo, fact.wa_vfrom = i, false, from
+                fact.wa_vseq = fact.wa_vseq + 1
+                want_open[m.id] = "voice"
+                send({ op = "media", jid = open_jid, id = m.id })
+                return
+            end
+            local gen = vp.gen
+            vp.from, vp.started = from, os.clock()
+            fact.wa_vfrom, fact.wa_vplay, fact.wa_vgo, fact.wa_vspeed = from, i, true, vp.speed
+            fact.wa_vseq = fact.wa_vseq + 1
+            vp_left(m)
+            vp.tick = every(250, function() local _, mm = vp_row(); if mm then vp_left(mm) end end)
+            player = spawn("mpv", { "--no-config", "--no-video", "--really-quiet", "--no-input-terminal",
+                "--start=" .. string.format("%.2f", from), "--speed=" .. vp.speed, m.file }, function() end, function()
+                if gen ~= vp.gen then return end      -- stopped here (paused, moved, sped up): not its end
+                player = nil
+                local r = vp_row()
+                vp_done()
+                -- The next one, when it is a voice note from the same side.
+                local nxt = r and rows_of[r + 2]
+                if nxt and nxt.kind == "audio" and nxt.me == m.me then vp_start(r + 1, nxt, 0) end
+            end)
+        end
+        X.voice_came = function(path)
+            local w = vp.want
+            vp.want = nil
+            if not w or w.id ~= vp.id then return end
+            local i, m = vp_row()
+            if m then m.file = m.file ~= "" and m.file or path; vp_start(i, m, w.from) end
+        end
+        X.voice_toggle = function(i)
+            local m = rows_of[i + 1]
+            if not m then return end
+            if vp.id == m.id then
+                if fact.wa_vgo then
+                    local pos = vp_pos()
+                    vp_halt()
+                    vp.from = pos
+                    fact.wa_vgo, fact.wa_vfrom = false, pos
+                    fact.wa_vseq = fact.wa_vseq + 1
+                else
+                    vp_start(i, m, vp.from >= vp_secs(m) - 0.3 and 0 or vp.from)
+                end
+                return
+            end
+            vp_start(i, m, 0)
+        end
+        on("wa_vseek", function(v)
+            local i, k = v // 1000, v % 1000
+            local m = rows_of[i + 1]
+            if m and m.kind == "audio" then vp_start(i, m, vp_secs(m) * k / 1000) end
+        end)
+        on("wa_vspeed_cycle", function()
+            vp.speed = vp.speed == 1 and 1.5 or (vp.speed == 1.5 and 2 or 1)
+            fact.wa_vspeed = vp.speed
+            local i, m = vp_row()
+            if m and fact.wa_vgo then vp_start(i, m, vp_pos()) end
+        end)
+        X.voice_rows = function()
+            if not vp.id then return end
+            local i = vp_row()
+            if i then fact.wa_vplay = i else vp_done() end   -- gone from what is drawn (another chat): it stops
+        end
+
+        -- A link's card pressed: where it goes, in the browser.
+        on("wa_link_at", function(i)
+            local m = rows_of[i + 1]
+            local u = m and (m.lurl or "") or ""
+            if string.match(u, "^https?://") then
+                run("xdg-open", { u }, nil, { output = false })
+                fact.app = "none"
+            end
+        end)
+        on("wa_qjump", function(i)
+            local m = rows_of[i + 1]
+            if not m or (m.qtext or "") == "" then return end
+            if (m.qid or "") ~= "" then go_to(m.qid); return end
+            local mine, q = m.qfrom == "You", m.qtext
+            local q_open = string.gsub(q, "…$", "")
+            for k = #msgs, 1, -1 do
+                local c = msgs[k]
+                if c.ts <= m.ts and c.id ~= m.id and c.me == mine then
+                    local line = string.match(c.text or "", "^[^\n]*") or ""
+                    if line == q or (q_open ~= q and string.sub(line, 1, #q_open) == q_open) then go_to(c.id); return end
+                end
+            end
         end)
 
         -- Another chat: what was over this one goes.
@@ -7079,7 +8459,9 @@ end)()
                 kind = "audio", media = "", w = 0, h = 0, st = 0, qfrom = "", qtext = "" }
             msgs_show()
             fact.wa_mine = fact.wa_mine + 1
-            send({ op = "file", jid = r.jid, path = r.path, caption = "", tmp = tmp, quote = "", ptt = true, secs = secs })
+            local req = { op = "file", jid = r.jid, path = r.path, caption = "", tmp = tmp, quote = "", ptt = true, secs = secs }
+            msgs[#msgs].again = req
+            send(req)
         end
         local function can_rec()
             return looking() and open_jid ~= nil and wa_state == "ok" and not fact.wa_typing and not fact.wa_search
@@ -7143,7 +8525,7 @@ end)()
     wa_hook.stage = function(path) stage(path) end
     wa_hook.insert = function(words)
         if (words or "") == "" then return end
-        text.wa_in = (text.wa_in or "") .. words
+        insert("wa_in", words)    -- at its cursor (kept while a picker was over it); told back as `text:wa_in`
         fact.wa_has_in = true
         fact.wa_typing = true
     end
@@ -7161,8 +8543,75 @@ end)()
             fact.wa_typing = true
         elseif key == "read" then
             send({ op = "read", jid = jid })
+        elseif key == "decline" and X.decline then
+            X.decline(jid)
+        elseif key == "ignore" and X.ignore then
+            X.ignore(jid)
         end
     end
+
+    -- A call ringing: an urgent banner (it stays until it stops ringing) with Decline, the phone's ring
+    -- (not with Do Not Disturb), and "Calling…" in the chat. A linked device cannot answer: the phone does.
+    ;(function()
+        local ringing = {}        -- call id → what the helper said
+        local bell = nil          -- the ring playing now
+        local RING = "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
+        local ignored = {}        -- calls let ring on the phone only: no ring here, no banner again
+        local function any()
+            for id in pairs(ringing) do if not ignored[id] then return true end end
+            return false
+        end
+        local function ring()
+            if bell or not any() or fact.dnd then return end
+            bell = spawn("pw-play", { RING }, function() end, function()
+                bell = nil
+                after(700, ring)
+            end)
+        end
+        X.ringing = function(jid)
+            for _, d in pairs(ringing) do if d.jid == jid then return d end end
+            return nil
+        end
+        -- Ignore: it rings on in the phone (the caller sees nothing); here, silence.
+        X.ignore = function(jid)
+            for id, d in pairs(ringing) do
+                if d.jid == jid then ignored[id] = true end
+            end
+            if not any() and bell then kill(bell); bell = nil end
+        end
+        -- Flicked away (a scene rule; the logic's own `fact.banner = false` is not heard here): ignored.
+        on("fact:banner", function(b)
+            if not b and banner_note and banner_note.call and ringing[banner_note.call] then X.ignore(banner_note.jid) end
+        end)
+        X.decline = function(jid)
+            for id, d in pairs(ringing) do
+                if d.jid == jid then send({ op = "decline", id = id }) end
+            end
+        end
+        X.call = function(d)
+            if d.on then
+                ringing[d.id] = d
+                local pic = ""
+                for _, c in ipairs(chats) do if c.jid == d.jid then pic = c.pic or "" end end
+                show_banner({
+                    wa = true, call = d.id, jid = d.jid, id = -1, app = "WhatsApp", icon = ICON, urgency = 2, image = pic,
+                    title = (d.name or "") ~= "" and d.name or "WhatsApp",
+                    body = (d.video and "📹 Incoming video call" or "📞 Incoming voice call") .. " · answer on your phone",
+                    actions = { { key = "decline", label = "Decline" }, { key = "ignore", label = "Ignore" }, { key = "reply", label = "Message" } },
+                })
+                ring()
+            else
+                ringing[d.id] = nil
+                ignored[d.id] = nil
+                if not any() and bell then kill(bell); bell = nil end
+                if banner_note and banner_note.call == d.id then
+                    fact.banner = false
+                    banner_note = nil
+                end
+            end
+            header()
+        end
+    end)()
     every(60000, function() if looking() then list_show() end end)   -- "Yesterday" comes at midnight
 end)()
 

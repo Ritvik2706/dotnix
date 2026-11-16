@@ -1,7 +1,7 @@
 From e0ffd7d796f22f3c3b07ac7368d018fa7b84c10d Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Tue, 27 Oct 2026 21:06:36 +0400
-Subject: [PATCH 01/38] input: bare hjkl move focus in the overview, like the
+Subject: [PATCH 01/40] input: bare hjkl move focus in the overview, like the
  arrows
 
 ---

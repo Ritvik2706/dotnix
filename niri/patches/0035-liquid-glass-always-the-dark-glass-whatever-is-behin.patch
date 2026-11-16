@@ -1,7 +1,7 @@
 From a405ddfeda100fdd8bea575979e65988081c446b Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Mon, 2 Nov 2026 13:18:28 +0400
-Subject: [PATCH 35/38] liquid glass: always the dark glass, whatever is behind
+Subject: [PATCH 35/40] liquid glass: always the dark glass, whatever is behind
 
 The glass no longer turns light or dark with what is behind it: every shape
 is drawn at GLASS_TONE (0: the dark glass's tint, lift and sheen), so it looks

@@ -1,0 +1,223 @@
+From 4363a8f4523806e3c35a3ee51cb9957d25fb5739 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Sun, 8 Nov 2026 18:24:36 +0400
+Subject: [PATCH 39/40] liquid glass: frost regions (layer 3, protocol v6) blur
+ the backdrop further inside them
+
+---
+ resources/lumen-glass-v1.xml                 |  9 +++--
+ src/protocols/lumen_glass.rs                 | 10 +++--
+ src/render_helpers/framebuffer_effect.rs     | 13 ++++++-
+ src/render_helpers/liquid_glass.rs           | 18 +++++++++
+ src/render_helpers/shaders/liquid_glass.frag | 41 +++++++++++++++++++-
+ src/render_helpers/shaders/mod.rs            |  2 +
+ 6 files changed, 85 insertions(+), 8 deletions(-)
+
+diff --git a/resources/lumen-glass-v1.xml b/resources/lumen-glass-v1.xml
+index 163ab80a..9f6e9ce7 100644
+--- a/resources/lumen-glass-v1.xml
++++ b/resources/lumen-glass-v1.xml
+@@ -34,7 +34,7 @@
+     Private to lumen and the patched niri.
+   </description>
+ 
+-  <interface name="lumen_glass_manager_v1" version="5">
++  <interface name="lumen_glass_manager_v1" version="6">
+     <description summary="glass for surfaces">
+     </description>
+ 
+@@ -58,7 +58,7 @@
+     </request>
+   </interface>
+ 
+-  <interface name="lumen_glass_surface_v1" version="5">
++  <interface name="lumen_glass_surface_v1" version="6">
+     <description summary="the glass of one surface">
+       All state is double-buffered: it applies on the surface's next
+       wl_surface.commit, together with what the client drew for that frame.
+@@ -89,7 +89,10 @@
+             `continuous` corners); from version 4, plus 2 x layer: 0 glass
+             on what is behind the surface, 1 glass on top of that glass
+             (a control on a panel), which refracts it; 2 the same, but it
+-            bends the crisp backdrop under the panel instead (a button)
++            bends the crisp backdrop under the panel instead (a button);
++            from version 6, 3: not glass but a frost region, inside which
++            the backdrop of the layer 0 glass is blurred further, by
++            `refraction` px (at most 4 a surface; no rim, no merging)
+           refraction: how far the backdrop is displaced at the very rim,
+             fading to 0 where the edge's curve ends
+           dispersion: 0..1, how much the colours separate at the rim
+diff --git a/src/protocols/lumen_glass.rs b/src/protocols/lumen_glass.rs
+index 0ce68c48..8a179603 100644
+--- a/src/protocols/lumen_glass.rs
++++ b/src/protocols/lumen_glass.rs
+@@ -14,7 +14,7 @@ use super::raw::lumen_glass::v1::server::{lumen_glass_manager_v1, lumen_glass_su
+ use lumen_glass_manager_v1::LumenGlassManagerV1;
+ pub use lumen_glass_surface_v1::LumenGlassSurfaceV1;
+ 
+-const VERSION: u32 = 5;
++const VERSION: u32 = 6;
+ 
+ /// Floats per shape in set_shapes: 13, or 16 (version 2) with lens zoom, tint
+ /// and rim tint (the two can't be confused with at most 8 shapes).
+@@ -260,8 +260,12 @@ where
+                         radii: [v[4].max(0.), v[5].max(0.), v[6].max(0.), v[7].max(0.)],
+                         // corner: continuous (0/1) + 2 x layer.
+                         continuous: v[8].rem_euclid(2.) >= 0.5,
+-                        layer: ((v[8] / 2.).floor() as i32).clamp(0, 1) as u8,
+-                        sharp: (v[8] / 2.).floor() as i32 >= 2,
++                        // 3: a frost region (no glass of its own, see liquid_glass.rs).
++                        layer: match (v[8] / 2.).floor() as i32 {
++                            3 => 3,
++                            l => l.clamp(0, 1) as u8,
++                        },
++                        sharp: (v[8] / 2.).floor() as i32 == 2,
+                         refraction: v[9].clamp(-200., 200.),
+                         dispersion: v[10].clamp(0., 1.),
+                         bevel: v[11].max(0.),
+diff --git a/src/render_helpers/framebuffer_effect.rs b/src/render_helpers/framebuffer_effect.rs
+index b9d4096e..8bd4e490 100644
+--- a/src/render_helpers/framebuffer_effect.rs
++++ b/src/render_helpers/framebuffer_effect.rs
+@@ -55,6 +55,9 @@ pub struct GlassDraw {
+     pub merge: f32,
+     /// The surface's frost (0..1), the same for all its shapes.
+     pub frost: f32,
++    /// Frost regions (lumen-glass layer 3, at most 4): boxes inside the glass whose backdrop is
++    /// blurred further, by a radius of their own: (x, y, w, h), (corner radius, radius px, 0, 0), …
++    pub regions: Vec<[f32; 16]>,
+     /// Where the brightness behind each shape is reported (light/dark glass).
+     pub measure: Option<std::sync::Arc<std::sync::Mutex<GlassMeasure>>>,
+     /// Layer 0: where to leave its crisp capture for the glass on top of it.
+@@ -376,7 +379,7 @@ impl FramebufferEffectElement {
+         crop: Rectangle<f64, Logical>,
+         transform: Transform,
+         sharp_map: Option<[f32; 4]>,
+-    ) -> [Uniform<'static>; 12] {
++    ) -> [Uniform<'static>; 14] {
+         let (input_to_clip_geo, clip_geo_size) = self.input_to_clip_geo(crop, transform);
+         [
+             Uniform::new("niri_scale", self.scale),
+@@ -397,6 +400,14 @@ impl FramebufferEffectElement {
+             Uniform::new("tex_sharp", 1i32),
+             Uniform::new("sharp_map", sharp_map.unwrap_or([1., 1., 0., 0.])),
+             Uniform::new("sharp_under", if sharp_map.is_some() { 1f32 } else { 0. }),
++            Uniform {
++                name: "frost_regions".into(),
++                value: UniformValue::Matrix4x4 {
++                    matrices: if glass.regions.is_empty() { vec![[0.; 16]] } else { glass.regions.clone() },
++                    transpose: false,
++                },
++            },
++            Uniform::new("frost_count", glass.regions.len() as f32),
+         ]
+     }
+ 
+diff --git a/src/render_helpers/liquid_glass.rs b/src/render_helpers/liquid_glass.rs
+index e2aebe94..922155e9 100644
+--- a/src/render_helpers/liquid_glass.rs
++++ b/src/render_helpers/liquid_glass.rs
+@@ -412,6 +412,24 @@ impl Glass {
+                 )
+                 .with_glass(GlassDraw {
+                     shapes,
++                    // Frost regions (layer 3) blur layer 0's backdrop further inside them.
++                    regions: if layer == 0 {
++                        state
++                            .shapes
++                            .iter()
++                            .filter(|s| s.layer == 3)
++                            .take(4)
++                            .map(|s| {
++                                let mut m = [0.; 16];
++                                m[..4].copy_from_slice(&[s.x - x0, s.y - y0, s.w, s.h]);
++                                m[4] = s.radii[0];
++                                m[5] = s.refraction.max(0.);
++                                m
++                            })
++                            .collect()
++                    } else {
++                        Vec::new()
++                    },
+                     // Controls side by side stay apart: only the panels melt.
+                     merge: if layer >= 1 { 0. } else { state.merge },
+                     frost: state.frost,
+diff --git a/src/render_helpers/shaders/liquid_glass.frag b/src/render_helpers/shaders/liquid_glass.frag
+index 17e154fe..9bba9174 100644
+--- a/src/render_helpers/shaders/liquid_glass.frag
++++ b/src/render_helpers/shaders/liquid_glass.frag
+@@ -225,6 +225,13 @@ float displacement(float u, float bevel, float thickness, float ior, float power
+ // coordinates, and it is bent instead of the panel's glass.
+ uniform vec4 sharp_map;
+ uniform float sharp_under;
++// Frost regions (lumen-glass layer 3): inside each, the frosted backdrop is
++// blurred further, by its own radius. (x, y, w, h), (corner, radius px, 0, 0).
++uniform mat4 frost_regions[4];
++uniform float frost_count;
++float region_soften = 0.0;   // px, here (set in main)
++mat2 px_to_tc = mat2(0.0);   // a logical px offset in texture coordinates (set in main)
++float region_turn = 0.0;     // the taps' rotation, per pixel, so no pattern shows
+ float shape_sharp = 0.0;
+ // How much of the crisp backdrop shows here (0..1): all of it on a round
+ // button; on a pill or a field only along its curved edge, easing into the
+@@ -237,7 +244,25 @@ vec4 backdrop(vec2 c, float clear) {
+         vec4 crisp = texture2D(tex_sharp, clamp(c * sharp_map.xy + sharp_map.zw, vec2(0.0005), vec2(0.9995)));
+         return sharp_k >= 1.0 ? crisp : mix(texture2D(tex, c), crisp, sharp_k);
+     }
+-    vec4 frosted = texture2D(tex, c);
++    vec4 frosted;
++    if (region_soften > 0.5) {
++        // A disc of the frosted backdrop: the centre and three rings of 8, turned per pixel.
++        frosted = texture2D(tex, c);
++        float wsum = 1.0;
++        for (int ring = 1; ring <= 3; ring++) {
++            float rr = region_soften * float(ring) / 3.0;
++            float w = 1.0 - float(ring) * 0.22;
++            for (int k = 0; k < 8; k++) {
++                float ang = (float(k) + 0.5 * float(ring)) * 0.785398 + region_turn;
++                vec2 o = px_to_tc * (vec2(cos(ang), sin(ang)) * rr);
++                frosted += w * texture2D(tex, clamp(c + o, vec2(0.0005), vec2(0.9995)));
++                wsum += w;
++            }
++        }
++        frosted /= wsum;
++    } else {
++        frosted = texture2D(tex, c);
++    }
+     return clear > 0.0 ? mix(frosted, texture2D(tex_sharp, c), clear) : frosted;
+ }
+ 
+@@ -293,6 +318,20 @@ void main() {
+     mat2 a = mat2(input_to_geo[0].xy, input_to_geo[1].xy);
+     float det = a[0][0] * a[1][1] - a[1][0] * a[0][1];
+     mat2 inv = mat2(a[1][1], -a[0][1], -a[1][0], a[0][0]) / det;
++    px_to_tc = inv / geo_size.x * mat2(1.0, 0.0, 0.0, geo_size.x / geo_size.y);
++
++    // Inside a frost region: how much further its backdrop is blurred (its rounded box, eased in at the edge).
++    for (int i = 0; i < 4; i++) {
++        if (float(i) >= frost_count)
++            break;
++        mat4 r = frost_regions[i];
++        vec2 hs = r[0].zw * 0.5;
++        float rad = min(r[1].x, min(hs.x, hs.y));
++        vec2 q = abs(p - r[0].xy - hs) - (hs - rad);
++        float rd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
++        region_soften = max(region_soften, r[1].y * clamp(-rd / 3.0, 0.0, 1.0));
++    }
++    region_turn = hash12(p) * 6.2832;
+ 
+     // Soft drop shadow, only outside the glass. Not looked for where it can't
+     // show: fully covered, flat or rimless glass, or too far out (the shadow's
+diff --git a/src/render_helpers/shaders/mod.rs b/src/render_helpers/shaders/mod.rs
+index b992007a..ddb38a0c 100644
+--- a/src/render_helpers/shaders/mod.rs
++++ b/src/render_helpers/shaders/mod.rs
+@@ -150,6 +150,8 @@ impl Shaders {
+                     UniformName::new("tex_sharp", UniformType::_1i),
+                     UniformName::new("sharp_map", UniformType::_4f),
+                     UniformName::new("sharp_under", UniformType::_1f),
++                    UniformName::new("frost_regions", UniformType::Matrix4x4),
++                    UniformName::new("frost_count", UniformType::_1f),
+                 ],
+             )
+             .map_err(|err| {

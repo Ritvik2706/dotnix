@@ -1,7 +1,7 @@
 From a0036dacb88c9678f734b81409bce025bf0ff57d Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Tue, 27 Oct 2026 21:06:36 +0400
-Subject: [PATCH 03/38] render: squircle (continuous) window corners
+Subject: [PATCH 03/40] render: squircle (continuous) window corners
 
 rounding_alpha.frag ports lumen's continuous_corner: the corner spreads over
 1.84x the radius (capped at half the side), with the exponent solved so the

@@ -27,11 +27,11 @@ scene Island {
         //  60 frames a second at rest (a playing waveform costs little); 120 while the
         //  bar itself is moving, so it keeps up with the windows the compositor
         //  slides under it (they go at the screen's 240), and 60 again once it settles.
-        rate: 60, 120 while abs(vel(pw)) + abs(vel(k_mid)) + abs(vel(k_rail)) + abs(vel(ldv)) + abs(vel(ws_position)) + abs(vel(rail_ws)) + abs(vel(bat_in)) + abs(vel(slosh)) + abs(vel(slosh2)) + abs(vel(k_cap)) > 0.5
+        rate: 60, 120 while abs(vel(pw)) + abs(vel(k_mid)) + abs(vel(k_rail)) + abs(vel(ldv)) + abs(vel(ws_position)) + abs(vel(rail_ws)) + abs(vel(bat_in)) + abs(vel(slosh)) + abs(vel(slosh2)) + abs(vel(k_cap)) > 0.5, 240 while app == wa and abs(vel(wfb)) + abs(vel(wbar)) > 0.5   // …and a chat or the list scrolling: as fast as the screen and the card allow, as a browser's page
         anchor: top
         margin: 5             // same line as waybar's capsules
-        level: top            // like waybar: over windows, but a fullscreen video or game covers it (overlay would sit above fullscreen)
-        open: not fs          // covered then anyway: closed, it gives back its frames (~40–70 MB of shared memory) for the game
+        level: top, overlay while fs_under and fsc > 0.002   // like waybar: over windows, but a fullscreen video or game covers it, until a page is called up over it. Only then: changing level rebuilds the glass (a blink, and a heavier blur). Not `fs`: taking the keyboard unfocuses the window, fs goes false, and the two would chase each other
+        open: not fs or fsc > 0.002   // covered then anyway: closed, it gives back its frames (~40–70 MB of shared memory) for the game
         reserve: -1           // the strips below keep the room windows tile under, on every monitor,
                               // so nothing moves when the island changes monitor
         keyboard: exclusive while pw_open or (expanded and (panel == clip or panel == launch or panel == emoji or panel == wall or panel == cap or panel == mix or panel == cam or panel == timer or panel == awk or panel == proj or panel == fnds or panel == stor or panel == act)) or app != none or pk.pending   // only while it is needed: a password, the clipboard, the launcher, the pickers
@@ -172,6 +172,50 @@ scene Island {
         on press nh_x { emit note_dismiss }
     }
 
+    //  While recording: a small bar of the island's dark glass at the bottom
+    //  (where niri's screenshot panel was), with the time and a Stop button.
+    //  `captures: hidden` gives it the layer namespace lumen-private, which
+    //  niri's layer rule (rules/layers.kdl) leaves out of every capture: on the
+    //  monitor, never in the video. The coral capsule by the pill stays too.
+    surface rec_bar {
+        size: 260, 96
+        anchor: bottom
+        margin: 0
+        level: overlay
+        reserve: -1
+        captures: hidden
+        open: rbv > 0.002
+        group {
+            pivot: 118, 66
+            scale: 0.86 + 0.14 * rbv
+            move: 0, 18 * (1 - rbv)
+            opacity: smooth(0, 0.55, rbv)
+            body {
+                gradient: 20, 14 to 216, 66, dusk, deep
+                glass: 100%
+                blur: lg_card_frost * rbv; refraction: lg_refraction * rbv; bevel: lg_bevel; dispersion: lg_dispersion * rbv; specular: lg_specular * rbv; glass_tint: lg_glass_tint * rbv; rim_tint: lg_rim_tint; merge: lg_merge; adapt: gl_rb
+                opacity: card_alpha
+                milk: lg_card_milk
+                smoke: card_smoke
+                rim: 0%
+                ripple: 0%
+                light: 1%, 0, 12
+                shadow: 0, 8, 22, 16%
+                box { from: 20, 14; size: 196, 52; corner: 26 continuous }
+            }
+            ellipse { at: 44, 40; radius: 5; color: coral; opacity: 70% + 30% * rec_pulse }
+            text rec_time { at: 58, 40; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+            zone box rb_stop { from: 120, 23; size: 88, 34; corner: 17 continuous; cursor: pointer; label: "Stop recording"; active: rbv > 0.9 }
+            body {
+                color: mix(rose, #8a3e50, rb_stop.hover); material: control; opacity: 50% + 10% * rb_stop.pressed
+                box { from: 120, 23; size: 88, 34; corner: 17 continuous }
+            }
+            box { from: 140, 35; size: 10, 10; corner: 2.5 continuous; color: rose_ink }
+            text "Stop" { at: 157, 40; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: rose_ink }
+        }
+        on press rb_stop { emit rec_stop }
+    }
+
     // ── palette (waybar/style.css, LUMEN v2) ─────────────────────
     //  The colours that follow the wallpaper (ink, the prism, the glass, the greys)
     //  come from theme.plm, written by theme/wallpaper-theme.py; the rest are fixed.
@@ -186,6 +230,7 @@ scene Island {
     fact gl_r = 0             // the battery & date capsule
     fact gl_h = 0             // the level gauge over a fullscreen window (surface hud)
     fact gl_n = 0             // a notification over a fullscreen window (surface note_hud)
+    fact gl_rb = 0            // the recording bar (surface rec_bar)
     //  2026-11-02: niri draws every glass dark now (patch 0035), so the text stays white: these are
     //  held at 0 (dark). To follow niri's light/dark again, set the switch below to true.
     let gl_follow = false
@@ -223,6 +268,7 @@ scene Island {
     //  WhatsApp's view in iMessage's own colours (not the island's tint: that follows a wallpaper).
     let im_blue  = #0a84ff    // iOS's system blue, dark: what is ours, what is unread, what sends
     let im_blue2 = #3a9bff    // …its lighter top, for the bubble's soft gradient
+    let im_deep  = #3b55e6    // …and deeper, towards indigo: ours far up the chat, away from the field
     let im_gray  = chip       // their bubbles, the field, the pills: the island's own neutral chips
     let im_gray2 = chip_hi    // …and what is chosen, or has the keys
 
@@ -322,7 +368,7 @@ scene Island {
     //  The chats, pinned then newest…
     model wac max 16 { name: text; last: text; ago: text; unread: number; badge: text; muted: bool; pinned: bool; group: bool; init: text; pic: image 44, 44; typing: bool }
     //  …and the open one's messages, oldest first, with a row for each day between them.
-    model wam max 120 { text: text; has_text: bool; me: bool; long: bool; from: text; has_from: bool; time: text; tail: bool; status: text; has_status: bool; day: bool; faint: bool; img: bool; sticker: bool; react: text; has_react: bool; edited: bool; can_edit: bool; can_save: bool; pic: image 280, 280; dw: number; dh: number; file: bool; has_q: bool; qfrom: text; qtext: text; has_qtext: bool; full: text; video: bool; qpic: image 34, 34; has_qpic: bool; stack: number; stack_n: text; pic2: image 280, 280; pic3: image 280, 280 }
+    model wam max 120 { text: text; has_text: bool; me: bool; long: bool; from: text; has_from: bool; time: text; clock: text; jumbo: bool; tail: bool; status: text; has_status: bool; day: bool; faint: bool; ghost: bool; gi: number; grp: bool; has_face: bool; face: image 28, 28; finit: text; img: bool; sticker: bool; react: text; has_react: bool; rmine: bool; edited: bool; can_edit: bool; can_save: bool; pic: image 280, 280; dw: number; dh: number; file: bool; voice: bool; vsecs: number; vwave: image 384, 48; has_vwave: bool; vbars: number; vtime: text; md: text; has_link: bool; has_lp: bool; ltitle: text; has_ltitle: bool; ldesc: text; has_ldesc: bool; lsite: text; lpic: image 420, 420; has_lpic: bool; lbig: bool; lr: number; has_q: bool; qme: bool; has_qlt: bool; qltitle: text; qlsite: text; qfrom: text; qtext: text; has_qtext: bool; full: text; video: bool; qpic: image 34, 34; has_qpic: bool; stack: number; stack_n: text; pic2: image 280, 280; pic3: image 280, 280 }
     fact wa_state: pair | qr | connecting | ok | offline = connecting
     fact wa_linked = true     // false while it has to be linked from the phone (the QR code)
     text wa_msg = ""
@@ -341,6 +387,28 @@ scene Island {
     fact wa_tail = 0          // one more message of theirs at the bottom of the open chat
     fact wa_mine = 0          // …or of ours (sent here or from the phone)
     text wa_find = ""
+    //  The command line (:), as Vim's: what is written in it, what it answers (an unknown command…), the
+    //  commands that fit what is written (the chosen one first lit; Tab completes it), and which is chosen.
+    //  A voice note playing in its bubble: which row (-1: none), whether it runs, where this run began
+    //  (seconds; the row counts on from there at the speed), a run begun (counting starts again), how
+    //  long is left (the logic's, every quarter second).
+    fact wa_vplay = -1
+    fact wa_vgo = false
+    fact wa_vfrom = 0
+    fact wa_vspeed = 1
+    fact wa_vseq = 0
+    text wa_vleft = ""
+    event wa_vseek ->         // row × 1000 + where on its waveform (‰)
+    event wa_vspeed_cycle ->
+    fact wa_cmd = false
+    text wa_cmd_in = ""
+    text wa_cmd_msg = ""
+    model wacmd max 10 { name: text; desc: text }
+    fact wa_cmd_sel = 0
+    fact wa_cmd_said = false  // …and whether it has something to say
+    event wa_cmd_run ->
+    event wa_cmd_tab ->
+    event wa_cmd_move ->
     text wa_in = ""
     text wa_name = ""
     fact wa_open = false      // a chat is open on the right
@@ -361,7 +429,7 @@ scene Island {
     event wa_wheel ->         // the wheel over the list: the logic moves its window
     event wa_older ->         // scrolled near the top of a chat
     fact wa_snap = false      // a chat opening: its rows take their heights at once, not on their springs
-    fact wa_vim: insert | normal | visual = insert   // the message field's Vim mode
+    fact wa_times = false     // t: every message's time, out at the chat's right (ours slide aside for them)
     //  The chat's cursor (l, then j/k), as Vim's on lines: the row it is on (-1: none), how far
     //  that row's top is from the bottom of the chat, and which way it last went (to step over days).
     fact wa_cur = -1
@@ -385,6 +453,8 @@ scene Island {
     event wa_reply ->         // r: answering it
     event wa_quote_clear ->
     fact wa_off = 0           // the first chat in sight
+    fact wa_sb = false        // the chat list is scrolling: its bar shows (pages/whatsapp.plm)
+    fact wa_msb = false       // …the messages are
     fact wa_first = 0         // …and the first the list's records hold (a few above it, to glide over)
     fact wa_total = 0         // how many chats the list goes through
     fact wa_sync_show = false // catching up after being away (the helper's "sync"), and a moment after
@@ -419,7 +489,7 @@ scene Island {
     event wa_prefetch ->      // the pointer over a picture or file: fetched whole, ready to open or drag out
     //  Over the chat, one at a time (`wa_modal`: the view's other keys wait): the gallery (m), the
     //  reactions (e), deleting (dd), forwarding (f), searching the chat (/), a voice note (v).
-    let wa_modal = wa_gal or wa_rx or wa_del > 0 or wa_fwd or wa_cs or wa_rec or wa_menu >= 0 or wa_who
+    let wa_modal = wa_gal or wa_rx or wa_del > 0 or wa_fwd or wa_cs or wa_rec or wa_menu >= 0 or wa_who or wa_cmd
     //  The pointer's way to the same: a bar beside the message under it (react, reply, more), and
     //  its menu (… or a right click), opened where it was pressed, for the message it is on.
     fact wa_menu = -1         // the row the menu is for (-1: none)
@@ -427,7 +497,10 @@ scene Island {
     fact wa_my = 0
     fact wa_m_edit = false    // …what it offers for that message
     fact wa_m_save = false
-    event wa_act ->           // row × 10 + what: 1 react, 2 reply, 3 forward, 4 copy, 5 save, 6 edit, 7 delete, 8 open in its app
+    fact wa_m_fail = false    // one that did not go: its menu is Try Again, Copy, Delete
+    fact wa_cur_fail = false  // the cursor is on one that did not go: Enter tries again
+    event wa_retry ->
+    event wa_act ->           // row × 10 + what: 1 react, 2 reply, 3 forward, 4 copy, 5 save, 6 edit, 7 delete, 8 open in its app, 9 try again
     event wa_rec_tap ->       // the microphone pressed: a voice note, until sent or thrown away
     event wa_ql_open ->       // Quick Look's picture, in the program that opens it
     event wa_gsave ->         // a tile's or a file's own save button (its record)
@@ -467,6 +540,8 @@ scene Island {
     model wawho max 12 { name: text; init: text; pic: image 32, 32; emoji: text; me: bool; sub: text }
     model wawt max 7 { label: text }
     event wa_who_open ->
+    event wa_link_at ->       // a link's card pressed: the browser (the row's index)
+    event wa_qjump ->         // a reply's quoted message pressed: the chat goes to the original (the row's index)
     event wa_who_at ->        // …that row's
     event wa_who_move ->
     event wa_who_tab ->
@@ -513,6 +588,11 @@ scene Island {
     image ic_off = file "icons/power.svg", 18, 18
     image ic_search = file "icons/search.svg", 14, 14
     image ic_x = file "icons/xmark.svg", 12, 12
+    //  What stands in for a WhatsApp message: on its way, view once, open on the phone, deleted.
+    image ic_g_wait = file "icons/timer.svg", 13, 13
+    image ic_g_once = file "icons/once.svg", 13, 13
+    image ic_g_phone = file "icons/phone.svg", 13, 13
+    image ic_g_del = file "icons/nosign.svg", 13, 13
     image ic_trash = file "icons/trash.svg", 15, 15
     image ic_doc = file "icons/doc.svg", 24, 24
     image ic_folder = file "icons/folder.svg", 24, 24
@@ -887,7 +967,19 @@ scene Island {
     // ── emoji: the logic hands over the 32 in sight ──
     model emo max 56 { e: text; name: text; sel: bool }
     fact emo_q_empty = true
+    //  Where the chosen one of each list is among those in sight (-1: none): its gliding glass (pages/glide.plm).
+    fact clip_at = -1
+    fact launch_at = -1
+    fact proj_at = -1
+    fact stor_at = -1
+    fact act_at = -1
+    fact emo_at = -1
+    fact wall_at = -1
+    fact win_at = -1
+    fact fnd_at = -1
     fact emo_insert = false   // vim: searching (insert) or moving through the grid (normal)
+    fact emo_from = false     // opened over a field being typed in (WhatsApp, a mail's reply): what is chosen goes
+                              // into it at its cursor, the picker stays for more, and one Escape goes back to it
     fact emo_gg = false       // a first `g` waiting for its second
     event emo_q_clear ->
     event emo_cat_step ->     // [ ] : the category before or after the one in sight
@@ -931,6 +1023,7 @@ scene Island {
     fact cap_save = true      // screenshots also go to ~/Pictures/Screenshots
     fact recording = false
     text rec_time = "0:00"
+    text rec_at = ""          // niri's screenshot UI: "at WxH+X+Y" or "output NAME" starts a recording
     event cap_take ->         // which: 0 region, 1 window, 2 screen
     event rec_stop ->
     event shot_open
@@ -1322,8 +1415,6 @@ scene Island {
     //  The banner: 0 the pill, 1 the pill grown into a notification.
     prop ban = 0 ~380ms
     follow ban = if(ban_here and app == none and not expanded and not osd and not picked and not copied and not dev_on, 1, 0)
-    //  An app opening takes the pill: a banner showing then goes (it is still in the notifications).
-    on change app while app != none and ban_here { banner = false }
     //  The level gauge: 0 the pill, 1 the pill grown into it.
     //  How far the pill has gone into its dark, smoked glass: the card and banners are.
     let dark = max(max(max(open, ban), cpi), aon)
@@ -1332,6 +1423,7 @@ scene Island {
     //  Over a fullscreen window the pill is under it: the gauge comes on its own
     //  (surface hud), dropping in from above and settling with a little give.
     fact fs = false           // the focused window is fullscreen (the logic says)
+    fact fs_under = false     // …and a page over it hasn't changed that: taking the keyboard makes `fs` false
     //  Where the gauge and a banner show when the pill cannot (over a fullscreen window: top centre;
     //  the pill busy —its card open, an app up—: top right, under the date, as macOS's do).
     fact hud_at: top | top_right = top
@@ -1342,7 +1434,13 @@ scene Island {
     follow fso = if(fs and osd, 1, 0)
     //  …and so does a notification's banner (surface note_hud), when the pill would show one.
     prop fsn = 0 ~hud_in
+    prop rbv = 0 ~hud_in      // the recording bar (surface rec_bar)
+    follow rbv = if(recording, 1, 0)
     follow fsn = if((fs or isl_tv) and banner and not osd and not picked and not copied and not dev_on, 1, 0)
+    //  A page called up over a fullscreen window (Super+D, Super+C…): the island
+    //  comes back for it, above fullscreen, and stays long enough to close properly.
+    prop fsc = 0 ~500ms
+    follow fsc = if(pill_busy or pw_open or pk.pending, 1, 0)
     prop lv = 0 ~240ms        // the level shown: it pours rather than jumps
     follow lv = clamp(if(osd_kind == vol, audio.volume, if(osd_kind == bright, bright, kbd)), 0, 1)
     prop trail = 0 ~700ms     // …and where it was, catching up slowly
@@ -1412,22 +1510,26 @@ scene Island {
     prop wb2 = 0
     prop wb3 = 0
     prop wb4 = 0
-    wave wb0 = 3.6 * amp at 6.3
-    wave wb1 = 4.4 * amp at 8.9
-    wave wb2 = 3.8 * amp at 7.4
-    wave wb3 = 4.6 * amp at 10.1
-    wave wb4 = 3.4 * amp at 5.7
+    //  Only while the bars are in sight: the pill's contents fade out under the card, an app, a banner,
+    //  a gauge… and a fullscreen window covers the island altogether. A wave left running kept the
+    //  whole island going round sixty times a second behind all of those, drawing nothing.
+    let wseen = if(max(max(max(open, ban), max(aon, ivv)), max(max(os, dvv), max(pkv, cpv))) < 0.5 and ldv < 0.5 and (not fs or fsc > 0.002), 1, 0)
+    wave wb0 = 3.6 * amp * wseen at 6.3
+    wave wb1 = 4.4 * amp * wseen at 8.9
+    wave wb2 = 3.8 * amp * wseen at 7.4
+    wave wb3 = 4.6 * amp * wseen at 10.1
+    wave wb4 = 3.4 * amp * wseen at 5.7
     //  A second rhythm under each bar, at unrelated speeds: uneven, like music.
     prop wc0 = 0
     prop wc1 = 0
     prop wc2 = 0
     prop wc3 = 0
     prop wc4 = 0
-    wave wc0 = 2.2 * amp at 13.7
-    wave wc1 = 1.8 * amp at 3.9
-    wave wc2 = 2.6 * amp at 15.3
-    wave wc3 = 1.6 * amp at 4.6
-    wave wc4 = 2.4 * amp at 12.2
+    wave wc0 = 2.2 * amp * wseen at 13.7
+    wave wc1 = 1.8 * amp * wseen at 3.9
+    wave wc2 = 2.6 * amp * wseen at 15.3
+    wave wc3 = 1.6 * amp * wseen at 4.6
+    wave wc4 = 2.4 * amp * wseen at 12.2
     on change media.playing while media.playing { mus_keep: 1 }
     on change media.playing while not media.playing { mus_keep: 0 after 120000ms }
     let mus = max(mus_p, mus_keep * if(has_player, 1, 0))
@@ -1486,9 +1588,15 @@ scene Island {
     follow wap = if(wa_att, 1, 0)
     //  The WhatsApp chat's messages (pages/whatsapp.plm) run the whole height of the chat, under
     //  its floating header and field; what they show unhidden is from y 100 to just over the field.
-    let wvh = 744 - 64 - 100 - 46 * wqp - 64 * wap
+    measure wa_in_m           // what the WhatsApp field takes up: it grows a line at a time, up to six
+    prop wfx = 0 ~120ms         // …how much taller than one line it is, sprung: the capsule and all over it rise by that
+    follow wfx = max(0, wa_in_m.height - 13.5 * 1.3)
+    let wvh = 744 - 64 - 154 - 46 * wqp - 64 * wap - wfx   // from 134 to 662: clear of the fades at both ends of the chat
     measure wanm              // how wide the chat's name is: its glass pill fits it
+    let wcw = 568               // the WhatsApp chat's column: its 600 less a margin each side
     prop wfb = 0 ~quick         // …scrolled up this far from its newest (0: at the bottom)
+    prop wts = 0 ~260ms         // …its times out (t), as iMessage's swipe shows them
+    follow wts = if(wa_times, 1, 0)
     let wmax = max(0, wml.height - wvh)   // …and as far as it goes
     let mzs = 1004 / 620      // how much larger the focused view draws a mail (the card's whole width)
     //  Reading (l) in the large view: the list slides away and the mail takes the whole card.
@@ -1532,21 +1640,30 @@ scene Island {
     //  rides into the app's corner) to just short of the date capsule on the right.
     //  A card grown from the date capsule (the calendar, a notification) is part of the row too:
     //  app, its card, then that one, side by side, never over each other.
-    let cap_card_w = if(cal, 316, if(ban_here and not osd and not fs and (expanded or app != none), 384, 0))
+    //  The capsule on the right grows into what the pill would say while the middle is taken (see `chk`):
+    //  which, by the pill's own order of importance, and how big.
+    let cap_want = if(osd, 1, if(picked, 6, if(copied, 3, if(dev_on, 4, if(ban_here, 2, if(ld_on, 7, if(idle_on, 5, 0)))))))
+    let hud_w = if(chk == 1, 340, if(chk == 2, 384, if(chk == 3, cp_tw, if(chk == 4, dv_w, if(chk == 5, 290, if(chk == 6, 214, ld_w))))))
+    let hud_h = if(chk == 2, ban_h, if(chk == 3, cp_th, 34))
+    let cap_card_w = if(cal, 316, if(cap_want > 0 and not fs and (expanded or app != none), hud_w, 0))   // whatever the capsule grows into: the app makes room
     let pair_l = 16
     let pair_r = screen.width - 24 - max(190, cap_card_w + 14)
+    //  …the room at rest (the date capsule, or the calendar opened from it): what decides whether a card
+    //  fits beside the app. Something passing through the capsule (a copy, a notification, idle) may slide
+    //  the row aside if there is room, but never puts the card over the app nor resizes the files.
+    let pair_r0 = screen.width - 24 - max(190, if(cal, 316, 0) + 14)
     //  The files keep their whole layout while the card is out: only their preview narrows, by
     //  what the card needs (never below the list's own 300).
     let fnd_slim = app_last == fnd and expanded and app == fnd
-    let fnd_bw = clamp(pair_r - pair_l - 14 - max(if(panel == clip, 404, if(panel == home or panel == ctl, 412, if(panel == cam, 928, 384))), rest_w), 760, 1120)
-    let aw_t = if(app_last == fnd, if(fnd_slim, fnd_bw, 1120), 1040 - if(wa_slim, 284, 0) - if(mail_slim, 384, 0))
+    let fnd_bw = clamp(pair_r0 - pair_l - 14 - max(if(panel == clip, 404, if(panel == home or panel == ctl, 412, if(panel == cam, 928, 384))), rest_w), 760, 1120)
+    let aw_t = if(app_last == fnd, if(fnd_slim, fnd_bw, 1120), if(app_last == wa, 940 - if(wa_slim, 240, 0), 1040 - if(mail_slim, 384, 0)))   // WhatsApp: a 340 list and a 600 chat
     let ah_t = if(app_last == mailx, 840, if(app_last == wa, 760, 88 + 458 + 16))
     //  The files beside an app: what room the row leaves them (their preview hidden below ~720).
-    let fnds_room = pair_r - pair_l - 14 - aw_t
+    let fnds_room = pair_r0 - pair_l - 14 - aw_t
     let fnds_w = if(fnds_room >= 720, min(fnds_room, 1120), 452)     // the list and its preview, or the list alone (its 420 rows)
     let cw_c = if(panel == launch, 600, if(panel == home or panel == ctl, 412, if(panel == cam, 928, if(panel == clip or panel == proj, 780, if(panel == fnds, fnds_w, 384)))))
     let cw_b = if(panel == clip, 404, if(panel == proj, 412, cw_c))
-    let beside_fits = app != none and aw_t + 14 + max(cw_b, rest_w) <= pair_r - pair_l
+    let beside_fits = app != none and aw_t + 14 + max(cw_b, rest_w) <= pair_r0 - pair_l
     let cw_t = if(beside_fits, cw_b, cw_c)
     let beside = beside_fits and expanded
     let proj_wide = not beside_fits           // the projects' preview: on their own only
@@ -1570,7 +1687,7 @@ scene Island {
     let side_room = if(side, side_w, 300)
     //  The app glides left as its card buds off to the right: the pair centred, or as far left as
     //  it takes to keep the card clear of the date capsule.
-    let pair_x = clamp(screen.width / 2 - pair_w / 2, pair_l, pair_r - pair_w)
+    let pair_x = max(pair_l, min(screen.width / 2 - pair_w / 2, pair_r - pair_w))
     //  …and no card grown from the date capsule (the calendar, a notification) ever covers it: it
     //  glides left just far enough, and back once the card is gone. (The gauge, a strip at the
     //  top, does not move it: its clock steps aside.)
@@ -1871,88 +1988,32 @@ scene Island {
     //  An image shows as a tiny squircle of itself; text read off the screen
     //  says "Scanned", and OCR that found nothing says so instead.
     text cp_text { at: 0, -40; size: 12.5; weight: 600; family: "SF Pro Display"; opacity: 0; measure: cpm }
+    include "pages/states.plm"
+    include "pages/glide.plm"
     group {
         opacity: smooth(0.45, 1, cpv)
         move: 0, 2 * (1 - cpv)
         clip inset 1 box { from: x0, 0; size: pw, ph; corner: pr continuous }
-        //  A picture: "Image copied" and its size along the bar, the picture under it.
-        group {
-            show: cp_kind == 1
-            image ic_clip { at: x0 + 16, 10; size: 14, 14; tint: ink; opacity: 85% }
-            text "Image copied" { at: x0 + 38, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink }
-            text cp_dims { at: x0 + pw - 16, 17; anchor: right center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 55% }
-            let pic_x = cx - cp_iw / 2
-            let pic_y = 38
-            box { from: pic_x, pic_y; size: cp_iw, cp_ih; corner: 12 continuous; color: chip_hi }
-            group {
-                clip box { from: pic_x, pic_y; size: cp_iw, cp_ih; corner: 12 continuous }
-                image cp_big { at: cx - 150, pic_y + cp_ih / 2 - 85; size: 300, 170 }
-            }
-            box { from: pic_x, pic_y; size: cp_iw, cp_ih; corner: 12 continuous; stroke: 0.6; color: ink; opacity: 18% }
-        }
-        image ic_clip { at: x0 + 16, 10; size: 14, 14; tint: ink; opacity: 85%; show: cp_kind == 0 }
-        image ic_shot { at: x0 + 16, 10; size: 14, 14; tint: ink; opacity: 85%; show: cp_kind == 2 or cp_kind == 3 }
-        //  Low battery: a small coral battery, and how much is left on the right.
-        group {
-            show: cp_kind == 4
-            box { from: x0 + 14, 12; size: 16, 9; corner: 2.8 continuous; stroke: 1.2; color: coral }
-            box { from: x0 + 30.6, 14.6; size: 1.4, 3.8; corner: 0.7 continuous; color: coral }
-            box { from: x0 + 16, 14; size: 3, 5; corner: 1 continuous; color: coral }
-            text cp_dims { at: x0 + pw - 16, 17; anchor: right center; size: 12; weight: 700; family: "SF Pro Display"; color: coral }
-        }
-        //  A timer has run out: its symbol in warm light, and how long it was.
-        group {
-            show: cp_kind == 5
-            image ic_timer { at: x0 + 16, 10; size: 14, 14; tint: warm }
-            text cp_dims { at: x0 + pw - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: 65% }
-        }
-        text cp_text {
-            at: x0 + 42, 17; anchor: left center; width: 230; lines: 1
-            size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(cp_kind == 1, 0, if(cp_kind == 3, 70%, 100%)); shadow: 0, 1, 3, 35% * (1 - gl_cs)
-        }
-        text pick(min(cp_kind, 2), "Copied", "Copied", "Scanned") {
-            at: x0 + pw - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"
-            color: ink; opacity: if(cp_kind == 0 or cp_kind == 2, 65%, 0); shadow: 0, 1, 3, 35% * (1 - gl_cs)
-        }
+        group { move: x0, 0; CopyState(pw, gl_cs) }
     }
     on change cp_seq { copied = true }
     on still cp_seq for 2400ms while copied and cp_kind != 1 and cp_kind != 4 and cp_kind != 5 { copied = false }
     on still cp_seq for 4000ms while copied and cp_kind == 4 { copied = false }
     on still cp_seq for 6000ms while copied and cp_kind == 5 { copied = false }
     on still cp_seq for 3200ms while copied and cp_kind == 1 { copied = false }
-    on change expanded while expanded { copied = false }
 
     // ── a device connected, in the pill: its symbol, its name, its battery ──
     //  The ring fills once the pill has opened, green, or coral when low.
     text dv_name { at: 0, -40; size: 12.5; weight: 600; family: "SF Pro Display"; opacity: 0; measure: dvm }
     prop dvr = 0 ~700ms
-    follow dvr = if(dvv > 0.6, max(dv_bat, 0), 0)
+    prop dvo = 0              // …once it has come in (a moment after it is told), wherever it shows
+    on change dv_seq { dvo: 0 ~1ms; dvo: 1 ~1ms after 350ms }
+    follow dvr = if(dev_on and dvo > 0.5, max(dv_bat, 0), 0)
     group {
         opacity: smooth(0.45, 1, dvv)
         move: 0, 2 * (1 - dvv)
         clip inset 1 box { from: x0, 0; size: pw, ph; corner: pr continuous }
-        group {
-            move: x0 + 16, 8
-            image dv_head { at: 0, 0; size: 18, 18; tint: ink; show: dv_glyph == 0 }
-            image dv_mouse { at: 0, 0; size: 18, 18; tint: ink; show: dv_glyph == 1 }
-            image dv_keys { at: 0, 0; size: 18, 18; tint: ink; show: dv_glyph == 2 }
-            image dv_phone { at: 0, 0; size: 18, 18; tint: ink; show: dv_glyph == 3 }
-            image dv_other { at: 0, 0; size: 18, 18; tint: ink; show: dv_glyph == 4 }
-        }
-        text dv_name {
-            at: x0 + 44, 17; anchor: left center; width: 180; lines: 1
-            size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; shadow: 0, 1, 3, 35% * (1 - gl_cs)
-        }
-        group {
-            show: dv_bat >= 0
-            let rx = x0 + pw - 16 - 32 - 6 - 11
-            ellipse { at: rx, 17; radius: 9; stroke: 2.4; color: ink; opacity: 18% }
-            arc { at: rx, 17; radius: 9; span: clamp(dvr, 0.012, 1) * 360deg; rotate: clamp(dvr, 0.012, 1) * 180deg; width: 2.4; color: if(dv_bat <= 0.2, coral, #30d158) }
-            text number(dv_bat * 100, 0, "%") {
-                at: x0 + pw - 16, 17; anchor: right center; size: 12; weight: 700; family: "SF Pro Display"
-                color: ink; shadow: 0, 1, 3, 35% * (1 - gl_cs)
-            }
-        }
+        group { move: x0, 0; DeviceState(pw, gl_cs) }
     }
     // ── idle: a moon and how long until the lock (its ring draining); back, a tick and how long
     //  you were away, for a moment. The least of the pill's states: anything else comes first.
@@ -1960,25 +2021,7 @@ scene Island {
         opacity: smooth(0.45, 1, ivv)
         move: 0, 2 * (1 - ivv)
         clip inset 1 box { from: x0, 0; size: pw, ph; corner: pr continuous }
-        image ic_moon_i { at: x0 + 16, 8; size: 18, 18; tint: soft_l; opacity: 1 - ivb }
-        group {
-            opacity: ivb
-            pivot: x0 + 25, 17
-            scale: 0.6 + 0.4 * ivb
-            ellipse { at: x0 + 25, 17; radius: 9; color: #30d158 }
-            image ic_check_i { at: x0 + 17, 9; size: 16, 16; tint: #ffffff }
-        }
-        text "Idle" { at: x0 + 44, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; shadow: 0, 1, 3, 35% * (1 - gl_cs); opacity: 1 - ivb }
-        text "Welcome back" { at: x0 + 44, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; shadow: 0, 1, 3, 35% * (1 - gl_cs); opacity: ivb }
-        //  Until the lock: the ring drains, the minutes count down.
-        group {
-            opacity: 1 - ivb
-            let irx = x0 + pw - 16 - 38 - 6 - 11
-            ellipse { at: irx, 17; radius: 9; stroke: 2.4; color: ink; opacity: 18% }
-            arc { at: irx, 17; radius: 9; span: clamp(ivr, 0.012, 1) * 360deg; rotate: clamp(ivr, 0.012, 1) * 180deg; width: 2.4; color: if(idle_left <= 60, coral, soft_l) }
-            text "{idle_left, time}" { at: x0 + pw - 16, 17; anchor: right center; size: 12; weight: 700; family: "SF Pro Display"; color: ink; shadow: 0, 1, 3, 35% * (1 - gl_cs) }
-        }
-        text "Away {(600 - idle_left) / 60, 0} min" { at: x0 + pw - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: 65% * ivb; shadow: 0, 1, 3, 35% * (1 - gl_cs) }
+        group { move: x0, 0; IdleState(pw, gl_cs) }
     }
     on idle_warn { idle_on = true; idle_back = false; idle_left = 300 }
     every 1s while idle_on and not idle_back { idle_left = max(0, idle_left - 1) }
@@ -1986,62 +2029,27 @@ scene Island {
     on change idle_left while idle_left <= 0 { idle_on = false }
     on idle_resume while idle_on { idle_back = true }
     on still idle_back for 2600ms while idle_back { idle_on = false; idle_back = false }
-    on change expanded while expanded { idle_on = false; idle_back = false }
 
     on change dv_seq { dev_on = true }
     on still dv_seq for 3600ms while dev_on { dev_on = false }
-    on change expanded while expanded { dev_on = false }
 
     // ── landed on another desktop: the pill says where, as the Dynamic Island
     //  says what is going on. It widens from the clock into the desktop's apps
     //  (their icons popping in one after another, the most recent in front)
     //  and its name, the time still at its end; then it settles back.
     text ld_name { at: 0, -40; size: 13; weight: 600; family: "SF Pro Display"; opacity: 0; measure: ldm }
-    let ld_x = x0 + 16
-    let ld_e1 = clamp((ldv - 0.25) / 0.5, 0, 1)
-    let ld_e2 = clamp((ldv - 0.35) / 0.5, 0, 1)
-    let ld_e3 = clamp((ldv - 0.45) / 0.5, 0, 1)
-    let ld_e4 = clamp((ldv - 0.55) / 0.45, 0, 1)
     group {
         opacity: smooth(0.45, 1, ldv)
         clip inset 1 box { from: x0, 0; size: pw, ph; corner: pr continuous }
-        //  Back to front, so the first one sits on top of the stack.
-        group {
-            show: ld_n > 3
-            pivot: ld_x + 55, 17; scale: 0.6 + 0.4 * ld_e4; opacity: ld_e4
-            image ld_i4 { at: ld_x + 45, 7; size: 20, 20 }
-        }
-        group {
-            show: ld_n > 2
-            pivot: ld_x + 40, 17; scale: 0.6 + 0.4 * ld_e3; opacity: ld_e3
-            image ld_i3 { at: ld_x + 30, 7; size: 20, 20 }
-        }
-        group {
-            show: ld_n > 1
-            pivot: ld_x + 25, 17; scale: 0.6 + 0.4 * ld_e2; opacity: ld_e2
-            image ld_i2 { at: ld_x + 15, 7; size: 20, 20 }
-        }
-        group {
-            show: ld_n > 0
-            pivot: ld_x + 10, 17; scale: 0.6 + 0.4 * ld_e1; opacity: ld_e1
-            image ld_i1 { at: ld_x, 7; size: 20, 20 }
-        }
-        text ld_name {
-            at: ld_x + ld_iw, 17 + 2 * (1 - ldv); anchor: left center; width: 200; lines: 1
-            size: 13; weight: 600; family: "SF Pro Display"; color: tint_ink; shadow: 0, 1, 3, 35% * (1 - gl_cs)
-        }
+        group { move: x0, 0; LandState(pw, ldv, gl_cs) }
     }
-    on change expanded while expanded { ld_on = false }
 
     // ── the colour picker's answer, in the pill: a swatch, its code, "Copied" ──
     group {
         opacity: smooth(0.45, 1, pkv)
         move: 0, 2 * (1 - pkv)
         clip inset 1 box { from: x0, 0; size: pw, ph; corner: pr continuous }
-        ellipse { at: x0 + 19, 17; radius: 9; color: rgb(pk_r, pk_g, pk_b) }
-        ellipse { at: x0 + 19, 17; radius: 9; stroke: 1; color: ink; opacity: 35% }
-        text pk_hex { at: x0 + 36, 17; anchor: left center; size: 13; weight: 600; family: "SF Pro Display"; color: ink; shadow: 0, 1, 3, 35% * (1 - gl_cs) }
-        text "Copied" { at: x0 + pw - 16, 17; anchor: right center; size: 12; weight: 600; family: "SF Pro Display"; color: ink; opacity: 70%; shadow: 0, 1, 3, 35% * (1 - gl_cs) }
+        group { move: x0, 0; PickState(pw, gl_cs) }
     }
     }
 
@@ -2238,13 +2246,12 @@ scene Island {
         group {
         opacity: 1 - lv
         move: -36 * lv, 0
-        zone box z { from: 0, 0; size: 364, 52; corner: 14 continuous; cursor: pointer; label: "{m.from}: {m.subj}" }
+        zone box z { from: 0, 0; size: 364, 52; corner: 26 continuous; cursor: pointer; label: "{m.from}: {m.subj}" }
         body {
-            gradient: 0, 0 to 364, 52, soft_l, soft_s; glass: 25%; blur: 0%; light: 4%, 0, 26
-            opacity: if(mx_sel == m.index, 20%, 0)
-            box { from: 0, 0; size: 364, 52; corner: 14 continuous }
+            color: ink; opacity: 6%; show: z.hover > 0.5 and mx_sel != m.index
+            box { from: 0, 0; size: 364, 52; corner: 26 continuous }
         }
-        box { from: 0, 0; size: 364, 52; corner: 14 continuous; color: ink; opacity: (6% * z.hover + 4% * z.pressed) * if(mx_sel == m.index, 0, 1) }
+        //  (The chosen mail is the list's gliding glass: pages/glide.plm.)
         body {
             gradient: 7, 13 to 15, 21, soft_l, soft_s; light: 7%, 13, 4
             opacity: if(m.unread, 100%, 0)
@@ -2252,8 +2259,8 @@ scene Island {
         }
         text m.from { at: 23, 17; anchor: left center; width: 260; lines: 1; size: 13; weight: 700; family: "SF Pro Display"; color: ink; opacity: if(m.unread, 100%, 0) }
         text m.from { at: 23, 17; anchor: left center; width: 260; lines: 1; size: 13; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(m.unread, 0, 90%) }
-        text m.ago { at: 352, 17; anchor: right center; size: 10.5; weight: 600; family: "SF Pro Display"; color: if(m.unread, tint_ink, ink); opacity: if(m.unread, 95%, 45%) }
-        text m.subj { at: 23, 35.5; anchor: left center; width: 330; lines: 1; size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(m.unread, 82%, 58%) }
+        text m.ago { at: 340, 17; anchor: right center; size: 10.5; weight: 600; family: "SF Pro Display"; color: if(m.unread, tint_ink, ink); opacity: if(m.unread, 95%, 45%) }
+        text m.subj { at: 23, 35.5; anchor: left center; width: 316; lines: 1; size: 11.5; weight: 500; family: "SF Pro Display"; color: ink; opacity: if(m.unread, 82%, 58%) }
         }
         on press z { emit mailx_pick(m.index) }
     }
@@ -2262,22 +2269,33 @@ scene Island {
     //  was said last over two lines; a bead of the island's light before it while it is unread,
     //  and the count under the time. Pinned and muted ones say so with a small symbol.
     component WaChat(c: record) {
-        size: 364 - 284 * wcol, 66
-        let rw = 364 - 284 * wcol         // folded: the face alone
+        size: 320 - 240 * wcol, 66
+        let rw = 320 - 240 * wcol         // folded: the face alone
         let wt = 1 - smooth(0, 0.6, wcol) // …its words fade first
         let bw = if(c.unread > 99, 28, if(c.unread > 9, 23, 18))
         let sel = if(wa_sel == wa_first + c.index, 1, 0)
-        zone box z { from: 0, 0; size: rw, 66; corner: 18 continuous; cursor: pointer; label: "{c.name}" }
+        //  On the right, on the middle line where the pill's round end leaves the most room: the time
+        //  (each row measures its own: "14:07", "Yesterday"), the unread count left of it, then pinned/muted.
+        measure agm
+        let unr = if(c.unread > 0, 1, 0)
+        let bdx = 302 - agm.width - 7 - bw / 2          // the count's middle
+        let mrk_x = 302 - agm.width - 7 - (bw + 6) * unr - 11   // pinned or muted, left of them
+        let rcol = 302 - mrk_x + 8                       // how much the right column takes
+        zone box z { from: 0, 0; size: rw, 66; corner: 33 continuous; cursor: pointer; label: "{c.name}" }
+        //  Under the pointer a faint trace (one glass pill only: the chosen one); the chosen chat is a raised, lit one: a pill inset so the
+        //  face has 11 on every side and sits in its round end. Folded, a circle around the face.
         body {
-            color: im_gray2; light: 4%, 0, 20
-            opacity: 85% * sel
-            box { from: 0, 0; size: rw, 66; corner: 18 continuous }
+            color: ink; opacity: 6%; show: z.hover > 0.5 and sel < 0.5
+            box { from: 7, 0; size: rw - 14, 66; corner: 33 continuous }
         }
-        box { from: 0, 0; size: rw, 66; corner: 18 continuous; color: ink; opacity: (5% * z.hover + 4% * z.pressed) * (1 - sel) }
-        //  Unread: a bead of light before the face (grey when it is muted).
+        //  (The chosen chat's glass is the list's one `Glide`, pages/whatsapp.plm: it travels between rows.)
+        //  Unread: a bead of light before the face (grey when it is muted). Not on the chosen chat: there
+        //  it would sit on the glass pill's rim, and the count beside the time says it already.
+        prop dsel = 0 ~160ms
+        follow dsel = sel
         body {
             color: if(c.muted, im_gray2, im_blue); light: 7%, 29, 4
-            opacity: if(c.unread > 0, 100%, 0) * wt
+            opacity: if(c.unread > 0, 100%, 0) * wt * (1 - dsel)
             ellipse { at: 9, 33; radius: 3.8 }
         }
         body {
@@ -2293,25 +2311,28 @@ scene Island {
         group {
         opacity: wt
         show: wcol < 0.98
-        text c.name { at: 72, 19; anchor: left center; width: 205; lines: 1; size: 13.5; weight: 700; family: "SF Pro Display"; color: ink; opacity: if(c.unread > 0, 100%, 0) }
-        text c.name { at: 72, 19; anchor: left center; width: 205; lines: 1; size: 13.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(c.unread > 0, 0, 94%) }
-        text c.ago { at: 352, 19; anchor: right center; size: 10.5; weight: 500; family: "SF Pro Text"; color: if(c.unread > 0 and not c.muted, im_blue2, ink); opacity: if(c.unread > 0, 100%, 45%) }
+        text c.name { at: 72, 19; anchor: left center; width: 230 - rcol; lines: 1; size: 13.5; weight: 700; family: "SF Pro Display"; color: ink; opacity: if(c.unread > 0, 100%, 0) }
+        text c.name { at: 72, 19; anchor: left center; width: 230 - rcol; lines: 1; size: 13.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: if(c.unread > 0, 0, 94%) }
+        text c.ago { at: 302, 33; measure: agm; anchor: right center; size: 10.5; weight: 500; family: "SF Pro Text"; color: if(c.unread > 0 and not c.muted, im_blue2, ink); opacity: if(c.unread > 0, 100%, 45%) }
         //  Pinned, muted: before the time.
-        image ic_pin { at: 352 - 44, 13; size: 11, 11; tint: ink; opacity: if(c.pinned and not c.muted, 40%, 0) }
-        image ic_bellx { at: 352 - 44, 13; size: 11, 11; tint: ink; opacity: if(c.muted, 40%, 0) }
-        text c.last { at: 72, 29; anchor: left top; width: 250 - bw * if(c.unread > 0, 1, 0); lines: 2; line_height: 1.22; size: 11.5; weight: 400; family: "SF Pro Text"; color: ink; opacity: if(c.typing, 0, if(c.unread > 0, 78%, 52%)) }
+        image ic_pin { at: mrk_x, 27.5; size: 11, 11; tint: ink; opacity: if(c.pinned and not c.muted, 40%, 0) }
+        image ic_bellx { at: mrk_x, 27.5; size: 11, 11; tint: ink; opacity: if(c.muted, 40%, 0) }
+        text c.last { at: 72, 29; anchor: left top; width: 230 - rcol; lines: 2; line_height: 1.22; size: 11.5; weight: 400; family: "SF Pro Text"; color: ink; opacity: if(c.typing, 0, if(c.unread > 0, 78%, 52%)) }
         text "typing…" { at: 72, 37; anchor: left center; size: 11.5; weight: 500; family: "SF Pro Text"; color: im_blue2; opacity: if(c.typing, 100%, 0) }
         }
         //  The unread count: under the time, or (folded) on the face's shoulder.
-        let bcx = 352 - bw / 2 + (58 - 352 + bw / 2) * wcol
-        let bcy = 42.5 + (16 - 42.5) * wcol
+        let bcx = bdx + (58 - bdx) * wcol
+        let bcy = 33 + (16 - 33) * wcol
         group {
             opacity: if(c.unread > 0, 1, 0)
+            //  A soft solid bead (grey when muted): a gentle blue from top to bottom and a faint rim of light.
+            //  Not glass (too much on something this small), not a flat disc (read as pasted on).
             body {
-                color: if(c.muted, im_gray2, im_blue); light: 6%, bcy - 8.5, 8
-                shadow: 0, 1, 3, 25% * wcol
+                gradient: 0, bcy - 8.5 to 0, bcy + 8.5, if(c.muted, mix(im_gray2, #ffffff, 0.08), im_blue2), if(c.muted, im_gray2, im_blue)
+                opacity: 94%
                 box { from: bcx - bw / 2, bcy - 8.5; size: bw, 17; corner: 8.5 continuous }
             }
+            box { from: bcx - bw / 2 + 0.5, bcy - 8; size: bw - 1, 16; corner: 8 continuous; stroke: 0.6; color: #ffffff; opacity: 22% }
             text c.badge { at: bcx, bcy + 0.2; anchor: center; size: 10; weight: 700; family: "SF Pro Display"; color: #ffffff }
         }
         on press z { emit wa_pick(c.index) }
@@ -2319,33 +2340,61 @@ scene Island {
 
     //  A message, as iOS's Messages draws them: a bubble as wide as what it says (up to 420),
     //  ours on the right in the island's light, theirs on the left in grey; messages that follow
-    //  each other close up, and only the last of a run has a tail and its time. A picture is its
-    //  own rounded shape, with the time on a small pane over it and any caption in a bubble
-    //  under it. Between days, the day; under the last one sent, whether it was read.
+    //  each other close up, and only the last of a run has a tail. No times in the bubbles: t
+    //  brings them all out at the chat's right (ours sliding aside for them), and the pointer on
+    //  one shows its own beside its bar. A picture is its own rounded shape, any caption in a
+    //  bubble under it; one to three emoji alone are large, on nothing. Reactions sit on the
+    //  bubble's top corner. Between days, the day; under the last one sent, whether it was read.
     component WaMsg(m: record) {
         let side = max(m.dw, m.dh)
         let so = if(m.stack > 1, 10, 0)     // a stack: room above for the cards tilted out behind
-        let picked = if(wa_focus and wa_cur == m.index, 1, 0)
+        let picked = if(wa_focus and not wa_typing and wa_cur == m.index, 1, 0)   // only while going through the messages
+        let bubbled = not m.day and not m.jumbo and (m.has_text or m.file)
         //  Its slot takes its height on a spring: the words of a new message are measured a few
         //  frames after it is there, and this way it slides in instead of jumping as they come.
         //  Opening a chat (`wa_snap`), the height itself, at once. (Not with a `~1ms` rule: that
         //  would leave the follow travelling in 1 ms from then on.)
         prop hs = 0 ~200ms
         follow hs = if(m.index < wam.count, wmc.height, 0)   // an unused slot at nothing, so a new one grows from it
-        //  …and rises into place as it comes, as a message sent leaves the field on iOS.
+        //  …and comes with some weight: ours rises out of the field and settles to its size, as a
+        //  message sent leaves it on iOS; theirs opens from its stem's corner, a touch past and back.
         prop born = 0 ~380ms
         follow born = if(m.index < wam.count, 1, 0)
+        prop pop = 0 ~spring(260, 17)
+        follow pop = if(m.index < wam.count, 1, 0)
+        //  The stem: on the last of a run. When one more joins it, it draws back into this bubble's
+        //  corner as it grows out of the new one's, instead of jumping down.
+        prop stem = 0 ~220ms
+        follow stem = if(m.tail, 1, 0)
+        //  A voice note playing here: seconds since this run began (at its speed), and how far through it is.
+        prop vpos = 0
+        spin vpos by if(wa_vplay == m.index and wa_vgo, wa_vspeed, 0)
+        on change wa_vseq while wa_vplay == m.index { vpos: 0 ~1ms }
+        let vprog = if(wa_vplay == m.index, clamp((wa_vfrom + vpos) / max(1, m.vsecs), 0, 1), 0)
+        //  …and whether it is the one playing, on a spring: its bubble widens for the speed pill and
+        //  the light that fills it comes up.
+        prop vsp = 0 ~220ms
+        follow vsp = if(wa_vplay == m.index, 1, 0)
+        let vww = m.vbars * 3                   // its waveform's width
+        let vtw = if(m.vsecs >= 600, 36, 29)    // its time's
+        let vtx = 40 + vww + 10                 // where the time starts
+        //  With the times out (t), ours slide aside for theirs.
+        let tsx = if(m.me and not m.day, 56 * wts, 0)
+        let tmx = wcw - 4 + tsx - if(m.grp, 36, 0)   // …where the times end: the chat's right, whatever moved the row
         group {
-        size: 624, if(wa_snap, wmc.height, hs)
-        move: 0, if(wa_snap, 0, 26 * (1 - born))
+        size: wcw, if(wa_snap, wmc.height, hs)
+        //  In a group, what others say sits beside a column for their faces (iMessage's).
+        move: if(m.grp, 36, 0) - tsx, if(wa_snap, 0, if(m.me, 44, 12) * (1 - born))
+        pivot: if(m.me, wcw, 0), wmc.height
+        scale: if(wa_snap or m.day, 1, if(m.me, 0.93 + 0.07 * born, 0.84 + 0.16 * pop))
         //  The whole row, under everything in it: the pointer over it brings the bar beside it, a
         //  right click its menu.
-        zone box hz { from: 0, 0; size: 624, wmc.height; label: "Message"; active: not m.day and m.index < wam.count }
+        zone box hz { from: 0, 0; size: wcw, wmc.height; label: "Message"; active: not m.day and m.index < wam.count }
         column wmc {
             //  The day, and the time of its first message: quiet, centred.
             group {
                 show: m.day
-                size: 624, 38
+                size: wcw, 38
                 row {
                     at: 312, 20; anchor: center middle; gap: 5
                     text m.text { size: 10.5; weight: 700; family: "SF Pro Text"; color: ink; opacity: 50% }
@@ -2355,15 +2404,72 @@ scene Island {
             //  Who said it, over the first of their run (in a group).
             group {
                 show: m.has_from
-                size: 624, 17
+                size: wcw, 17
                 text m.from { at: 14, 8; anchor: left center; size: 10.5; weight: 600; family: "SF Pro Text"; color: ink; opacity: 50% }
+            }
+            //  What it answers: not a pane inside the reply but the original itself, small and faded — a
+            //  ghost of its own bubble (blue if it was ours, grey if theirs, lit and coloured as the real
+            //  one is) above this one, set in from the side, and a fine thread curving from it down into
+            //  the reply, as iMessage threads them. Pressed, the chat goes to the original.
+            group {
+                show: m.has_q and not m.day
+                size: wcw, wqb.height + 6
+                let qw = wqb.width
+                let qh = wqb.height
+                let qx = if(m.me, wcw - 22 - qw, 22)
+                let tx = if(m.me, wcw - 12, 12)            // where the thread comes down, into the reply's top
+                let gx = if(m.me, wcw - 22, 22)            // …from the ghost's side
+                path {
+                    stroke: 1.4; color: if(m.qme, im_blue2, ink); opacity: if(m.qme, 55%, 26%)
+                    move gx, qh / 2
+                    curve tx, qh / 2 + 10 via tx, qh / 2
+                    line tx, qh + 26
+                }
+                body {
+                    gradient: fixed 0, 130 to 0, 690, if(m.qme, im_deep, im_gray), if(m.qme, im_blue, im_gray) 62%, if(m.qme, im_blue2, im_gray)
+                    light: 6%, 0, 12
+                    rim: 12%
+                    opacity: if(m.qme, 50%, 62%)
+                    box { from: qx, 0; size: qw, qh; corner: min(16, qh / 2) continuous }
+                }
+                zone box wqz { from: qx, 0; size: qw, qh; corner: min(16, qh / 2) continuous; cursor: pointer; label: "Go to the message it answers"; active: m.has_q and m.index < wam.count }
+                box { from: qx, 0; size: qw, qh; corner: min(16, qh / 2) continuous; color: #ffffff; opacity: 7% * wqz.hover }
+                row wqb {
+                    at: qx, 0; padding: 6; gap: 5
+                    group { size: 1, 1 }
+                    //  …its picture, small, when it was one.
+                    group {
+                        show: m.has_qpic
+                        size: 30, 30
+                        group {
+                            clip box { from: 0, 0; size: 30, 30; corner: 9 continuous }
+                            image m.qpic { at: 0, 0; size: 30, 30 }
+                        }
+                    }
+                    column {
+                        gap: 0
+                        text m.qfrom { size: 9.5; weight: 700; family: "SF Pro Text"; color: if(m.qme, #ffffff, ink); opacity: if(m.qme, 72%, 50%) }
+                        //  (`fit`: wrapped at 300, as wide as its widest line)
+                        text m.qtext { width: 300; fit: true; lines: 2; line_height: 1.25; size: 12; weight: 400; family: "SF Pro Text"; color: if(m.qme, #ffffff, ink); opacity: if(m.qme, 82%, 70%); show: m.has_qtext and not m.has_qlt }
+                        //  …a link with a card: the card's title (its picture is the thumbnail beside), and the site.
+                        text m.qltitle { width: 300; fit: true; lines: 2; line_height: 1.25; size: 12; weight: 600; family: "SF Pro Text"; color: if(m.qme, #ffffff, ink); opacity: if(m.qme, 90%, 82%); show: m.has_qlt }
+                        text m.qlsite { size: 10.5; weight: 500; family: "SF Pro Text"; color: if(m.qme, #ffffff, ink); opacity: if(m.qme, 65%, 50%); show: m.has_qlt }
+                    }
+                    group { size: 1, 1 }
+                }
+                on press wqz { emit wa_qjump(m.index) }
+            }
+            //  Room above it for its reactions, which sit on its top corner.
+            group {
+                show: m.has_react and not m.day
+                size: wcw, 12
             }
             //  A picture: its own shape, rounded as the bubbles are. Several sent one after another are
             //  one stack, as iMessage's: the next two tilted out behind the first, how many on it.
             group {
                 show: m.img
-                size: 624, m.dh + so + if(m.has_text or m.has_q, 3, 0)
-                let px = if(m.me, 624 - m.dw, 0)
+                size: wcw, m.dh + so + if(m.has_text or m.file, 3, 0)
+                let px = if(m.me, wcw - m.dw, 0)
                 group {
                     show: m.stack > 2
                     pivot: px + m.dw / 2, so + m.dh / 2
@@ -2413,24 +2519,17 @@ scene Island {
                     text m.stack_n { at: px + 23, so + 17.3; anchor: center; size: 10.5; weight: 700; family: "SF Pro Text"; color: #ffffff }
                 }
                 box { from: px - 1.5, so - 1.5; size: m.dw + 3, m.dh + 3; corner: 19.5 continuous; stroke: 2; color: im_blue2; opacity: 90% * picked }
-                //  Its time, on a small dark pane in its corner (when no caption carries it).
-                group {
-                    opacity: if(m.tail and not m.has_text, 1, 0)
-                    body {
-                        color: well; opacity: glass_alpha
-                        box { from: px + m.dw - 48, so + m.dh - 24; size: 40, 16; corner: 8 continuous }
-                    }
-                    text m.time { at: px + m.dw - 28, so + m.dh - 15.6; anchor: center; size: 9.5; weight: 600; family: "SF Pro Text"; color: #ffffff; opacity: 92% }
-                }
+                //  Its time, out at the right with the others (t), when no caption carries it.
+                text m.clock { at: tmx, so + m.dh / 2; anchor: right center; size: 10; weight: 500; family: "SF Pro Text"; color: ink; opacity: 45% * wts; show: wts > 0.01 and not (m.has_text or m.file) }
                 on press iz { emit wa_look_at(m.index) }
                 on enter iz { emit wa_prefetch(m.index); wa_hov = m.index }
                 on leave iz while wa_hov == m.index { wa_hov = -1 }
             }
             //  The bubble: drawn behind its words, as big as they come to.
             group {
-                show: not m.day and (m.has_text or m.file or m.has_q)
-                size: 624, bub.height
-                let bx = if(m.me, 624 - bub.width, 0)
+                show: bubbled
+                size: wcw, bub.height
+                let bx = if(m.me, wcw - bub.width, 0)
                 //  The bubble is one outline, not a box with a stem stuck on (that showed a step where
                 //  they met): three soft corners, and on its own side the fourth is either a corner or,
                 //  on the last of a run, iMessage's stem — the side running straight down into a fine
@@ -2438,123 +2537,278 @@ scene Island {
                 let sx = if(m.me, bx + bub.width, bx)      // the stem's side…
                 let ox = if(m.me, bx, bx + bub.width)      // …the other
                 let sd = if(m.me, 1, -1)                   // outwards, on the stem's side
-                let tl = if(m.tail, 1, 0)
+                let tl = if(wa_snap, if(m.tail, 1, 0), stem)
                 let br = min(18, bub.height / 2)
                 let bb = bub.height
+                //  Drawn as a rounded box, and the stem as a small piece of its own over the corner it
+                //  replaces (one silhouette, so no seam): a path the size of the whole bubble cost the card
+                //  three times as much to paint, and a chat repaints every bubble whenever it moves.
+                //  Without a stem that piece shrinks to a point in the middle (a hidden shape would still count).
+                let scx = bx + bub.width / 2
+                let scy = bb / 2
+                let sin = sx - sd * min(br + 19, bub.width - br)   // how far in it reaches along the bottom
+                //  Lit, not flat. Ours take their blue from where they are on the screen, not from
+                //  themselves: brightest by the field, deepening towards indigo up the chat, so the whole
+                //  conversation reads as one lit surface they scroll through (iMessage's). Each has a
+                //  sheen along its top, light along its edge (`rim`, inside it: nothing behind is touched),
+                //  and ours cast a little of their blue onto the card.
                 body {
-                    gradient: bx, 0 to bx, bb, if(m.me, im_blue2, im_gray), if(m.me, im_blue, im_gray)
-                    light: 5%, 0, 12
+                    gradient: fixed 0, 130 to 0, 690, if(m.me, im_deep, im_gray), if(m.me, im_blue, im_gray) 62%, if(m.me, im_blue2, im_gray)
+                    light: 6%, 0, 13
+                    rim: 12%
+                    shadow: 0, 2, if(m.me, 10, 0), if(m.me, 24%, 0), im_blue
+                    opacity: if(m.ghost, 0, 1)
+                    box { from: bx, 0; size: bub.width, bb; corner: br continuous }
                     path {
-                        move ox + sd * br, 0
-                        line sx - sd * br, 0
-                        curve sx, br via sx, 0
-                        line sx, bb - br + tl * (br - 10)
-                        curve sx + sd * (-br / 4 + tl * (6 + br / 4)), bb - br / 4 + tl * (br / 4 + 0.2) via sx + sd * tl * 0.3, bb - br / 2 + tl * (br / 2 - 2.5)
-                        curve sx - sd * (br + tl * (9 - br)), bb - tl * 1.6 via sx - sd * (br / 2 + tl * (5 - br / 2)), bb - tl * 2.9
-                        curve sx - sd * (br + tl * (18 - br)), bb via sx - sd * (br + tl * (14 - br)), bb
-                        line ox + sd * br, bb
-                        curve ox, bb - br via ox, bb
-                        line ox, br
-                        curve ox + sd * br, 0 via ox, 0
+                        move scx + tl * (sx - scx), scy + tl * (bb - br - 1 - scy)
+                        line scx + tl * (sx - scx), scy + tl * (bb - 10 - scy)
+                        curve scx + tl * (sx + sd * 6.2 - scx), scy + tl * (bb + 0.2 - scy) via scx + tl * (sx + sd * 0.3 - scx), scy + tl * (bb - 2.5 - scy)
+                        //  Back from the tip along the bottom, staying under the box's corner all the way (a sweep
+                        //  rising above it left a sliver of the corner below the stem, which the lit edge showed).
+                        curve scx + tl * (sx - sd * 12 - scx), scy + tl * (bb - scy) via scx + tl * (sx - sd * 2 - scx), scy + tl * (bb - 1 - scy)
+                        line scx + tl * (sin - scx), scy + tl * (bb - scy)
+                        line scx + tl * (sin - scx), scy + tl * (bb - br - 1 - scy)
                         close
                     }
                 }
+                //  What stands in for a message (deleted, still on its way, view once, a kind not shown here):
+                //  not a bubble of words but its outline, empty, so it never reads as something said.
+                box { from: bx + 0.5, 0.5; size: bub.width - 1, bb - 1; corner: br - 0.5 continuous; stroke: 1; color: ink; opacity: if(m.ghost, 24%, 0) }
                 box { from: bx - 1.5, -1.5; size: bub.width + 3, bub.height + 3; corner: 19.5 continuous; stroke: 2; color: if(m.me, #ffffff, im_blue2); opacity: 85% * picked }
                 column bub {
                     at: bx, 0; padding: 7, 13; gap: 2
-                    //  What it answers.
-                    row {
-                        show: m.has_q
-                        padding: 4, 9; gap: 10; fill: if(m.me, mix(im_blue, #000000, 0.22), mix(im_gray, #000000, 0.3)); corner: 10
-                        column {
-                            gap: 1
-                            text m.qfrom { size: 10.5; weight: 700; family: "SF Pro Text"; color: if(m.me, #ffffff, im_blue2); opacity: 90% }
-                            text m.qtext { size: 11.5; weight: 400; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: 68%; show: m.has_qtext }
+                    //  Its link's card: the page's picture across the top, filling it (cropped, whatever its
+                    //  shape), then its title, what it is and the site, big enough to read — on a darker pane of
+                    //  the bubble's own colour. Pressed, the link opens.
+                    group {
+                        show: m.has_lp
+                        let cw = if(m.long, 420, 340)
+                        let bh = cw * clamp(m.lr, 0.42, 0.75)
+                        //  The picture sits fitted in a square canvas: the square is drawn as big as it takes for
+                        //  the picture in it to cover the band (iw, ih: how much of the square it fills each way).
+                        let iw = min(1, 1 / max(m.lr, 0.01))
+                        let ih = clamp(m.lr, 0.01, 1)
+                        let sq = max(cw / iw, bh / ih)
+                        size: if(m.long, 420, 340), wlc.height + 6
+                        body {
+                            gradient: fixed 0, 130 to 0, 690, if(m.me, mix(im_deep, #000000, 0.24), mix(im_gray, #000000, 0.28)), if(m.me, mix(im_blue, #000000, 0.24), mix(im_gray, #000000, 0.28)) 62%, if(m.me, mix(im_blue2, #000000, 0.24), mix(im_gray, #000000, 0.28))
+                            box { from: 0, 0; size: cw, wlc.height; corner: 14 continuous }
                         }
-                        //  …and its picture, small, when it was one.
-                        group {
-                            show: m.has_qpic
-                            size: 34, 34
-                            //  (The clip in a group of its own: on the one the row lays out, it did not hold.)
+                        zone box wlz { from: 0, 0; size: cw, wlc.height; corner: 14 continuous; cursor: pointer; label: "Open the link"; active: m.has_lp and m.index < wam.count }
+                        column wlc {
+                            at: 0, 0; gap: 0
                             group {
-                                clip box { from: 0, 0; size: 34, 34; corner: 8 continuous }
-                                image m.qpic { at: 0, 0; size: 34, 34 }
+                                show: m.has_lpic
+                                size: if(m.long, 420, 340), if(m.long, 420, 340) * clamp(m.lr, 0.42, 0.75)
+                                group {
+                                    clip box { from: 0, 0; size: cw, bh; corner: 14 continuous }
+                                    image m.lpic { at: (cw - sq) / 2, (bh - sq) / 2; size: sq, sq }
+                                }
+                            }
+                            row {
+                                gap: 0
+                                group { size: 12, 1 }
+                                column {
+                                    gap: 3
+                                    group { size: 1, 8 }
+                                    text m.ltitle { width: cw - 24; lines: 3; line_height: 1.22; size: 14; weight: 700; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); show: m.has_ltitle }
+                                    text m.ldesc { width: cw - 24; lines: 3; line_height: 1.25; size: 12.5; weight: 400; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: 74%; show: m.has_ldesc }
+                                    text m.lsite { width: cw - 24; lines: 1; size: 11.5; weight: 600; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: 55% }
+                                    group { size: 1, 9 }
+                                }
                             }
                         }
+                        box { from: 0, 0; size: cw, wlc.height; corner: 14 continuous; color: #ffffff; opacity: 6% * wlz.hover }
+                        on press wlz { emit wa_link_at(m.index) }
                     }
-                    //  A voice note, video or file: a line that opens it.
+                    //  A voice note, played in its bubble: a round button (▶, ❚❚ while it plays), the note's own
+                    //  waveform — as long as the note is (the helper gives a longer one more bars, `vbars`; 3 px
+                    //  each) — and its length. Playing, the button's halo stretches into a capsule of light
+                    //  that runs along the waveform with the playhead, so the bubble fills as it plays, the bars
+                    //  lighting up under it; the time counts down and a 1× / 1.5× / 2× pill comes in at the end
+                    //  (the bubble widening for it, not keeping room for it). A press on the waveform goes
+                    //  there. At its end the next voice note from the same side plays.
+                    group {
+                        let vme = wa_vplay == m.index
+                        let vrun = vme and wa_vgo
+                        size: vtx + vtw + 50 * vsp, 34
+                        show: m.voice
+                        zone box vz { from: -6, -2; size: 40, 38; corner: 19; cursor: pointer; label: "Play the voice note"; carries: "{m.full}" }
+                        zone box vwz { from: 36, 0; size: vww + 8, 34; cursor: pointer; label: "Go to there in the voice note"; active: m.voice }
+                        //  The light filling it: a capsule from round the button to the playhead.
+                        box { from: -3, -3; size: 39 + (vww + 5) * vprog, 40; corner: 20 continuous; color: if(m.me, #ffffff, ink); opacity: if(m.me, 15%, 8%) * vsp }
+                        ellipse { at: 16, 17; radius: 15 + 0.6 * vz.pressed; color: if(m.me, #ffffff, ink); opacity: if(m.me, 24%, 13%) + 8% * vz.hover }
+                        path { at: 17.5, 17; color: if(m.me, #ffffff, ink); opacity: if(vrun, 0, 95%); move -4.5, -6.5; line 6.5, 0; line -4.5, 6.5; close }
+                        box { from: 11.5, 11; size: 3.6, 12; corner: 1.2; color: if(m.me, #ffffff, ink); opacity: if(vrun, 95%, 0) }
+                        box { from: 17.4, 11; size: 3.6, 12; corner: 1.2; color: if(m.me, #ffffff, ink); opacity: if(vrun, 95%, 0) }
+                        //  The bars sit centred in the helper's picture (64 bars' room): drawn centred on the waveform.
+                        //  Played: bright up to where it is, with a soft lit edge; still to come: quiet.
+                        image m.vwave { at: 40 + vww / 2 - 96, 5; size: 192, 24; tint: if(m.me, #ffffff, ink); opacity: if(vme, if(m.me, 40%, 28%), if(m.me, 88%, 62%)) + 8% * vwz.hover * (1 - vsp) }
+                        group {
+                            show: vme
+                            clip box { from: 40, 0; size: vww * vprog, 34 }
+                            image m.vwave { at: 40 + vww / 2 - 96, 5; size: 192, 24; tint: if(m.me, #ffffff, ink); opacity: 100% }
+                        }
+                        box { from: 40 + vww * vprog - 1, 3; size: 2, 28; corner: 1; color: if(m.me, #ffffff, ink); opacity: 70% * vsp * if(vprog > 0.005 and vprog < 0.995, 1, 0) }   // the playhead
+                        box { from: 40, 16.25; size: vww, 1.5; corner: 0.75; color: if(m.me, #ffffff, ink); opacity: if(m.has_vwave, 0, 30%) }   // no waveform yet: a quiet line
+                        text m.vtime { at: vtx, 17; anchor: left center; size: 12; weight: 600; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: 78% * (1 - vsp) }
+                        text wa_vleft { at: vtx, 17; anchor: left center; size: 12; weight: 600; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: if(vme, 90%, 0) * vsp }
+                        //  The speed, while it is the one playing.
+                        group {
+                            opacity: vsp
+                            zone box vsz { from: vtx + vtw + 6, 7; size: 40, 20; corner: 10 continuous; cursor: pointer; label: "Play faster"; active: vme }
+                            box { from: vtx + vtw + 6, 7; size: 40, 20; corner: 10 continuous; color: if(m.me, #ffffff, ink); opacity: 18% + 10% * vsz.hover }
+                            text "{wa_vspeed}×" { at: vtx + vtw + 26, 17.3; anchor: center; size: 11; weight: 700; family: "SF Pro Text"; color: if(m.me, #ffffff, ink) }
+                            on press vsz { emit wa_vspeed_cycle }
+                        }
+                        on press vz { emit wa_media(m.index) }
+                        on enter vz { emit wa_prefetch(m.index) }
+                        on enter vwz { emit wa_prefetch(m.index) }
+                        on press vwz { emit wa_vseek(m.index * 1000 + floor(clamp((local.x - 40) / vww, 0, 0.999) * 1000)) }
+                    }
+                    //  A video or file: a line that opens it.
                     group {
                         size: 236, 22
-                        show: m.file
+                        show: m.file and not m.voice
                         zone box fz { from: -6, -3; size: 248, 28; cursor: pointer; label: "Open it"; carries: "{m.full}" }
                         text m.text { at: 0, 11; anchor: left center; width: 236; lines: 1; size: 13.5; weight: 600; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: 88% + 12% * fz.hover }
                         on press fz { emit wa_media(m.index) }
                         on enter fz { emit wa_prefetch(m.index) }
                     }
-                    text m.text { size: 13.5; weight: 400; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: if(m.faint, 55%, 100%); selectable: true; show: m.has_text and not m.long and not m.file }
-                    text m.text { width: 420; size: 13.5; weight: 400; line_height: 1.3; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: if(m.faint, 55%, 100%); selectable: true; show: m.has_text and m.long and not m.file }
-                    text m.time { size: 9.5; weight: 500; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: if(m.me, 70%, 42%); show: m.tail and not (m.img and not m.has_text) }
+                    //  What stands in for a message: its symbol and what it means, quiet.
+                    row {
+                        show: m.ghost
+                        gap: 6
+                        group {
+                            size: 13, 16
+                            image ic_g_wait { at: 0, 1.5; size: 13, 13; tint: ink; opacity: if(m.gi == 1, 55%, 0) }
+                            image ic_g_once { at: 0, 1.5; size: 13, 13; tint: ink; opacity: if(m.gi == 2, 55%, 0) }
+                            image ic_g_phone { at: 0, 1.5; size: 13, 13; tint: ink; opacity: if(m.gi == 3, 55%, 0) }
+                            image ic_g_del { at: 0, 1.5; size: 13, 13; tint: ink; opacity: if(m.gi == 4, 55%, 0) }
+                        }
+                        text m.text { size: 13; weight: 400; family: "SF Pro Text"; color: ink; opacity: 58% }
+                    }
+                    //  Wrapped at 420 and hugged by its bubble (`fit`): as wide as its widest line, however long.
+                    text m.text { width: 420; fit: true; size: 13.5; weight: 400; line_height: 1.3; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: if(m.faint, 55%, 100%); selectable: true; show: m.has_text and not m.file and not m.ghost and not m.has_link }
+                    //  …with a link in it: as markdown, so the link can be followed (`on("link")`), in a lighter tone.
+                    text m.md { width: 420; fit: true; size: 13.5; weight: 400; line_height: 1.3; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: if(m.faint, 55%, 100%); selectable: true; markdown: true; link: if(m.me, #dce9ff, link_c); show: m.has_link }
+                    //  The time is out at the side now (t); only an edit is still said in it.
+                    text "Edited" { size: 9.5; weight: 500; family: "SF Pro Text"; color: if(m.me, #ffffff, ink); opacity: if(m.me, 70%, 42%); show: m.edited and m.has_text and not m.ghost }
                 }
+                text m.clock { at: tmx, bb / 2; anchor: right center; size: 10; weight: 500; family: "SF Pro Text"; color: ink; opacity: 45% * wts; show: wts > 0.01 }
             }
-            //  Its reactions: a small pill tucked under its corner, on its own side.
+            //  One to three emoji and nothing else: large, on nothing (iMessage's).
             group {
-                show: m.has_react and not m.day
-                size: 624, 22
-                move: 0, -3
-                row rpm {
-                    show: m.me
-                    at: 612, 0; anchor: right top; padding: 2, 8; fill: im_gray2; corner: 11
-                    text m.react { size: 12; weight: 600; family: "SF Pro Text"; color: ink }
+                show: m.jumbo and not m.day
+                size: wcw, wjb.height
+                row wjb {
+                    at: if(m.me, wcw - wjb.width, 0), 0; padding: 0, 2
+                    text m.text { size: 40; family: "SF Pro Text"; color: ink; opacity: if(m.faint, 55%, 100%); selectable: true }
                 }
-                row rpt {
-                    show: not m.me
-                    at: 12, 0; padding: 2, 8; fill: im_gray2; corner: 11
-                    text m.react { size: 12; weight: 600; family: "SF Pro Text"; color: ink }
-                }
-                //  Pressed: who gave them (WhatsApp's sheet).
-                zone box rpz { from: if(m.me, 612 - rpm.width, 12), 0; size: if(m.me, rpm.width, rpt.width), 22; corner: 11 continuous; cursor: pointer; label: "Who reacted"; active: m.has_react and m.index < wam.count }
-                box { from: if(m.me, 612 - rpm.width, 12), 0; size: if(m.me, rpm.width, rpt.width), 22; corner: 11 continuous; color: #ffffff; opacity: 8% * rpz.hover }
-                on press rpz { emit wa_who_at(m.index) }
+                box { from: if(m.me, wcw - wjb.width, 0) - 4, -2; size: wjb.width + 8, wjb.height + 4; corner: 14 continuous; stroke: 2; color: im_blue2; opacity: 85% * picked }
+                text m.clock { at: tmx, wjb.height / 2; anchor: right center; size: 10; weight: 500; family: "SF Pro Text"; color: ink; opacity: 45% * wts; show: wts > 0.01 }
             }
             //  Under the last one sent: Delivered, Read.
             group {
                 show: m.has_status
-                size: 624, 17
-                text m.status { at: 620, 9; anchor: right center; size: 10; weight: 600; family: "SF Pro Text"; color: ink; opacity: 45% }
+                size: wcw, 17
+                text m.status { at: wcw - 4, 9; anchor: right center; size: 10; weight: 600; family: "SF Pro Text"; color: if(m.faint, #ff453a, ink); opacity: if(m.faint, 100%, 45%) }
             }
             //  The room after it: close within a run, more between runs.
-            group { size: 624, if(m.day, 0, if(m.tail, 8, 2)) }
+            group { size: wcw, if(m.day, 0, if(m.tail, 8, 2)) }
+        }
+        //  Whose it is, in a group: their face beside the last of their run, level with its bottom
+        //  (under the room after it); their initials until the picture comes.
+        group {
+            show: m.has_face
+            let fy = wmc.height - 28 - if(m.tail, 8, 2)
+            ellipse { at: -18, fy + 14; radius: 14; color: #6e6e76 }
+            text m.finit { at: -18, fy + 14.5; anchor: center; size: 10; weight: 600; family: "SF Pro Display"; color: #ffffff; opacity: 92% }
+            group {
+                clip ellipse { at: -18, fy + 14; radius: 14 }
+                image m.face { at: -32, fy; size: 28, 28 }
+            }
+            ellipse { at: -18, fy + 14; radius: 14; stroke: 0.6; color: ink; opacity: 10% }
         }
         //  Beside it, on the side with room, while the pointer is on it: react, reply, more.
-        let ew = max(if(m.img, m.dw, 0), if(m.has_text or m.file or m.has_q, bub.width, 0))
-        let bx0 = if(m.me, 624 - ew - 104, ew + 8)
-        let by0 = max(0, (wmc.height - 30) / 2 - if(m.has_status, 8, 0) - if(m.has_react, 10, 0))
+        let ew = max(if(m.img, m.dw, 0), if(bubbled, bub.width, 0), if(m.jumbo, wjb.width, 0))
+        let bx0 = if(m.me, wcw - ew - 104, ew + 8)
+        let by0 = max(0, (wmc.height - 30) / 2 - if(m.has_status, 8, 0) + if(m.has_react, 6, 0) + if(m.has_q, (wqb.height + 6) / 2, 0))
         prop hv = 0 ~120ms
         zone ellipse pb1 { at: bx0 + 16, by0 + 15; radius: 13; cursor: pointer; label: "React"; active: hv > 0.5 }
         zone ellipse pb2 { at: bx0 + 48, by0 + 15; radius: 13; cursor: pointer; label: "Reply"; active: hv > 0.5 }
         zone ellipse pb3 { at: bx0 + 80, by0 + 15; radius: 13; cursor: pointer; label: "More"; active: hv > 0.5 }
-        follow hv = if(not m.day and m.index < wam.count and wa_menu < 0 and not wa_modal and (hz.hover or pb1.hover or pb2.hover or pb3.hover), 1, 0)
+        follow hv = if(not m.day and not m.faint and m.index < wam.count and wa_menu < 0 and not wa_modal and abs(vel(wfb)) < 60 and (hz.hover or pb1.hover or pb2.hover or pb3.hover), 1, 0)
         group {
             show: hv > 0.01
             opacity: hv
+            //  Three buttons of glass, each its own (glass on glass goes one level deep): the one
+            //  under the pointer lighter and a touch larger.
             body {
-                color: im_gray; material: control
-                box { from: bx0, by0; size: 96, 30; corner: 15 continuous }
+                color: mix(im_gray, chip_hi, pb1.hover); material: control; opacity: lgb_fill + 10% * pb1.hover
+                ellipse { at: bx0 + 16, by0 + 15; radius: 14 + pb1.hover }
             }
-            ellipse { at: bx0 + 16, by0 + 15; radius: 12; color: im_gray2; opacity: pb1.hover }
-            ellipse { at: bx0 + 48, by0 + 15; radius: 12; color: im_gray2; opacity: pb2.hover }
-            ellipse { at: bx0 + 80, by0 + 15; radius: 12; color: im_gray2; opacity: pb3.hover }
+            body {
+                color: mix(im_gray, chip_hi, pb2.hover); material: control; opacity: lgb_fill + 10% * pb2.hover
+                ellipse { at: bx0 + 48, by0 + 15; radius: 14 + pb2.hover }
+            }
+            body {
+                color: mix(im_gray, chip_hi, pb3.hover); material: control; opacity: lgb_fill + 10% * pb3.hover
+                ellipse { at: bx0 + 80, by0 + 15; radius: 14 + pb3.hover }
+            }
             image ic_smile_m { at: bx0 + 8.5, by0 + 7.5; size: 15, 15; tint: ink; opacity: 80% }
             image ic_reply { at: bx0 + 40.5, by0 + 7.5; size: 15, 15; tint: ink; opacity: 80% }
             image ic_more { at: bx0 + 72.5, by0 + 7.5; size: 15, 15; tint: ink; opacity: 80% }
+            //  …and its time, past the bar (unless every time is out already).
+            text m.clock { at: bx0 - 8, by0 + 15; anchor: right center; size: 10; weight: 500; family: "SF Pro Text"; color: ink; opacity: 45% * (1 - wts); show: m.me }
+            text m.clock { at: bx0 + 104, by0 + 15; anchor: left center; size: 10; weight: 500; family: "SF Pro Text"; color: ink; opacity: 45% * (1 - wts); show: not m.me }
         }
+        //  One that did not go (iMessage's): a red mark beside it, there until it is sent again or
+        //  deleted. Pressed: sent again. Its menu (a right click) has both.
+        let pfy = (wmc.height - if(m.has_status, 17, 0) - if(m.tail, 8, 2)) / 2 + if(m.has_q, (wqb.height + 6) / 2, 0)
+        zone ellipse pfz { at: wcw - ew - 20, pfy; radius: 12; cursor: pointer; label: "Try again"; active: m.faint and m.index < wam.count and not wa_modal }
+        group {
+            show: m.faint
+            ellipse { at: wcw - ew - 20, pfy; radius: 9 + pfz.hover; color: #ff453a }
+            text "!" { at: wcw - ew - 20, pfy; anchor: center; size: 12.5; weight: 800; family: "SF Pro Text"; color: #ffffff }
+        }
+        on press pfz { emit wa_act(m.index * 10 + 9) }
         on press pb1 { emit wa_act(m.index * 10 + 1) }
         on press pb2 { emit wa_act(m.index * 10 + 2) }
         //  Its menu (… or a right click on it) opens over this bar, beside the bubble on the side with
         //  room, never over the messages: `wa_mx` from the row's left (the page adds where rows start).
         let menu_x = if(m.me, bx0 + 96 - 200, bx0)
-        on press pb3 { wa_menu = m.index; wa_mx = menu_x; wa_my = pointer.y - 15; wa_m_edit = m.can_edit; wa_m_save = m.can_save }
-        on press right hz { wa_menu = m.index; wa_mx = menu_x; wa_my = pointer.y - 15; wa_m_edit = m.can_edit; wa_m_save = m.can_save }
+        on press pb3 { wa_menu = m.index; wa_mx = menu_x; wa_my = pointer.y - 15; wa_m_edit = m.can_edit; wa_m_save = m.can_save; wa_m_fail = m.faint }
+        on press right hz { wa_menu = m.index; wa_mx = menu_x; wa_my = pointer.y - 15; wa_m_edit = m.can_edit; wa_m_save = m.can_save; wa_m_fail = m.faint }
+        //  Its reactions: a soft solid bead on its top corner, the inner one (iMessage's tapbacks),
+        //  half over it, in the room left above it: blue when one of them is ours, as iMessage's. Its
+        //  emoji have room round them (a layout's `padding` is one number: the sides are spacers).
+        //  Pressed: who gave them (WhatsApp's sheet).
+        group {
+            show: m.has_react and not m.day
+            let etw = if(m.img, m.dw, if(m.jumbo, wjb.width, bub.width))   // what is on top: the picture, or the bubble
+            let ety = if(m.has_from, 17, 0) + if(m.has_q, wqb.height + 6, 0) + 12 + if(m.img, so, 0)
+            let rw = max(28, wrb.width)
+            let rx = if(m.me, wcw - etw + 14 - rw, etw - 14)
+            let ry = ety - 12
+            body {
+                gradient: 0, ry to 0, ry + 24, if(m.rmine, im_blue2, mix(im_gray2, #ffffff, 0.08)), if(m.rmine, im_blue, im_gray2)
+                light: 6%, ry, 10
+                rim: 14%
+                shadow: 0, 1.5, 6, 34%
+                box { from: rx, ry; size: rw, 24; corner: 12 continuous }
+            }
+            box { from: rx + 0.3, ry + 0.3; size: rw - 0.6, 23.4; corner: 11.7 continuous; stroke: 0.6; color: #ffffff; opacity: 20% }
+            row wrb {
+                at: rx + (rw - wrb.width) / 2, ry + (24 - wrb.height) / 2; padding: 0; gap: 0
+                group { size: 7, 1 }
+                text m.react { size: 13; weight: 600; family: "SF Pro Text"; color: if(m.rmine, #ffffff, ink) }
+                group { size: 7, 1 }
+            }
+            zone box rpz { from: rx, ry; size: rw, 24; corner: 12 continuous; cursor: pointer; label: "Who reacted"; active: m.has_react and m.index < wam.count }
+            box { from: rx, ry; size: rw, 24; corner: 12 continuous; color: #ffffff; opacity: 8% * rpz.hover }
+            on press rpz { emit wa_who_at(m.index) }
+        }
         }
         //  The chat's cursor. Each step is worked out by the row it crosses, which knows its own
         //  height (`wa_cy` is the chosen row's top, from the chat's bottom); then the chosen one
@@ -2600,7 +2854,7 @@ scene Island {
                 }
                 text t.dur { at: tx + 33, ty + gt - 15; anchor: center; size: 9.5; weight: 600; family: "SF Pro Text"; color: #ffffff; opacity: 92% }
             }
-            box { from: tx - 2, ty - 2; size: gt + 4, gt + 4; corner: 14 continuous; stroke: 2.5; color: im_blue2; opacity: if(wa_gc == n, 1, 0) }
+            //  (Its ring is the gallery's, gliding: pages/glide.plm.)
             on press tz { emit wa_gpick(t.index) }
             //  Its own save button, in the corner, while the pointer is on it.
             zone ellipse ts { at: tx + gt - 18, ty + 18; radius: 13; cursor: pointer; label: "Save to Downloads"; active: tz.hover or ts.hover }
@@ -2643,8 +2897,13 @@ scene Island {
     //  One line of a message's menu: what it does and its symbol; Delete in red.
     component WaMenuItem(label: text, icon: image, code: number, danger: bool) {
         size: 188, 32
-        zone box iz { from: 0, 0; size: 188, 32; corner: 10 continuous; cursor: pointer; label: "{label}" }
-        box { from: 0, 0; size: 188, 32; corner: 10 continuous; color: im_gray2; opacity: iz.hover }
+        zone box iz { from: 0, 0; size: 188, 32; corner: 16 continuous; cursor: pointer; label: "{label}" }
+        //  Inside the menu's glass (it goes one level deep): a soft, lit highlight, not a flat block.
+        body {
+            gradient: 0, 0 to 0, 32, mix(chip_hi, #ffffff, 0.10), chip_hi; light: 5%, 0, 16
+            opacity: 70% * iz.hover
+            box { from: 0, 0; size: 188, 32; corner: 16 continuous }
+        }
         text label { at: 12, 16; anchor: left center; size: 12.5; weight: 500; family: "SF Pro Text"; color: if(danger, #ff6961, ink) }
         image icon { at: 162, 9; size: 15, 15; tint: if(danger, #ff6961, ink); opacity: 80% }
         on press iz { emit wa_act(wa_menu * 10 + code); wa_menu = -1 }
@@ -2657,7 +2916,7 @@ scene Island {
         group {
             show: r.index < wawho.count
             zone box rz { from: x0, ry; size: fw, 40; corner: 20 continuous; cursor: pointer; label: "{r.name}" }
-            box { from: x0, ry; size: fw, 40; corner: 20 continuous; color: im_gray2; opacity: max(on, 0.5 * rz.hover) }
+            box { from: x0, ry; size: fw, 40; corner: 20 continuous; color: im_gray2; opacity: 50% * rz.hover * (1 - on) }
             ellipse { at: x0 + 22, ry + 20; radius: 15; color: #6e6e76 }
             text r.init { at: x0 + 22, ry + 20.5; anchor: center; size: 10.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 90% }
             group {
@@ -2684,8 +2943,8 @@ scene Island {
         let on = if(wa_fwi == r.index, 1, 0)
         group {
             show: r.index < wafw.count
-            zone box rz { from: x0, ry; size: fw, 40; corner: 14 continuous; cursor: pointer; label: "Forward to {r.name}" }
-            box { from: x0, ry; size: fw, 40; corner: 14 continuous; color: im_gray2; opacity: max(on, 0.5 * rz.hover) }
+            zone box rz { from: x0, ry; size: fw, 40; corner: 20 continuous; cursor: pointer; label: "Forward to {r.name}" }
+            box { from: x0, ry; size: fw, 40; corner: 20 continuous; color: im_gray2; opacity: 50% * rz.hover * (1 - on) }
             ellipse { at: x0 + 22, ry + 20; radius: 15; color: #6e6e76 }
             text r.init { at: x0 + 22, ry + 20.5; anchor: center; size: 10.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 90% }
             group {
@@ -3231,13 +3490,16 @@ scene Island {
     }
     //  Its zone is its whole target shape, so moving down into it keeps it open.
     zone box wv_z { from: wl, 3; size: wv_w, wv_th; corner: 22 continuous; label: "Windows"; active: wv }
-    zone box wsel_z { at: sel_cx, sel_cy; size: sel_w, sel_h; corner: sel_h / 2 continuous; label: "Windows on this desktop" }
+    //  Over a fullscreen window a page comes alone: not the rail, not the date capsule.
+    let rail_here = not fs_under or wo > 0.002
+    zone box wsel_z { at: sel_cx, sel_cy; size: sel_w, sel_h; corner: sel_h / 2 continuous; label: "Windows on this desktop"; active: rail_here }
     on enter wsel_z while not wv { wv = true; emit win_look(0) }
     on leave wv_z while wv and not switching { wv = false }
 
-    zone box ws_z { from: lx - 4, 4 + wdy; size: rail_w + 8, 26; label: "Workspaces" }
+    zone box ws_z { from: lx - 4, 4 + wdy; size: rail_w + 8, 26; label: "Workspaces"; active: rail_here }
     let kr = k_rail * (1 - wo)
     group {
+        show: rail_here
         pivot: lx + rail_w / 2, sel_cy
         scale: 1 - 0.14 * kr
     //  Clear glass, as the island is: the compositor frosts what is behind it,
@@ -3366,23 +3628,21 @@ scene Island {
     //  The pill busy (its card open, an app up): the capsule grows into the level gauge or into a
     //  notification, as it grows into the calendar, and back. The gauge stays clear glass, a pill;
     //  a notification is a card of the dark glass.
-    fact chk = 1                            // 1 the gauge, 2 a notification (kept while it shrinks back)
-    let cap_hud = pill_busy and not fs and not cal and (osd or ban_here)
-    on change osd while osd { chk = 1 }
-    on change banner_seq while not osd { chk = 2 }
-    on change osd while not osd and ban_here { chk = 2 }
+    //  Whatever the pill would say, in the same order of importance: the middle taken never stops it.
+    fact chk = 1                            // 1 the gauge, 2 a notification, 3 a copy, 4 a device, 5 idle, 6 a colour, 7 a desktop (kept while it shrinks back)
+    let cap_hud = pill_busy and not fs and not cal and cap_want > 0
+    on change cap_want while cap_want > 0 { chk = cap_want }
     prop ch = 0 ~shape
     follow ch = if(cap_hud, 1, 0)
-    let hud_w = if(chk == 1, 340, 384)
-    let hud_h = if(chk == 1, 34, ban_h)
-    let cm = max(max(co, inv), if(chk == 2, ch, 0))   // how much of a card it is: its glass, its corners
+    let cap_card = chk == 2 or (chk == 3 and cp_kind == 1)   // a notification or a copied picture: a card of the dark glass
+    let cm = max(max(co, inv), if(cap_card, ch, 0))   // how much of a card it is: its glass, its corners
     let cg = max(co, if(inv > 0.002, 1, 0))   // sliding in, it is already its whole size: only where it is changes
     let ccw0 = cap_w + (if(ch > co, hud_w, if(side_k > 0, side_w, max(cal_w, cap_w))) - cap_w) * max(cg, ch)
     let cch0 = cap_h + (if(ch > co, hud_h, if(side_k > 0, side_h, cal_hh)) - cap_h) * max(cg, ch)
     let ccw = ccw0 + (1120 - ccw0) * inv
     let cch = cch0 + (88 + 458 + 16 - cch0) * inv
     let ccl = cap_r - ccw0 + (fl0 - (cap_r - ccw0)) * inv
-    let ccr = if(chk == 1 and ch > co, cch0 / 2, 14 + 8 * cm)
+    let ccr = if(not cap_card and ch > co, cch0 / 2, 14 + 8 * cm)
     //  Plugged in: a sweep of light across the fill, and the rim warms to green.
     prop plug_sweep = 1 ~900ms
     prop plug_glow = 0 ~500ms
@@ -3402,7 +3662,9 @@ scene Island {
     prop cap_hov = 0 ~180ms
     follow cap_hov = stat_z.hover
     let kc = k_cap * (1 - cm)
+    let cap_here = not fs_under or max(cm, ch) > 0.002      // its cards still grow out of it
     group {
+        show: cap_here
         pivot: cap_r, cap_y + cap_h / 2
         scale: 1 - 0.05 * kc, 1 - 0.07 * kc
     //  Grown into the calendar it smokes over into the centre card's dark plum
@@ -3533,18 +3795,30 @@ scene Island {
         }
         group {
             show: chk == 2
-            //  A glass body's fill is drawn under everything lumen draws: over an app (its corner
-            //  reaches under the capsule) this plain one, the card's own dark, keeps it from reading through.
-            //  Only then: anywhere else the card is the capsule's glass, as the calendar is.
+            //  A glass body's fill is drawn under everything lumen draws: if an app's card reaches under
+            //  the capsule (it is nudged aside to leave the banner its room, so only while it slides), this
+            //  plain one, the card's own dark, keeps it from reading through. Otherwise the banner is the
+            //  capsule's glass, as the calendar and the pill's banners are (it used to be this solid dark
+            //  whenever an app was up: not glass at all).
             body {
                 gradient: ccl, cap_y to ccl + ccw, cap_y + cch, dusk, deep
-                opacity: 94% * smooth(0, 0.6, ch) * if(app != none, 1, 0)
+                opacity: 94% * smooth(0, 0.6, ch) * if(app != none and axr > ccl + 2, 1, 0)
                 box { from: ccl, cap_y; size: ccw, cch; corner: ccr continuous }
             }
             group {
                 move: ccl, cap_y
                 NoteCard(ch, gl_rs, nswap, 0, cb_hit.hover, cb_x.hover, cb_x.pressed)
             }
+        }
+        //  …or what the pill would have said: a copy, a device, idle, a colour, a desktop.
+        group {
+            opacity: smooth(0.45, 1, ch)
+            move: ccl, cap_y + 2 * (1 - ch)
+            group { show: chk == 3; CopyState(ccw, gl_rs) }
+            group { show: chk == 4; DeviceState(ccw, gl_rs) }
+            group { show: chk == 5; IdleState(ccw, gl_rs) }
+            group { show: chk == 6; PickState(ccw, gl_rs) }
+            group { show: chk == 7; LandState(ccw, ch, gl_rs) }
         }
     }
     }
@@ -3554,10 +3828,10 @@ scene Island {
     on release cb_hit while banner and abs(drag.dy) < 6 and abs(drag.dx) < 6 { emit note_open }
     on press cb_x { emit note_dismiss }
     //  Only a hover: it brightens, but a click is not for it (the card is the centre pill's).
-    zone box stat_z { from: cap_l, cap_y; size: cap_w, cap_h; corner: cap_h / 2 continuous; label: "Battery and date" }
+    zone box stat_z { from: cap_l, cap_y; size: cap_w, cap_h; corner: cap_h / 2 continuous; label: "Battery and date"; active: cap_here }
     include "pages/calendar.plm"
-    zone box bat_z { from: cap_l, cap_y; size: bx + bat_gw + 6 - cap_l, cap_h; corner: cap_h / 2 continuous; label: "Battery" }
-    zone box date_z { from: bx + bat_gw + 6, cap_y; size: max(0, cap_r - bx - bat_gw - 6), cap_h; corner: cap_h / 2 continuous; label: "Date"; active: not cal and not side }
+    zone box bat_z { from: cap_l, cap_y; size: bx + bat_gw + 6 - cap_l, cap_h; corner: cap_h / 2 continuous; label: "Battery"; active: cap_here }
+    zone box date_z { from: bx + bat_gw + 6, cap_y; size: max(0, cap_r - bx - bat_gw - 6), cap_h; corner: cap_h / 2 continuous; label: "Date"; active: cap_here and not cal and not side }
     on enter bat_z { bat_peek = true; emit bat_look }
     on leave bat_z { bat_peek = false }
     every 15s while bat_peek or peek_held { emit bat_look }
@@ -3565,7 +3839,7 @@ scene Island {
     on enter date_z { cal = true; side_k = 0 }
     on change cal while cal { emit cal_look; side_k = 0 }
     //  After the capsule's zone, so the click lands here.
-    zone box mute_z { from: mx - 12, cap_y + 3; size: 24, cap_h - 6; corner: (cap_h - 6) / 2 continuous; cursor: pointer; label: "Unmute"; active: audio.muted and mut > 0.6 }
+    zone box mute_z { from: mx - 12, cap_y + 3; size: 24, cap_h - 6; corner: (cap_h - 6) / 2 continuous; cursor: pointer; label: "Unmute"; active: cap_here and audio.muted and mut > 0.6 }
     on press mute_z { emit osd_mute }
 
     //  ── a tool beside a large view ──
@@ -3848,12 +4122,19 @@ scene Island {
 
     //  Super+E: open on the emoji, straight into the search; again, close.
     on emoji_open while expanded and panel == emoji { expanded = false }
-    on emoji_open while not (expanded and panel == emoji) and not big { expanded = true; panel = emoji; emo_insert = false }
+    on emoji_open while not (expanded and panel == emoji) and not big and not (app == wa and wa_typing) and not (app == mailx and mr_rep) { expanded = true; panel = emoji; emo_insert = false; emo_from = false }
+    //  …from a field being typed in: onto the grid, the last one used chosen (Enter gives it again), the
+    //  keys the picker's; the field keeps its place. Ctrl+. again closes it, as Super+E does.
+    on emoji_open while not (expanded and panel == emoji) and not big and ((app == wa and wa_typing) or (app == mailx and mr_rep)) { expanded = true; panel = emoji; emo_from = true; emo_insert = false; blur }
+    on key Ctrl+period while emo_keys and emo_from { expanded = false }
+    on change expanded while not expanded { emo_from = false }
+    on change expanded while not expanded and app == mailx and mr_rep { focus mr_in }
     //  Beside a large view (WhatsApp, the mail, the files) it opens from the right capsule instead; again, closes.
     on emoji_open while big and not (side and side_k == 2) { side = true; side_k = 2; cal = false; side_focus = true; emo_insert = false; blur }
     on emoji_open while big and side and side_k == 2 { side = false }
     //  Normal mode, as vim: h j k l move, gg G the ends, Ctrl+d Ctrl+u half a
-    //  page, [ ] the categories, Enter y pick, i searches, q Esc close.
+    //  page, [ ] the categories, Enter y pick, i / search, q Esc close. Over a field being typed in,
+    //  a pick goes into it and the picker closes; Shift+Enter puts one in and stays for more.
     on key h while emo_keys and not emo_insert { emit emo_move(-1) }
     on key l while emo_keys and not emo_insert { emit emo_move(1) }
     on key j while emo_keys and not emo_insert { emit emo_move(8) }
@@ -3865,13 +4146,18 @@ scene Island {
     on key bracketright while emo_keys and not emo_insert { emit emo_cat_step(1) }
     on key bracketleft while emo_keys and not emo_insert { emit emo_cat_step(-1) }
     on key Return while emo_keys and not emo_insert { emit emo_pick }
+    on key Shift+Return while emo_keys and not emo_insert { emit emo_pick(1) }
     on key y while emo_keys and not emo_insert { emit emo_pick }
     on key q while emo_keys and not side and not emo_insert { expanded = false }
     on key q while emo_keys and side and not emo_insert { side = false }
     on key i while emo_keys and not emo_insert { emo_insert = true; focus emo_q }
+    on key slash while emo_keys and not emo_insert { emo_insert = true; focus emo_q }
+    //  Escape: out of the search into the grid (h j k l, the arrows); from the grid, opened over a
+    //  field, back to it; otherwise it clears what was searched, then closes.
     on key Escape while emo_keys and emo_insert { emo_insert = false; blur }
-    on key Escape while emo_keys and not emo_insert and not emo_q_empty { emit emo_q_clear }
-    on key Escape while emo_keys and not side and not emo_insert and emo_q_empty { expanded = false }
+    on key Escape while emo_keys and not emo_insert and emo_from { expanded = false }
+    on key Escape while emo_keys and not emo_insert and not emo_q_empty and not emo_from { emit emo_q_clear }
+    on key Escape while emo_keys and not side and not emo_insert and emo_q_empty and not emo_from { expanded = false }
     on key Escape while emo_keys and side and not emo_insert and emo_q_empty { side = false }
     //  Typing in the search: Ctrl with h j k l still moves through the grid.
     on key Ctrl+h while emo_keys and emo_insert and not side { emit emo_move(-1) }
@@ -3884,6 +4170,7 @@ scene Island {
     on key Down while emo_keys { emit emo_move(8) }
     on key Up while emo_keys { emit emo_move(-8) }
     on key Tab while emo_keys { emit emo_move(1) }
+    on key Shift+Tab while emo_keys { emit emo_move(-1) }
     on key Ctrl+d while emo_keys { emit emo_move(16) }
     on key Ctrl+u while emo_keys { emit emo_move(-16) }
     on submit emo_q { emit emo_pick }
@@ -4072,7 +4359,7 @@ scene Island {
     //  The large mail view: Super+U opens it (and closes it); its keys, vim's, while no reply is being typed.
     on mail_big while app == mailx and not expanded { app = none }
     on mail_big while app == mailx and expanded { expanded = false }
-    on mail_big while not (app == mailx) and app != fnd { app = mailx; expanded = false; mr_rep = false; mx_focus = false }
+    on mail_big while not (app == mailx) and app != fnd { app = mailx; expanded = false; mr_rep = false; mx_focus = false; blur }
     //  Over the files: the mail takes the pill, and the files go beside it.
     on mail_big while app == fnd { app = mailx; expanded = true; panel = fnds; mr_rep = false; mx_focus = false }
     on key j while app == mailx and not expanded and not side_keys and not mr_rep and not mx_focus { emit mailx_move(1) }
@@ -4136,11 +4423,22 @@ scene Island {
     //  sends, Escape lets the field go; i in the list searches it.
     on wa_big while app == wa and not expanded { app = none }
     on wa_big while app == wa and expanded { expanded = false }
-    on wa_big while not (app == wa) and app != fnd { app = wa; expanded = false; wa_focus = false; wa_typing = false; wa_search = false }
-    on wa_big while app == fnd { app = wa; expanded = true; panel = fnds; wa_focus = false; wa_typing = false; wa_search = false }
-    on change wa_typing while wa_typing { focus wa_in }
+    //  Opening it: on the list (Vim's keys), no field taking them: `blur` says so to the engine too, which
+    //  otherwise gives the first field drawn (the search) the keyboard as it comes.
+    on wa_big while not (app == wa) and app != fnd { app = wa; expanded = false; wa_focus = false; wa_typing = false; wa_search = false; blur }
+    on wa_big while app == fnd { app = wa; expanded = true; panel = fnds; wa_focus = false; wa_typing = false; wa_search = false; blur }
+    on change wa_typing while wa_typing { focus wa_in; wa_cur = -1 }   // writing: no message stays chosen (Esc comes back to the chat, none chosen)
     on change wa_search while wa_search { focus wa_find }
     on submit wa_in { emit wa_send }
+    //  The command line: `:` (not while writing), Enter runs, Tab completes, ↑/↓ choose, Esc lets it go.
+    on key colon while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql { wa_cmd = true }
+    on change wa_cmd while wa_cmd { focus wa_cmd_in }
+    on change wa_cmd while not wa_cmd and not wa_typing and not wa_search and not wa_cs { blur }
+    on submit wa_cmd_in { emit wa_cmd_run }
+    on key Tab while app == wa and not expanded and wa_cmd { emit wa_cmd_tab }
+    on key Down while app == wa and not expanded and wa_cmd { emit wa_cmd_move(1) }
+    on key Up while app == wa and not expanded and wa_cmd { emit wa_cmd_move(-1) }
+    on key Escape while app == wa and not expanded and wa_cmd { wa_cmd = false }
     on submit wa_find { wa_search = false; blur }
     on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and wa_typing { wa_typing = false; blur }
     on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and wa_search { wa_search = false; blur; emit wa_find_clear }
@@ -4180,8 +4478,8 @@ scene Island {
     on key Ctrl+u while app == wa and not expanded and not side_keys and not wa_modal and not wa_search and not wa_focus { emit wa_move(-5) }
     on key Ctrl+f while app == wa and not expanded and not side_keys and not wa_modal and not wa_search and not wa_focus { emit wa_move(10) }
     on key Ctrl+b while app == wa and not expanded and not side_keys and not wa_modal and not wa_search and not wa_focus { emit wa_move(-10) }
-    on key Ctrl+e while app == wa and not expanded and not side_keys and not wa_modal and not wa_search and not wa_focus { emit wa_wheel(-1) }
-    on key Ctrl+y while app == wa and not expanded and not side_keys and not wa_modal and not wa_search and not wa_focus { emit wa_wheel(1) }
+    on key Ctrl+e while app == wa and not expanded and not side_keys and not wa_modal and not wa_search and not wa_focus { emit wa_wheel(-2) }
+    on key Ctrl+y while app == wa and not expanded and not side_keys and not wa_modal and not wa_search and not wa_focus { emit wa_wheel(2) }
     on key H while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_focus { emit wa_jump(0) }
     on key M while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_focus { emit wa_jump(1) }
     on key L while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_focus { emit wa_jump(2) }
@@ -4191,8 +4489,10 @@ scene Island {
     on key z while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_focus and not wa_zz { wa_zz = true }
     on key i while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_focus and wa_linked { wa_search = true }
     on key s while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search { wa_rail = not wa_rail }
-    on key Return while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and wa_linked and not wa_ql and not (wa_focus and wa_cur >= 0 and wa_cur_media) { wa_typing = true }
-    on key Return while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql and wa_focus and wa_cur >= 0 and wa_cur_media { emit wa_look }
+    on key t while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search { wa_times = not wa_times }
+    on key Return while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and wa_linked and not wa_ql and not (wa_focus and wa_cur >= 0 and (wa_cur_media or wa_cur_fail)) { wa_typing = true }
+    on key Return while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql and wa_focus and wa_cur >= 0 and wa_cur_media and not wa_cur_fail { emit wa_look }
+    on key Return while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql and wa_focus and wa_cur >= 0 and wa_cur_fail { emit wa_retry }
     on key l while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql and not wa_focus and wa_open { wa_focus = true; wa_typing = true }
     on key s while app == mailx and not expanded and not side_keys and not mr_rep and not mr_confirm { mx_rail = not mx_rail }
     on key Right while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql { wa_focus = true }
@@ -4212,10 +4512,6 @@ scene Island {
     on key o while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and wa_focus { emit wa_open }
     on key r while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and wa_focus and wa_cur >= 0 { emit wa_reply; wa_ql = false }
     //  The field in normal mode: j and k step out of it onto the messages (a cursor there: r answers, Enter views).
-    on key j while app == wa and not expanded and not side_keys and not wa_modal and wa_typing and wa_vim == normal { wa_typing = false; blur; wa_focus = true; emit wa_cmove(1) }
-    on key k while app == wa and not expanded and not side_keys and not wa_modal and wa_typing and wa_vim == normal { wa_typing = false; blur; wa_focus = true; emit wa_cmove(-1) }
-    on key Down while app == wa and not expanded and not side_keys and not wa_modal and wa_typing and wa_vim == normal { wa_typing = false; blur; wa_focus = true; emit wa_cmove(1) }
-    on key Up while app == wa and not expanded and not side_keys and not wa_modal and wa_typing and wa_vim == normal { wa_typing = false; blur; wa_focus = true; emit wa_cmove(-1) }
     //  Enter: the picture or video under the cursor large (a click on it too); Escape, q or Enter close it.
     //  Over it: Space plays or stops a video (closes a picture), h/l go through a stack, ←/→ jump a video by 5 s.
     on key space while app == wa and not expanded and wa_ql { emit wa_ql_space }
@@ -4234,7 +4530,7 @@ scene Island {
     //  Ctrl+h j k l: between the three, as Vim's windows: the list on the left, the chat on the
     //  right, its field under it (from the list, l goes to the chat; past it, to a tool beside).
     on key Ctrl+h while app == wa and not expanded and not side_keys and not wa_modal and (wa_focus or wa_typing) { wa_typing = false; blur; wa_focus = false; wa_cur = -1 }
-    on key Ctrl+l while app == wa and not expanded and not side_keys and not wa_modal and not wa_focus and not wa_typing and wa_open { wa_search = false; blur; wa_focus = true }
+    on key Ctrl+l while app == wa and not expanded and not side_keys and not wa_modal and not wa_focus and not wa_typing and wa_open { wa_search = false; blur; wa_focus = true; emit wa_last }   // onto the messages, on the newest (l: into the field)
     on key Ctrl+j while app == wa and not expanded and not side_keys and not wa_modal and wa_focus and not wa_typing and not wa_search { wa_typing = true }
     on key Ctrl+k while app == wa and not expanded and not side_keys and not wa_modal and wa_typing { wa_typing = false; blur; wa_focus = true }
     //  Scrolling the chat (in the list too, and from the field's normal mode, which passes Ctrl on).
@@ -4247,7 +4543,7 @@ scene Island {
     //  Escape, one thing at a time: the answer being written, the cursor, the chat, the view.
     on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and not wa_typing and not wa_search and not wa_csr and wa_att { emit wa_att_clear }
     on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and not wa_typing and not wa_search and not wa_csr and not wa_att and wa_quote { emit wa_quote_clear }
-    on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and not wa_typing and not wa_search and not wa_csr and not wa_att and not wa_quote and wa_focus and wa_cur >= 0 { wa_cur = -1 }
+    on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and not wa_typing and not wa_search and not wa_csr and not wa_att and not wa_quote and wa_focus and wa_cur >= 0 { wa_cur = -1; wa_typing = true }   // from the messages, back to writing
     on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and not wa_typing and not wa_search and not wa_csr and not wa_att and not wa_quote and wa_focus and wa_cur < 0 { wa_focus = false }
     on key Escape while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and not wa_typing and not wa_search and not wa_csr and not wa_att and not wa_quote and not wa_focus { app = none }
     on key q while app == wa and not expanded and not side_keys and not wa_modal and not wa_ql and not wa_typing and not wa_search { app = none }
@@ -4386,7 +4682,7 @@ scene Island {
     on release cseek_z while scrubbing { pos = scrub_f * media.length; emit seek_to(scrub_f * media.length); scrubbing = false; scrub_over = scrub_f }
     on change expanded while not expanded { scrubbing = false }
     on press next_z { emit next }
-    on scroll ws_z { emit ws_step(wheel) }
+    on scroll ws_z while wheel.glide < 0.5 { emit ws_step(wheel) }
     on hold sw_z for 700ms { emit wm_switch }
     on hold out_z for 700ms { emit log_out }
     on hold re_z for 700ms { emit restart }
@@ -4422,7 +4718,7 @@ scene Island {
     on press bead_z { emit osd_mute }
     on press track_z { emit osd_set(clamp((pointer.x - tl) / max(tlen, 1), 0, 1)) }
     on drag track_z { emit osd_set(clamp((pointer.x - tl) / max(tlen, 1), 0, 1)) }
-    on scroll os_z while osd_kind == vol { emit vol_step(wheel); osd_seq = osd_seq + 1 }
-    on scroll os_z while osd_kind == bright { emit bright_step(wheel); osd_seq = osd_seq + 1 }
-    on scroll os_z while osd_kind == kbd { emit kbd_step(wheel); osd_seq = osd_seq + 1 }
+    on scroll os_z while osd_kind == vol and wheel.glide < 0.5 { emit vol_step(wheel); osd_seq = osd_seq + 1 }
+    on scroll os_z while osd_kind == bright and wheel.glide < 0.5 { emit bright_step(wheel); osd_seq = osd_seq + 1 }
+    on scroll os_z while osd_kind == kbd and wheel.glide < 0.5 { emit kbd_step(wheel); osd_seq = osd_seq + 1 }
 }

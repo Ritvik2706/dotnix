@@ -14,15 +14,12 @@ part Projects {
         group {
             show: not r.head
             zone box row { from: 0, 0; size: 380, 46; corner: 23 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel; active: not r.head }
+            //  Under the pointer a faint trace (one glass pill only: the chosen one); the chosen one is a raised, lit one (niri's glass on the card's).
             body {
-                color: chip_hi; opacity: 38% * row.hover; light: 4%, 0, 23
+                color: ink; opacity: 6%; show: row.hover > 0.5 and not r.sel
                 box { from: 0, 0; size: 380, 46; corner: 23 continuous }
             }
-            body {
-                gradient: 0, 0 to 380, 46, mix(chip_hi, lilac, 0.16), mix(chip_hi, sunset, 0.13)
-                glass: 25%; blur: 0%; light: 4%, 0, 23; shadow: 0, 1.8, 7, 20%; show: r.sel
-                box { from: 0, 0; size: 380, 46; corner: 23 continuous }
-            }
+            //  (The chosen one is the list's gliding glass: pages/glide.plm.)
             //  What it is: a session (lit green while it runs), a config, a folder.
             ellipse { at: 25, 23; radius: 15; color: if(r.kind == 0, mix(chip, #30d158, 0.22), chip); opacity: 70% }
             image ic_code_p { at: 16, 14; size: 18, 18; tint: if(r.kind == 0, #6ee79a, soft_l); show: r.kind == 0 }
@@ -100,6 +97,7 @@ part Projects {
 
         //  Under the rows, so a press reaches them; the wheel works over all of it.
         zone box proj_list { from: ex0 + 12, 128; size: 380, pl_h; label: "Projects" }
+        Glide(ex0 + 12, 128 + proj_at * 48, 380, 46, 23, proj_at >= 0, 0)
         column plist {
             at: ex0 + 12, 128; gap: 2
             for r in projs { ProjRow(r) }
@@ -129,5 +127,5 @@ part Projects {
     }
 
     on press pjb { emit go_home }
-    on scroll proj_list { emit proj_scroll(wheel) }
+    on scroll proj_list while wheel.glide < 0.5 { emit proj_scroll(wheel) }
 }

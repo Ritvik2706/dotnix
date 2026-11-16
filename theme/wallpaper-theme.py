@@ -45,6 +45,8 @@ LUMEN_OUT = DOTNIX / "lumen/shells/island/theme.plm"
 NIRI_OUT = DOTNIX / "niri/theme.kdl"
 STATE = Path.home() / ".cache/lumen/theme.json"
 TERM_DIR = Path.home() / ".cache/lumen/term"
+# Claude Code custom theme ("theme": "custom:wallpaper" in ~/.claude/settings.json)
+CLAUDE_THEME = Path.home() / ".claude/themes/wallpaper.json"
 GHOSTTY_OUT = DOTNIX / "ghostty/wall-colours"
 CACHE = Path.home() / ".cache/lumen/themes"
 WALLS = DOTNIX / "wallpapers"
@@ -476,6 +478,8 @@ def glass_niri():
     # Not glass, but the same kind of key: only the patched niri has it (columns that
     # size themselves, niri patch 0036), and stock niri must never be shown it.
     probes["auto-fit-columns"] = "layout { auto-fit-columns true; }\n"
+    # Layers left out of captures (the island's recording bar), patch 0040.
+    probes["hide-from-capture"] = "layer-rule { hide-from-capture true; }\n"
     for key, text in probes.items():
         probe.write_text(text)
         if subprocess.run([exe, "validate", "-c", str(probe)], capture_output=True).returncode == 0:
@@ -493,6 +497,19 @@ def niri_layout_extra(known):
     return ""
 
 
+def niri_rules_extra(known):
+    """Rules only the patched niri understands."""
+    if "hide-from-capture" in known:
+        return ("// The island's `captures: hidden` surfaces (the recording bar): on the\n"
+                "// monitor, never in a recording, screenshot or shared screen (patched niri;\n"
+                "// the rest of their rule is in niri/conf/rules/layers.kdl).\n"
+                "layer-rule {\n"
+                "    match namespace=\"^lumen-private$\"\n"
+                "    hide-from-capture true\n"
+                "}\n")
+    return ""
+
+
 GLASS_SAT = 1.8  # border-glass: how vivid the frost under a border is
 
 
@@ -504,7 +521,7 @@ def niri_text(t):
         # A niri without glass borders: nothing shows what is behind, so the
         # island's own light (from what is behind it) stands in until a restart.
         c = t["roles"]["lilac"].upper()
-        return (head + "layout {\n" + niri_layout_extra(known) +
+        return (head + niri_rules_extra(known) + "layout {\n" + niri_layout_extra(known) +
                 f"    border {{ active-gradient from=\"{c}\" to=\"#FFFFFFCC\" angle=120; inactive-color \"#FFFFFF1F\"; }}\n"
                 f"    insert-hint {{ color \"{c}40\"; }}\n"
                 f"    tab-indicator {{ active-color \"{c}\"; }}\n"
@@ -517,7 +534,7 @@ def niri_text(t):
         blur.append(f"border-shade {n['shade']}")
     if "border-inactive" in known:
         blur.append(f"border-inactive {n.get('inactive_k', 0.25)}")
-    return (head +
+    return (head + niri_rules_extra(known) +
             "// Borders have no colour of their own: each is the frost of what is really\n"
             "// behind it (border-glass), lit like a glass edge (border-light) inside a dark\n"
             "// hairline at its silhouette (border-shade), faint sheen on the focused one;\n"
@@ -732,6 +749,31 @@ def term_texts(t):
     return tmux, zsh, ghostty, nvim
 
 
+def claude_theme(t, p, c):
+    """Claude Code's colours from the same palette as the terminal: the prompt
+    box's rules are tmux's rule, its accent/spinner is the prompt accent, mode
+    colours are the re-hued ANSI cool group, errors/diffs keep their meaning.
+    Unknown keys are ignored by Claude Code, so a renamed key just falls back
+    to the base dark theme."""
+    def lift(h, dl=0.07):
+        L, C, hh = hex_to_lch(h)
+        return lch_to_hex(min(L + dl, 0.97), C, hh)
+    o = {
+        "claude": p["accent"], "claudeShimmer": lift(p["accent"]),
+        "promptBorder": p["rule"], "promptBorderShimmer": p["border_hi"],
+        "text": c["fg"], "subtle": c["8"], "inactive": c["8"], "inactiveShimmer": c["7"],
+        "suggestion": p["accent"], "remember": p["accent"], "ide": c["4"],
+        "permission": c["4"], "permissionShimmer": lift(c["4"]),
+        "planMode": c["6"], "autoAccept": c["5"], "autoAcceptShimmer": lift(c["5"]),
+        "skill": c["5"], "bashBorder": c["5"],
+        "success": c["2"], "error": c["1"], "warning": c["3"], "warningShimmer": lift(c["3"]),
+        "userMessageBackground": p["quiet"], "userMessageBackgroundHover": p["chip"],
+        "selectionBg": p["chip"],
+        "rate_limit_fill": p["accent"], "rate_limit_empty": p["rule"],
+    }
+    return json.dumps({"name": "Wallpaper", "base": "dark", "overrides": o}, indent=2) + "\n"
+
+
 def apply_term(t):
     """Each terminal piece picks the new colours up live: tmux re-sources its
     file, ghostty reloads its config (its palette: everything drawn in ANSI
@@ -739,6 +781,8 @@ def apply_term(t):
     the next prompt, nvim watches its file."""
     tmux, zsh, ghostty, nvim = term_texts(t)
     changed = []
+    if write_if_changed(CLAUDE_THEME, claude_theme(t, term_palette(t), term_colours(t))):
+        changed.append("claude")
     if write_if_changed(TERM_DIR / "nvim.sh", nvim):
         changed.append("nvim")   # running nvims watch the file
     if write_if_changed(TERM_DIR / "tmux.conf", tmux):

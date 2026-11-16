@@ -1,0 +1,264 @@
+From 75324d76b517ff729bdcd604d70643ddfbdb7bc9 Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Wed, 11 Nov 2026 21:06:54 +0400
+Subject: [PATCH 40/40] screen recording: r in the screenshot UI records the
+ selection; layer-rule hide-from-capture
+
+r hands the selection (or the output) to ~/.config/niri/scripts/record.sh.
+hide-from-capture leaves a layer surface out of screencasts and screenshots
+with nothing in its place: the island's recording bar is on the monitor,
+never in the video.
+---
+ docs/wiki/Configuration:-Layer-Rules.md | 13 +++++++++++
+ niri-config/src/layer_rule.rs           |  4 ++++
+ niri-config/src/lib.rs                  |  1 +
+ src/input/mod.rs                        |  1 +
+ src/layer/mapped.rs                     | 12 ++++++++--
+ src/layer/mod.rs                        |  6 +++++
+ src/niri.rs                             | 27 ++++++++++++++++++++++
+ src/ui/screenshot_ui.rs                 | 30 +++++++++++++++++++++++--
+ 8 files changed, 90 insertions(+), 4 deletions(-)
+
+diff --git a/docs/wiki/Configuration:-Layer-Rules.md b/docs/wiki/Configuration:-Layer-Rules.md
+index 0b2ccf34..b3e68e65 100644
+--- a/docs/wiki/Configuration:-Layer-Rules.md
++++ b/docs/wiki/Configuration:-Layer-Rules.md
+@@ -129,6 +129,19 @@ layer-rule {
+ }
+ ```
+ 
++#### `hide-from-capture`
++
++Leave the surface out of every capture: screencasts, screenshots and screencopy (wf-recorder, grim).
++Unlike `block-out-from`, nothing is drawn in its place, so a control meant only for whoever sits at the screen (a recording's stop button) is simply not in the video.
++
++```kdl
++layer-rule {
++    match namespace="^lumen-private$"
++
++    hide-from-capture true
++}
++```
++
+ #### `opacity`
+ 
+ Set the opacity of the surface.
+diff --git a/niri-config/src/layer_rule.rs b/niri-config/src/layer_rule.rs
+index cf099b3a..46f5090a 100644
+--- a/niri-config/src/layer_rule.rs
++++ b/niri-config/src/layer_rule.rs
+@@ -13,6 +13,10 @@ pub struct LayerRule {
+     pub opacity: Option<f32>,
+     #[knuffel(child, unwrap(argument))]
+     pub block_out_from: Option<BlockOutFrom>,
++    /// Seen on the monitor, left out of every capture (screencasts and
++    /// screenshots): not blacked out like block-out-from, just not there.
++    #[knuffel(child, unwrap(argument))]
++    pub hide_from_capture: Option<bool>,
+     #[knuffel(child, default)]
+     pub shadow: ShadowRule,
+     #[knuffel(child)]
+diff --git a/niri-config/src/lib.rs b/niri-config/src/lib.rs
+index b310521f..95a067b8 100644
+--- a/niri-config/src/lib.rs
++++ b/niri-config/src/lib.rs
+@@ -1915,6 +1915,7 @@ mod tests {
+                     block_out_from: Some(
+                         Screencast,
+                     ),
++                    hide_from_capture: None,
+                     shadow: ShadowRule {
+                         off: false,
+                         on: false,
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index 12d0edd8..5eff3052 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -762,6 +762,7 @@ impl State {
+                     KeyResult::None => (),
+                     KeyResult::Ocr => self.screenshot_ocr(),
+                     KeyResult::PickColor => self.screenshot_pick_color(),
++                    KeyResult::Record => self.screenshot_record(),
+                 }
+                 self.niri.queue_redraw_all();
+             }
+diff --git a/src/layer/mapped.rs b/src/layer/mapped.rs
+index 891f1de7..d6f467a0 100644
+--- a/src/layer/mapped.rs
++++ b/src/layer/mapped.rs
+@@ -17,7 +17,7 @@ use crate::render_helpers::shadow::ShadowRenderElement;
+ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
+ use crate::render_helpers::surface::push_elements_from_surface_tree;
+ use crate::render_helpers::xray::XrayPos;
+-use crate::render_helpers::{background_effect, liquid_glass, RenderCtx};
++use crate::render_helpers::{background_effect, liquid_glass, RenderCtx, RenderTarget};
+ use crate::utils::{baba_is_float_offset, round_logical_in_physical};
+ 
+ #[derive(Debug)]
+@@ -199,6 +199,12 @@ impl MappedLayer {
+         let location = location + bob_offset;
+         let xray_pos = xray_pos.offset(bob_offset);
+ 
++        // Only on the monitor itself: not in a screencast or a screenshot, and
++        // nothing in its place (its shadow and glass go with it).
++        if self.rules.hide_from_capture && ctx.target != RenderTarget::Output {
++            return;
++        }
++
+         let surface = self.surface.wl_surface();
+ 
+         let should_block_out = ctx.target.should_block_out(self.rules.block_out_from);
+@@ -277,7 +283,9 @@ impl MappedLayer {
+         xray_pos: XrayPos,
+         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
+     ) {
+-        if ctx.target.should_block_out(self.rules.block_out_from) {
++        if ctx.target.should_block_out(self.rules.block_out_from)
++            || (self.rules.hide_from_capture && ctx.target != RenderTarget::Output)
++        {
+             return;
+         }
+ 
+diff --git a/src/layer/mod.rs b/src/layer/mod.rs
+index 767a6b0e..e9708143 100644
+--- a/src/layer/mod.rs
++++ b/src/layer/mod.rs
+@@ -16,6 +16,9 @@ pub struct ResolvedLayerRules {
+     /// Whether to block out this layer surface from certain render targets.
+     pub block_out_from: Option<BlockOutFrom>,
+ 
++    /// Whether to leave this layer surface out of captures altogether.
++    pub hide_from_capture: bool,
++
+     /// Shadow overrides.
+     pub shadow: ShadowRule,
+ 
+@@ -66,6 +69,9 @@ impl ResolvedLayerRules {
+             if let Some(x) = rule.block_out_from {
+                 resolved.block_out_from = Some(x);
+             }
++            if let Some(x) = rule.hide_from_capture {
++                resolved.hide_from_capture = x;
++            }
+             if let Some(x) = rule.geometry_corner_radius {
+                 resolved.geometry_corner_radius = Some(x);
+             }
+diff --git a/src/niri.rs b/src/niri.rs
+index 6fc98d35..46eef230 100644
+--- a/src/niri.rs
++++ b/src/niri.rs
+@@ -2123,6 +2123,33 @@ impl State {
+         }
+     }
+ 
++    /// The screenshot UI's `r`: the UI closes and the selection is recorded,
++    /// by ~/.config/niri/scripts/record.sh (given `at WxH+X+Y` in logical
++    /// layout coordinates, as slurp gives them, or `output NAME`).
++    pub fn screenshot_record(&mut self) {
++        let target = self.niri.screenshot_ui.record_target();
++        self.close_screenshot_ui();
++        let Some((output, rect)) = target else {
++            return;
++        };
++        let what = match rect {
++            None => format!("output {}", output.name()),
++            Some(r) => {
++                let Some(geo) = self.niri.global_space.output_geometry(&output) else {
++                    return;
++                };
++                let (x, y) = (geo.loc.x as f64 + r.loc.x, geo.loc.y as f64 + r.loc.y);
++                let (w, h) = (r.size.w.round().max(1.), r.size.h.round().max(1.));
++                format!("at {w}x{h}+{}+{}", x.round(), y.round())
++            }
++        };
++        let Some(home) = std::env::var_os("HOME") else {
++            return;
++        };
++        let script = PathBuf::from(home).join(".config/niri/scripts/record.sh");
++        crate::utils::spawning::spawn(vec![script.into_os_string(), what.into()], None);
++    }
++
+     fn close_screenshot_ui(&mut self) {
+         self.niri.screenshot_ui.close();
+         self.niri
+diff --git a/src/ui/screenshot_ui.rs b/src/ui/screenshot_ui.rs
+index ac2d1e8d..4686d717 100644
+--- a/src/ui/screenshot_ui.rs
++++ b/src/ui/screenshot_ui.rs
+@@ -535,6 +535,7 @@ impl ScreenshotUi {
+             }
+             Keysym::o => KeyResult::Ocr,
+             Keysym::c => KeyResult::PickColor,
++            Keysym::r => KeyResult::Record,
+             _ => KeyResult::None,
+         }
+     }
+@@ -1173,13 +1174,13 @@ impl ScreenshotUi {
+         }
+ 
+         // Drawing (and typing) takes the keys; so do d (draw), f (folder),
+-        // o (copy the text) and c (copy a colour) while selecting.
++        // o (copy the text), c (copy a colour) and r (record) while selecting.
+         let own = (draw.wants(raw, mods.ctrl) && !mods.alt)
+             || (!draw.active
+                 && !mods.ctrl
+                 && !mods.alt
+                 && !mods.shift
+-                && matches!(raw, Keysym::d | Keysym::f | Keysym::o | Keysym::c));
++                && matches!(raw, Keysym::d | Keysym::f | Keysym::o | Keysym::c | Keysym::r));
+         if own {
+             return Some(Action::ScreenshotKey {
+                 raw: raw.raw(),
+@@ -1192,6 +1193,26 @@ impl ScreenshotUi {
+         action(raw, mods)
+     }
+ 
++    /// What `r` records: the whole output when that is what is selected,
++    /// else the selection, in the output's logical coordinates.
++    pub fn record_target(&self) -> Option<(Output, Option<Rectangle<f64, Logical>>)> {
++        let Self::Open {
++            selection,
++            output_data,
++            mode,
++            ..
++        } = self
++        else {
++            return None;
++        };
++        let data = output_data.get(&selection.0)?;
++        let rect = rect_from_corner_points(selection.1, selection.2);
++        if *mode == Mode::Screen || rect.size == data.size {
++            return Some((selection.0.clone(), None));
++        }
++        Some((selection.0.clone(), Some(rect.to_f64().to_logical(data.scale))))
++    }
++
+     pub fn selection_output(&self) -> Option<&Output> {
+         if let Self::Open {
+             selection: (output, _, _),
+@@ -1582,6 +1603,8 @@ pub enum KeyResult {
+     Ocr,
+     /// Copy the colour under the pointer.
+     PickColor,
++    /// Record the selection (a video, until stopped).
++    Record,
+ }
+ 
+ /// Where screenshots can go: screenshot-path's folder first, then the ones
+@@ -2271,6 +2294,7 @@ fn paint_panel(cr: &cairo::Context, st: &PanelState, style: &GlassStyle) -> anyh
+                 first,
+                 vec![
+                     key("y", "copy"),
++                    key("r", "record"),
+                     key(
+                         "⏎",
+                         &format!("save to {}", pango::glib::markup_escape_text(&st.folder)),
+@@ -2435,6 +2459,8 @@ mod tests {
+         );
+         assert_eq!(action(Keysym::q, none), Some(Action::CancelScreenshot));
+         assert_eq!(action(Keysym::x, none), None);
++        // r is the UI's own (record), like d/f/o/c, not a plain action.
++        assert_eq!(action(Keysym::r, none), None);
+     }
+ 
+     #[test]

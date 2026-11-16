@@ -1,7 +1,7 @@
 From 7372cac6b108f66833604877ffc82bbf1099f7f2 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 02:07:19 +0400
-Subject: [PATCH 13/38] render: liquid glass frost is a real blur dial
+Subject: [PATCH 13/40] render: liquid glass frost is a real blur dial
 
 Frost scales the blur's passes (0.5..1x) and offset (0.25..1x), so light
 frost keeps what is behind recognisable and the lensing visible; any frost

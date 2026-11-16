@@ -1,7 +1,7 @@
 From 6f88a13c95ca5cf1234767418a019c259a0d5a4b Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Tue, 27 Oct 2026 22:28:01 +0400
-Subject: [PATCH 06/38] render: lens the full body of lumen glass
+Subject: [PATCH 06/40] render: lens the full body of lumen glass
 
 ---
  src/render_helpers/shaders/liquid_glass.frag | 24 ++++++++++++++++----

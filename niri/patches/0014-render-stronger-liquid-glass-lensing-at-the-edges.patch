@@ -1,7 +1,7 @@
 From 85f982b81502940d0d27f5186a8567323b402dfc Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 02:13:02 +0400
-Subject: [PATCH 14/38] render: stronger liquid glass lensing at the edges
+Subject: [PATCH 14/40] render: stronger liquid glass lensing at the edges
 
 The (1-x)^2 squeeze capped at 0.45x bevel shifted 7 px at most on a 16 px
 card edge, too weak to read as Apple's. Now (1-x)^1.1 capped at 0.85x

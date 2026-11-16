@@ -1,7 +1,7 @@
 From 195f3b18a047bb0e6b255c2c9fd6c61ca09f8b4d Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 17:22:00 +0400
-Subject: [PATCH 27/38] liquid glass: same look, cheaper: cull far shapes, one
+Subject: [PATCH 27/40] liquid glass: same look, cheaper: cull far shapes, one
  pass for the edge normal, async light/dark readback
 
 ---

@@ -1,0 +1,36 @@
+// The chosen one of a list, as the workspace rail shows the desktop you are on: one highlight that
+// glides to where the choice goes (160 ms, no overshoot: quicker than the rail, lists are stepped
+// through fast) and stretches along the way it moves, by how fast, narrowing a little across it;
+// round again at rest. A list draws one behind its rows, from the chosen row's place, instead of each
+// row lighting its own (which can only appear, not move). It follows its place even while hidden,
+// so a list opening does not see it fly in.
+part Glides {
+    //  `x, y, w, h`: the box of the chosen one (in the list's own coordinates); `r` its corner;
+    //  `shown`: whether there is one to show; `kind`: 0 a glass control (the island's tint), 1 the
+    //  same in neutral grey (WhatsApp keeps no lilac), 2 a ring of soft light (around a picture),
+    //  3 a blue ring (WhatsApp's), 4 a plain fill (on a sheet with a solid ground, where glass can't show).
+    component Glide(x: number, y: number, w: number, h: number, r: number, shown: bool, kind: number) {
+        size: 0, 0
+        prop gx = 0 ~160ms
+        follow gx = x
+        prop gy = 0 ~160ms
+        follow gy = y
+        //  How fast it goes, each way, as a share of its size per second (as the rail's squash).
+        prop sx = 0 ~70ms
+        follow sx = clamp(abs(vel(gx)) / max(1, 14 * w / 3), 0, 1)
+        prop sy = 0 ~70ms
+        follow sy = clamp(abs(vel(gy)) / max(1, 14 * h / 3), 0, 1)
+        let gw = w * (1 + 0.26 * sx - 0.07 * sy)
+        let gh = h * (1 + 0.26 * sy - 0.07 * sx)
+        let gl = gx + w / 2 - gw / 2
+        let gt = gy + h / 2 - gh / 2
+        let gr = min(r, min(gw, gh) / 2)
+        body {
+            color: mix(mix(chip_hi, lilac, 0.14), mix(chip_hi, im_gray2, 0.3), if(kind == 1, 1, 0)); material: control; opacity: lgb_fill + 12%
+            show: shown and kind <= 1
+            box { from: gl, gt; size: gw, gh; corner: gr continuous }
+        }
+        box { from: gl, gt; size: gw, gh; corner: gr continuous; stroke: if(kind == 3, 2.5, 2); color: if(kind == 3, im_blue2, mix(soft_l, soft_s, 0.4)); opacity: if(shown and (kind == 2 or kind == 3), 92%, 0) }
+        box { from: gl, gt; size: gw, gh; corner: gr continuous; color: im_gray2; opacity: if(shown and kind == 4, 100%, 0) }
+    }
+}

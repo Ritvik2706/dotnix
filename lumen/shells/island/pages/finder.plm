@@ -12,14 +12,12 @@ part Finder {
     component FRow(r: record) {
         size: 420, if(fnd_listing, 36, 44)
         let rh = if(fnd_listing, 36, 44)
-        zone box row { from: 0, 0; size: 420, rh; corner: 12 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel; carries: "{r.drag}" }
-        box { from: 0, 0; size: 420, rh; corner: 12 continuous; color: ink; opacity: if(r.sel, 0, 5% * row.hover + 3% * row.pressed) }
+        zone box row { from: 0, 0; size: 420, rh; corner: rh / 2 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel; carries: "{r.drag}" }
         body {
-            gradient: 0, 0 to 420, rh, mix(chip_hi, lilac, 0.30), mix(chip_hi, sunset, 0.24)
-            light: 4%, 0, 18
-            opacity: if(r.sel, 100%, 0)
-            box { from: 0, 0; size: 420, rh; corner: 12 continuous }
+            color: ink; opacity: 6%; show: row.hover > 0.5 and not r.sel
+            box { from: 0, 0; size: 420, rh; corner: rh / 2 continuous }
         }
+        //  (The chosen one is the list's gliding glass: pages/glide.plm.)
         body {
             gradient: 3, rh / 2 - 8 to 7, rh / 2 + 8, soft_l, soft_s; light: 6%, 10, 2
             opacity: if(r.mark, 100%, 0)
@@ -50,11 +48,12 @@ part Finder {
     component FTile(r: record) {
         size: 105, 114
         zone box tz { from: 3, 2; size: 99, 110; corner: 16 continuous; cursor: pointer; label: "{r.name}"; selected: r.sel; carries: "{r.drag}" }
-        box { from: 3, 2; size: 99, 110; corner: 16 continuous; color: ink; opacity: if(r.sel, 0, 5% * tz.hover + 3% * tz.pressed) }
         body {
-            gradient: 3, 2 to 102, 112, mix(chip_hi, lilac, 0.30), mix(chip_hi, sunset, 0.24)
-            light: 4%, 2, 18
-            opacity: if(r.sel, 100%, 0)
+            color: ink; opacity: 6%; show: tz.hover > 0.5 and not r.sel
+            box { from: 3, 2; size: 99, 110; corner: 16 continuous }
+        }
+        body {
+            color: mix(chip_hi, lilac, 0.14); material: control; opacity: lgb_fill + 12%; show: r.sel
             box { from: 3, 2; size: 99, 110; corner: 16 continuous }
         }
         group {
@@ -182,6 +181,7 @@ part Finder {
 
         //  The results: always a list (how a folder's contents look is the preview's choice).
         zone box fnd_list { from: fx0 + 12, 88; size: 420, 458; label: "Files" }
+        Glide(fx0 + 12, 88 + fnd_at * (if(fnd_listing, 36, 44) + 2), 420, if(fnd_listing, 36, 44), if(fnd_listing, 18, 22), fnd_at >= 0, 0)
         column {
             at: fx0 + 12, 88; gap: 2
             for r in fhits { FRow(r) }
@@ -389,8 +389,8 @@ part Finder {
     on press vs_icons { emit fnd_view_as(1) }
     on press pcopy { emit fnd_yank }
     on press fsb { fnd_insert = true; focus fq }
-    on scroll fnd_list { emit fnd_scroll(wheel) }
+    on scroll fnd_list while wheel.glide < 0.5 { emit fnd_scroll(wheel) }
     on press pv_area { fnd_view = true; emit pv_grab }
     on drag pv_area { emit pv_drag_x(drag.dx); emit pv_drag_y(drag.dy) }
-    on scroll pv_area { fnd_view = true; emit pv_zoom(if(wheel > 0, 1.15, 0.87)) }
+    on scroll pv_area while wheel.glide < 0.5 { fnd_view = true; emit pv_zoom(if(wheel > 0, 1.15, 0.87)) }
 }

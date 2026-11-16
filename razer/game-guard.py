@@ -5,8 +5,9 @@
   game-guard.py check    the same pre-flight checks, printed
 
 While a game window exists it holds off idle (a controller isn't input to
-hypridle, so a game on the TV would blank at 10 min and suspend at 20) and warns
-about what would actually hurt. Nothing runs between games: it waits on niri's
+hypridle, so a game on the TV would blank at 10 min and suspend at 20), tells
+razer-fan.py, which keeps the performance profile for games, and warns about what
+would actually hurt. Nothing runs between games: it waits on niri's
 events, and only reads the GPU, which nvidia-smi would wake, during a game.
 CPU temperature isn't warned about: 100 C spikes are normal here (razer-fan.py).
 """
@@ -18,6 +19,7 @@ AGAIN = 300                  # the same warning at most this often
 GPU_HOT = 90                 # its slowdown is 95, shutdown 98
 RAM_LOW_GIB = 1.5
 DISK_LOW_GIB = 15
+GAME = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "razer-game.pid")   # razer-fan.py reads it
 
 
 def out(*cmd):
@@ -58,8 +60,6 @@ def preflight():
         bad.append(("ac", "On battery", "Plug in the charger: the GPU is held back and heat doesn't help the battery"))
     if not os.path.exists("/dev/ntsync"):
         bad.append(("ntsync", "ntsync isn't loaded", "Wine falls back to slower sync: sudo modprobe ntsync"))
-    if out("systemctl", "is-active", "thermald") == "active":
-        bad.append(("thermald", "thermald is running", "It cut the CPU to 9 W here: sudo systemctl disable --now thermald"))
     kernel = read("/sys/module/nvidia/version").replace(".", "-")
     if kernel and "nvidia-" + kernel not in out("flatpak", "list", "--columns=application"):
         bad.append(("driver", "NVIDIA driver mismatch", f"Flatpak has no GL for {kernel}: flatpak update, or games lose the GPU"))
@@ -103,6 +103,8 @@ class Guard:
     def start(self):
         self.inhibit = subprocess.Popen(["systemd-inhibit", "--what=idle", "--who=game-guard",
                                          "--why=A game is open", "--mode=block", "sleep", "infinity"])
+        with open(GAME, "w") as f:
+            f.write(str(os.getpid()))
         self.said = {}
         self.warn(preflight())
 
@@ -110,6 +112,10 @@ class Guard:
         self.inhibit.terminate()
         self.inhibit.wait()
         self.inhibit = None
+        try:
+            os.unlink(GAME)
+        except OSError:
+            pass
 
 
 def game_open():

@@ -1,7 +1,7 @@
 From 572e43294d93afcefa2a19959ce6ad48fbe18874 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 14:15:47 +0400
-Subject: [PATCH 24/38] liquid glass: keep light/dark across shapes coming and
+Subject: [PATCH 24/40] liquid glass: keep light/dark across shapes coming and
  going
 
 A change in the number of shapes reset every shape's decision, so all of

@@ -12,7 +12,7 @@ part Wall {
         //  The chosen one: a ring of softly tinted glass around it, a little away.
         prop on = 0 ~240ms
         follow on = if(r.sel, 1, 0)
-        box { from: -3, -3; size: 118, 76; corner: 17 continuous; stroke: 2; color: mix(soft_l, soft_s, 0.4); opacity: 90% * on }
+        //  (Its ring is the grid's, gliding: pages/glide.plm.)
 
         //  The picture, filling its squircle edge to edge (a placeholder until its thumbnail is made).
         group {
@@ -62,6 +62,7 @@ part Wall {
         }
 
         zone box wall_grid { from: ex0 + 16, 88; size: 352, wg_h; label: "Wallpapers" }
+        Glide(ex0 + 13 + mod(wall_at, 3) * 120, 85 + floor(wall_at / 3) * 78, 118, 76, 17, wall_at >= 0, 2)
         grid {
             at: ex0 + 16, 88; columns: 3; width: 352; gap: 8; row: 70
             for r in walls { WallTile(r) }
@@ -78,5 +79,5 @@ part Wall {
     }
 
     on press wb { emit go_home }
-    on scroll wall_grid { emit wall_scroll(wheel) }
+    on scroll wall_grid while wheel.glide < 0.5 { emit wall_scroll(wheel) }
 }

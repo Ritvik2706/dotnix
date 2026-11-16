@@ -1,7 +1,7 @@
 From 83bdbd21ebd032503a7c10bc7b082a22d98ef292 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 13:23:41 +0400
-Subject: [PATCH 22/38] lumen-glass v3: light/dark glass decided once, told to
+Subject: [PATCH 22/40] lumen-glass v3: light/dark glass decided once, told to
  the client
 
 Replaces the per-frame light/dark guess (it flickered as a pill expanded:

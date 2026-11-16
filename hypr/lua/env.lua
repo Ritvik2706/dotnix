@@ -7,11 +7,11 @@ hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
 hl.env("XDG_SESSION_DESKTOP", "Hyprland")
 
 -- Cursor theme + size for Wayland apps
-hl.env("HYPRCURSOR_THEME", "Bibata-Modern-Ice")
+hl.env("HYPRCURSOR_THEME", "Bibata-Modern-Ice-MiddleFinger")
 hl.env("HYPRCURSOR_SIZE", "21")
 
 -- Xcursor (GTK/Qt/Electron honor these)
-hl.env("XCURSOR_THEME", "Bibata-Modern-Ice")
+hl.env("XCURSOR_THEME", "Bibata-Modern-Ice-MiddleFinger")
 hl.env("XCURSOR_SIZE", "21")
 
 -- PRIME hybrid graphics: iGPU (card2/Intel) primary, dGPU (card1/NVIDIA) offload-only

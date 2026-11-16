@@ -1,7 +1,7 @@
 From 16ef4ac0ebadc144845331709691d948132fb2c1 Mon Sep 17 00:00:00 2001
 From: Ritvik <ritvik2014@gmail.com>
 Date: Wed, 28 Oct 2026 02:02:00 +0400
-Subject: [PATCH 12/38] render: liquid glass is one material; lighter frost
+Subject: [PATCH 12/40] render: liquid glass is one material; lighter frost
 
 A crisp lensed rim around a frosted middle read as a seam, not as glass.
 The rim now bends the same backdrop the middle shows (frosted or clear),
