@@ -13,4 +13,7 @@ return {
 
   -- ─── Tabline (we use winbar instead) ─────────────────────────────────────────
   { "akinsho/bufferline.nvim",     enabled = false },
+
+  -- ─── Start screen: none (nvim opens straight to an empty buffer) ─────────────
+  { "folke/snacks.nvim",           opts = { dashboard = { enabled = false } } },
 }

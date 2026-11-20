@@ -12,16 +12,28 @@ input {
         repeat-rate 40
     }
 
-    // macOS-feel trackpad, adaptive acceleration kept.
+    // macOS-feel trackpad, tuned for less finger travel and force:
+    // - tap: light taps instead of pressing the glass (less tendon load).
+    // - clickfinger: 1/2/3 fingers anywhere = left/right/middle, no
+    //   corner-hunting for right-click.
+    // - drag + drag-lock: tap-tap-hold drags; niri's drag-lock is libinput's
+    //   *timeout* mode, so you can lift and re-place a finger mid-drag
+    //   without dropping (no extra tap needed to release).
+    // - adaptive accel nudged above default: slow moves stay precise, quick
+    //   flicks cross the 1.6-scaled screen without re-placing the finger.
+    // - dwt: palm/typing guard.
     touchpad {
         tap
         natural-scroll
         dwt
+        dwtp
         drag true
         drag-lock
         click-method "clickfinger"
         tap-button-map "left-right-middle"
         scroll-method "two-finger"
+        accel-profile "adaptive"
+        accel-speed 0.2
         scroll-factor 0.45
     }
 

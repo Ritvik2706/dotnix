@@ -46,6 +46,18 @@ window-rule {
     open-on-workspace "terminal"
 }
 
+// Claude side pane (claude/pane.py, Mod+Shift+D): files Claude changed, its
+// activity and the diff. Always the second column of the terminal workspace,
+// beside the Claude terminal (pane-toggle.sh moves it there if it lands
+// elsewhere), at 0.4 so auto-fit gives the terminal the other 0.6. Opens
+// unfocused so typing stays with Claude.
+window-rule {
+    match app-id=r#"^dev\.dotnix\.claude-pane$"#
+    default-column-width { proportion 0.4; }
+    open-on-workspace "terminal"
+    open-focused false
+}
+
 // ── Documents, PDFs and images: workspace 3 ──
 // (File pickers are the portal's own windows, so they still open where you
 // are.) Things you read or make: wide enough for a page, a ⅓ to spare.

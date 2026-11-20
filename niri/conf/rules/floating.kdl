@@ -141,3 +141,20 @@ window-rule {
     open-floating true
     default-column-width {}
 }
+
+// The island's files in a window of their own (lumen, app id `lumen.files`:
+// W in the files, Mod+R): a compact floating panel by default, centred, so it
+// keeps the island's liquid glass look over what is behind (the patched niri
+// draws lumen's glass shapes on windows too, patch 0041) and stays out of the
+// strip's way. Mod+Space tiles it like any other window. The frost here is the
+// fallback for a niri without that patch.
+window-rule {
+    match app-id=r#"^lumen\.files$"#
+    open-floating true
+    default-column-width { fixed 1000; }
+    default-window-height { fixed 640; }
+    background-effect {
+        blur true
+        xray false
+    }
+}

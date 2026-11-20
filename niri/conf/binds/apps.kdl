@@ -5,14 +5,15 @@ binds {
     Mod+Return hotkey-overlay-title="Terminal" { spawn "ghostty"; }
     Mod+G hotkey-overlay-title="Zen (this project's, or jump)" { spawn-sh "~/.config/niri/scripts/focus-or-spawn.sh '^zen$' zen-browser"; }
     Mod+Shift+G hotkey-overlay-title="New Zen window" { spawn "zen-browser" "--new-window"; }
-    Mod+R hotkey-overlay-title="Files" { spawn "thunar"; }
+    Mod+R hotkey-overlay-title="Files (island, a window)" { spawn-sh "~/.local/bin/lumen --say island 'emit files_win' || thunar"; }
     Mod+S hotkey-overlay-title="Claude (there and back)" { spawn-sh "~/.config/custom_scripts/toggle_claude.sh"; }
+    Mod+Shift+D hotkey-overlay-title="Claude side pane: changes + activity" { spawn-sh "~/github/config/dotnix/claude/pane-toggle.sh"; }
 
     // ── The lumen island does most of it ──
     Mod+C hotkey-overlay-title="Clipboard (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit clip_open'"; }
     Mod+D hotkey-overlay-title="Launcher (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit launch_open'"; }
     Mod+P hotkey-overlay-title="Wallpaper (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit wall_open'"; }
-    Mod+Y hotkey-overlay-title="Finder (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit find_open'"; }
+    Mod+Y hotkey-overlay-title="Files (island card)" { spawn-sh "~/.local/bin/lumen --say island 'emit find_open'"; }
     Mod+B hotkey-overlay-title="Storage (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit stor_open'"; }
     Mod+X hotkey-overlay-title="Activity / task manager (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit act_open'"; }
     Mod+Shift+P hotkey-overlay-title="Colour picker (island)" { spawn-sh "~/.local/bin/lumen --say island 'emit pick_color'"; }

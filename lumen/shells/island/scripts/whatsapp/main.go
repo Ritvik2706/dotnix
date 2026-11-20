@@ -26,6 +26,7 @@
 //        {"op": "save", "jid": "…", "id": "…"}                   its file, into ~/Downloads
 //        {"op": "file", …, "ptt": true, "secs": 4}               a voice note recorded here
 //        {"op": "decline", "id": "…"}                           the call ringing now (calls.go)
+//        {"op": "sync"}                                          reconnect and catch up (sync.go)
 //        {"op": "logout"}
 //   out  {"t": "state", "state": "pair" | "qr" | "connecting" | "ok" | "offline", "msg": "…", "qr": "/…/qr-3.png"}
 //        {"t": "chats", "unread": 4, "chats": [{jid, name, last, ts, unread, group, muted, pinned, pic}, …]}  pinned, then newest
@@ -210,6 +211,7 @@ func main() {
 	} else {
 		go connect()
 	}
+	go watchResume() // sync.go: catch up after the laptop wakes
 
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1<<20), 1<<20)
@@ -344,6 +346,8 @@ func command(op map[string]any) {
 		}
 	case "decline":
 		go decline(str("id"))
+	case "sync":
+		go resync("asked") // sync.go
 	case "logout":
 		cli.Logout(ctx)
 		db.Exec(`DELETE FROM msgs`)

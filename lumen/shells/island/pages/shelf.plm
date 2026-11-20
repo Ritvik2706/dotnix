@@ -1,0 +1,98 @@
+// The shelf (as Dropover on macOS): something dragged from any program over the right capsule
+// makes it grow into a card that holds it. What is let go there stays (a reference, not a
+// copy; a text or a link becomes a small file of its own), shown as a small stack at the
+// capsule's left end; hovering the stack opens the shelf, and from there each one, or all at
+// once, is dragged out to wherever it goes: a chat, a mail, a folder, the files. Logic: shelf.luau.
+part Shelf {
+    //  One thing held: its picture (a thumbnail, with its own corners) or its icon, its name.
+    //  Dragged out, it goes; a click opens it; a right click lets it go from the shelf.
+    component ShfItem(t: record) {
+        size: 72, 88
+        zone box sz { from: 2, 2; size: 68, 84; corner: 16 continuous; cursor: pointer; label: "{t.name}"; carries: "{t.path}" }
+        box { from: 2, 2; size: 68, 84; corner: 16 continuous; color: ink; opacity: 7% * sz.hover }
+        let pic = t.ar > 0
+        let tw = if(t.ar >= 1, 52, 52 * t.ar)
+        let th = if(t.ar >= 1, 52 / t.ar, 52)
+        group {
+            show: pic
+            group {
+                clip box { from: 36 - tw / 2, 32 - th / 2; size: tw, th; corner: 7 continuous }
+                image t.ic { at: 10, 6; size: 52, 52 }
+            }
+            box { from: 36 - tw / 2, 32 - th / 2; size: tw, th; corner: 7 continuous; stroke: 0.6; color: ink; opacity: 16% }
+        }
+        image t.ic { at: 14, 10; size: 44, 44; show: not pic }
+        text t.name { at: 36, 66; anchor: center top; width: 64; lines: 1; align: center; size: 10; weight: 500; family: "SF Pro Display"; color: ink; opacity: 85% }
+        on release sz while abs(drag.dx) < 5 and abs(drag.dy) < 5 { emit shf_open_item(t.index) }
+        on press right sz { emit shf_remove(t.index) }
+    }
+
+    //  ── the card the capsule grows into ──
+    let sl = cap_r - shf_w
+    let shf_show = co > 0.01 and side_k == 0 and shf_last
+    //  Its zone, under what is in it: something carried over it keeps it open and lands on it
+    //  when let go; the pointer leaving it (nothing carried) closes it.
+    zone box shf_z { from: ccl, cap_y; size: ccw, cch; corner: ccr continuous; label: "Shelf"; active: shf_show and co > 0.6 }
+    on away shf_z for 450ms while shf_peek and drag.over < 0.5 { shf_peek = false }
+    on leave shf_z { shf_over = false }
+    on enter shf_z { shf_over = true }
+    group {
+        show: shf_show
+        opacity: smooth(0.45, 1, co)
+        move: 0, 8 * (1 - co)
+        clip box { from: ccl, cap_y; size: ccw, cch; corner: ccr continuous }
+        line { from: sl + 16, 39; to: cap_r - 16, 39; width: 0.7; color: ink; opacity: 10% }
+        text "Shelf" { at: sl + 20, 58; anchor: left center; size: 15; weight: 600; family: "SF Pro Display"; color: ink }
+        text pick(shf.count == 1, "{shf.count} items", "1 item") { at: sl + 70, 58.5; anchor: left center; size: 11; weight: 600; family: "SF Pro Display"; color: tint_ink; opacity: if(shf.count > 0, 90%, 0) }
+        //  All of it, dragged out at once (the stack), and let go of (the cross).
+        group {
+            opacity: if(shf.count > 0, 1, 0)
+            zone box shf_all_z { from: cap_r - 106, 44; size: 56, 28; corner: 14 continuous; cursor: pointer; label: "Drag all out"; carries: "{shf_all}"; active: shf.count > 0 }
+            body {
+                color: mix(chip, chip_hi, shf_all_z.hover); material: control
+                box { from: cap_r - 106, 44; size: 56, 28; corner: 14 continuous }
+            }
+            text "All" { at: cap_r - 78, 58.5; anchor: center; size: 11.5; weight: 600; family: "SF Pro Display"; color: ink }
+            zone ellipse shf_x { at: cap_r - 30, 58; radius: 14; cursor: pointer; label: "Clear the shelf" }
+            body {
+                color: mix(chip, chip_hi, shf_x.hover); material: control
+                ellipse { at: cap_r - 30, 58; radius: 14 - 0.5 * shf_x.pressed }
+            }
+            image ic_xmark { at: cap_r - 36, 52; size: 12, 12; tint: ink; opacity: 85% }
+            on press shf_x { emit shf_clear }
+        }
+        //  Empty, with something on its way in: where to let it go.
+        group {
+            opacity: if(shf.count == 0, 1, 0)
+            box { from: sl + 16, 80; size: shf_w - 32, 66; corner: 18 continuous; stroke: 1.5; color: soft_l; opacity: 40% + 35% * if(drag.over > 0.5, 1, 0) }
+            text "Let go to keep it here" { at: sl + shf_w / 2, 113; anchor: center; size: 12.5; weight: 600; family: "SF Pro Display"; color: ink; opacity: 85% }
+        }
+        //  Something more coming while it holds some: the shelf lights to take it.
+        box { from: sl + 6.5, cap_y + 0.5 + 72; size: shf_w - 13, shf_hh - 82; corner: 18 continuous; stroke: 1.5; color: soft_l; opacity: if(drag.over > 0.5 and shf.count > 0, 55%, 0) }
+        grid {
+            at: sl + 14, 76; columns: 4; width: 288; gap: 0; row: 92
+            for t in shf { ShfItem(t) }
+        }
+    }
+
+    //  The stack at the capsule's left end while it holds something (the capsule at rest):
+    //  its newest one, small, with how many. Hovered, the shelf opens; dragged, all of it goes.
+    prop shf_cs = 0 ~260ms
+    follow shf_cs = if(shf.count > 0 and not shf_on, 1, 0)
+    group {
+        opacity: shf_cs * (1 - co)
+        let scx = cap_l + 10
+        box { from: scx + 3, 9; size: 18, 18; corner: 5 continuous; color: chip_hi; opacity: if(shf.count > 1, 70%, 0) }
+        box { from: scx, 7; size: 18, 18; corner: 5 continuous; color: chip; opacity: 95% }
+        image shf_top { at: scx, 7; size: 18, 18 }
+        body {
+            gradient: scx + 12, 2 to scx + 24, 14, soft_l, soft_s; shadow: 0, 1, 2, 30%
+            opacity: if(shf.count > 1, 100%, 0)
+            ellipse { at: scx + 19, 8; radius: 6 }
+        }
+        text number(shf.count, 0, "") { at: scx + 19, 8.5; anchor: center; size: 8; weight: 700; family: "SF Pro Display"; color: pearl_ink; opacity: if(shf.count > 1, 100%, 0) }
+        zone box shf_chip { from: scx - 4, cap_y; size: 28, cap_h; corner: cap_h / 2 continuous; cursor: pointer; label: "The shelf"; carries: "{shf_all}"; active: shf.count > 0 and co < 0.5 }
+        on hover shf_chip for 220ms { shf_peek = true }
+    }
+
+}

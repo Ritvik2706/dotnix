@@ -250,6 +250,19 @@ scene Island {
     let ink_r = mix(ink_base, ink_dark, gl_rs)
     //  The compositor's liquid glass: frost, refraction, bevel, dispersion, rim light.
     include "glass.plm"
+    include "pages/glide.plm"
+    include "pages/finder.plm"
+
+    //  The files in a window of their own (W, Super+R): tiled with the others, so files can be
+    //  dragged between it and any program. The same view as the card's, laid out for its room.
+    surface files {
+        size: 560, 420
+        kind: window
+        title: "Files"
+        open: fnd_win
+        FilesView(0, 0, files.width, files.height, true, fnd_win and not (app == fnd or (expanded and panel == fnds)))
+    }
+
     let teal   = #6fd3ec      // cup-teal: lit only while media is live
     // Shared glass material controls live in glass.plm.
     let amber  = #ffce6e
@@ -425,6 +438,7 @@ scene Island {
     event wa_send ->
     event wa_media ->         // a picture, video, voice note or file in the chat, pressed
     event wa_pair ->          // a new QR code
+    event wa_sync ->          // R or :sync: reconnect and catch up with the phone
     event wa_find_clear ->
     event wa_wheel ->         // the wheel over the list: the logic moves its window
     event wa_older ->         // scrolled near the top of a chat
@@ -701,6 +715,7 @@ scene Island {
     image ic_rec_l = file "icons/record.svg", 20, 20
     image ic_windows_l = file "icons/windows.svg", 20, 20
     image ic_clip = file "icons/clip.svg", 14, 14
+    image ic_xmark = file "icons/xmark.svg", 12, 12
     image ic_check = file "icons/check.svg", 10, 10
     image ic_spk = file "icons/speaker.svg", 18, 18
     image ic_mute = file "icons/muted.svg", 16, 16
@@ -797,7 +812,6 @@ scene Island {
     fact side_k = 0           // …which: 1 the clipboard, 2 the emoji, 3 the files (kept while it closes; 0 once the calendar has it)
     fact wa_rail = false      // s: WhatsApp's chat list folded into a strip of faces (it folds by itself while a tool is beside it)
     fact side_focus = true    // …and it has the keys (Ctrl+h gives them to the view on the left, Ctrl+l back)
-    event fnd_to_view ->      // Ctrl+Shift+H: the finder's file(s) handed to the view beside it (WhatsApp)
     event clip_pick_row ->
     event clip_del_row ->
     event clip_scroll ->
@@ -1169,82 +1183,92 @@ scene Island {
     event cam_open_last ->
     event cam_open_dir ->
 
-    // ── files: a quick finder, ranked by what is opened often and lately ──
-    //  A row: its icon (WhiteSur's, by type), its name, where it is (a search) or its size and age (a folder).
-    model fhits max 16 { name: text; sub: text; kind: number; sel: bool; pin: number; mark: bool; cut: bool; ic: image 26, 26; date: text; size: text; icl: image 52, 52; drag: text }
-    fact pvd_list = false     // a folder's preview lists its contents instead of showing icons: V, or the preview's switch
-    event fnd_view_as ->      // 0 a list · 1 icons · −1 the other one
-    event fnd_back ->         // H: the folder before (history)
-    event fnd_forward ->      // L: and forward again
-    //  Where you are: Files, then each folder down to this one (the last is here).
-    model fcrumbs max 4 { name: text; last: bool }
-    event fnd_crumb ->
-    fact fnd_listing = false  // inside a folder, not searching: single-line rows, twelve of them
-    //  A folder's preview: what is in it, as icons (folders first), and how many more than show.
-    model pvd max 24 { name: text; dir: bool; ic: image 52, 52 }
+    // ── files: the file manager (pages/finder.plm, finder.luau) ──
+    //  A row of the folder or of a search (only those in sight): its picture (thumbnail or icon,
+    //  `ar` its shape, 0 an icon), name, where (a search), size, age; marked, cut, its key
+    //  (1–9 pinned, 'a marked), `hint` predicted, `head` a section's heading.
+    model fhits max 48 { name: text; sub: text; ic: image 96, 96; ar: number; size: text; date: text; sel: bool; mark: bool; cut: bool; badge: text; hasb: bool; hint: bool; dir: bool; head: bool; link: bool; target: bool; drag: text }
+    model fcarry max 3 { ic: image 96, 96 }   // what is carried (yy / dd), as a small stack
+    fact fnd_carrying = false
+    fact fnd_tgt_here = true   // …and p would drop it here (a file under the cursor), not into a folder
+    text fnd_carry = ""
+    fact fnd_rhover = -1       // the place, and the crumb, under the pointer (a drop lands there)
+    fact fnd_chover = -1
+    event fnd_carried ->       // a row dragged out of the files (let go on them again: moved)
+    event fnd_spring ->        // a drag held over a folder row: it opens
+    event fnd_rspring ->       // …or over a place on the left
+    //  The places on the left: headings and folders; `kind` 0 a place, 1 suggested, 2 a drive.
+    model frail max 30 { name: text; ic: image 18, 18; badge: text; hasb: bool; head: bool; at: bool; kind: number }
+    model fcrumbs max 6 { name: text; last: bool }
+    model pvd max 24 { name: text; dir: bool; ic: image 52, 52; hint: bool; sub: text }
+    fact pvd_list = false     // a folder's preview lists its contents instead of icons
     fact pvd_more = 0
     fact fq_empty = true
-    fact fnd_insert = false
-    fact fnd_gg = false
-    fact fnd_scoped = false   // inside a folder (stepped into), not the whole list
+    fact fnd_insert = false   // typing in the field: a search (fnd_qkind 1, i) or the folder's filter (2, /)
+    fact fnd_qkind = 1
+    fact fnd_filtering = false
+    fact fnd_mode = 0         // 0 a folder · 1 a search's results · 2 Open With's applications
+    fact fnd_grid = false     // the folder as a grid of thumbnails (w)
+    fact fnd_cols = 4         // …its columns, for the room it has
+    fact fnd_pv_on = true     // the preview showing (P)
+    fact fnd_count = 0        // how many there are in all, and the first in sight
+    fact fnd_first = 0
+    fact fnd_hover = -1       // the row under the pointer (a drop on a folder goes into it)
+    fact fnd_lw = 480         // the list's room, told by the copy showing (the card's or the window's)
+    fact fnd_lh = 462
+    fact fnd_pvh = 454
+    fact fnd_pre = false      // a key waiting for its second (g, y, d, m, ', f, z): the foot says what can follow
+    fact fnd_visual = false
+    fact fnd_busy = false
+    fact fnd_vplay = false    // a video playing in the preview
+    fact fnd_isvid = false
+    fact fnd_win = false      // the files in a window of their own (W, Super+R)
+    fact fnd_kon = false      // the files have the keys: the logic takes them
     text fq = ""
     text fnd_title = "Files"
-    fact pv_kind = 0          // 0 nothing, 1 text, 2 picture, 3 a list (archive), 4 no preview, 5 the keys, 6 prose, 7 a folder (icons)
+    text fnd_status = ""
+    text fnd_pending = ""
+    text fnd_busy_text = ""
+    text fnd_ext = ""         // a folder or file from outside (xdg-open): `lumen --say island "text fnd_ext PATH"`
+    fact pv_kind = 0          // 0 nothing, 1 text, 2 picture, 3 a list, 4 no preview, 5 the keys, 6 prose, 7 a folder, 8 an archive's contents
     text pv_name = ""
     text pv_meta = ""
     text pv_text = ""
     text pv_img_path = ""
     image pv_img = from pv_img_path, 1248, 800   // twice what it is drawn at whole: room to zoom in sharp
-    fact fnd_view = false     // looking closer at the preview (v, or a click): its keys move and zoom it
+    image fnd_vid = from vid.picture, 1248, 800  // a video playing in the preview, on the same canvas
+    image ic_pop = file "icons/external.svg", 14, 14
+    fact fnd_view = false     // looking closer at the preview (K, or a click): its keys move and zoom it
     fact pv_z = 1             // its zoom: 1 is all of it in view
     fact pv_px = 0            // …and how far it is moved, from the middle
     fact pv_py = 0
     text pv_zoom = "100%"
     event pv_zoom ->          // by that factor
-    event pv_fit ->           // 0: all of it
-    event pv_width ->         // w: as wide as the panel
-    event pv_pan_x ->
-    event pv_pan_y ->
-    event pv_end ->           // gg (1) · G (-1)
     event pv_grab ->
     event pv_drag_x ->
     event pv_drag_y ->
+    event pv_click ->
     fact pv_iw = 312
     fact pv_cs = 1            // how much the preview's 624×400 canvas is scaled so the picture in it fills its frame exactly
     fact pv_ih = 200
-    event find_open           // Super+R: `lumen --say island "emit find_open"`
-    event fnd_move ->
-    event fnd_open ->
-    event fnd_open_row ->
-    event fnd_up ->
-    event fnd_thunar ->
+    event find_open           // Super+Y: the files in the pill's card
+    event files_win           // Super+R: the files in a window of their own
+    event fnd_raise ->        // …already open: brought forward
+    event fnd_search_click -> // the search button
+    event fnd_view_as ->      // a folder's preview: 0 a list · 1 icons
+    event fnd_grid_as ->      // the folder: 0 a list · 1 a grid
+    event fnd_crumb ->
+    event fnd_rail ->
+    event fnd_eject ->
+    event fnd_hbtn ->         // the header's buttons: 1 back · 2 up · 3 preview · 4 window · 5 keys
+    event fnd_pick_row ->     // a click (twice: open)
+    event fnd_mark_row ->     // a right click: marked
     event fnd_scroll ->
-    event fq_clear ->
-    event fnd_pin ->          // m: pin or unpin (the pinned stay on top, numbered)
-    event fnd_jump ->         // 1–4: open that pin
-    event fnd_yank ->         // yp: the path, to the clipboard
-    event fnd_yank_dir ->     // yd: the folder's path
-    event fnd_tmux ->         // t: the folder as a tmux session (sesh), on the terminal's workspace
-    event fnd_term ->         // T: a new terminal window there
-    event fnd_edit ->         // e: in Neovim, whatever it is
-    event fnd_mark ->         // Space: mark for a batch (copy, cut, trash)
-    event fnd_unmark ->
-    event fnd_copy ->         // yy
-    event fnd_cut ->          // dd
-    event fnd_paste ->        // p: into the folder showing
-    event fnd_trash ->        // dD: to the trash (it can be restored from there)
-    event fnd_rename ->       // r
-    event fnd_new ->          // a: a file (0); A: a folder (1)
+    event fnd_vseek ->
     event fnd_prompt_ok ->
-    event fnd_sort ->         // s: name → modified → size → type; S: reversed
-    event fnd_hidden ->       // .: hidden files, shown or not
-    event fnd_top ->          // ~: back to the whole list
-    event fnd_help ->         // ?
     fact fnd_marks = 0        // how many are marked
     fact fnd_help_on = false  // the key list shows in the preview
     fact fnd_prompting = false
-    fact fnd_y = false        // a first `y` (or `d`) waiting for its second
-    fact fnd_d = false
     fact fnd_toast_on = false
     fact fnd_toast_seq = 0
     text fnd_toast = ""
@@ -1252,7 +1276,6 @@ scene Island {
     text fnd_in = ""
     text fnd_prompt_label = "Rename"
     text fnd_help_text = ""
-    measure srtm
     measure prlm
 
     // ── toggles ──
@@ -1989,7 +2012,6 @@ scene Island {
     //  says "Scanned", and OCR that found nothing says so instead.
     text cp_text { at: 0, -40; size: 12.5; weight: 600; family: "SF Pro Display"; opacity: 0; measure: cpm }
     include "pages/states.plm"
-    include "pages/glide.plm"
     group {
         opacity: smooth(0.45, 1, cpv)
         move: 0, 2 * (1 - cpv)
@@ -3144,15 +3166,10 @@ scene Island {
         box { from: x0, 0; size: pw, ph; color: #000000; opacity: 32% * arec }
     }
 
-    let fnd_side = false
-    //  The files: the pill grown into them (the app), or the card beside another app.
+    //  The files: the pill grown into them (their app), or the card beside another app.
     let fin_card = panel == fnds and app != fnd
     let fx0 = if(fin_card, ex0, ax0)
     let fnd_w = if(fin_card, fnds_w, if(app_last == fnd, aw_t, 1120))
-    let pvw = fnd_w - 460                     // the files' preview: what their width leaves it
-    let pv_on = pvw >= 260                    // …none below that: the list alone
-    //  …told to the logic, which fits pictures into it (as the preview's width less its margins).
-    on change pvw { fnd_pvw = pvw }
     //  ── the files: in the pill (their app), or in the card beside another app ──
     group {
         show: on_fnd > 0.002
@@ -3160,7 +3177,7 @@ scene Island {
         group {
             opacity: if(fin_card, smooth(0.5, 1, ck_in), smooth(0.5, 1, agp))
             move: 0, if(fin_card, ck_y + 8 * (1 - ck_in), 8 * (1 - agp))
-            include "pages/finder.plm"
+            FilesView(fx0, 32, fnd_w, 88 + 458 + 16 - 32, false, on_fnd > 0.5)
         }
     }
 
@@ -3605,7 +3622,29 @@ scene Island {
     event cal_step ->
     event cal_look ->
     prop co = 0 ~280ms        // 0 the capsule → 1 the card it grows into (the calendar, or a tool beside a large view)
-    follow co = if(cal or side, 1, 0)
+    follow co = if(cal or side or shf_on, 1, 0)
+    //  The shelf (pages/shelf.plm): something dragged over the capsule makes it grow into a card
+    //  that holds it; hovering the stack it leaves at the capsule's end opens it again.
+    model shf max 12 { name: text; ic: image 96, 96; ar: number; path: text }
+    text shf_all = ""          // every path held, one a line (dragged out all at once)
+    text shf_top_path = ""     // the newest one's picture, for the stack on the capsule
+    text shf_add = ""          // from outside: `lumen --say island "text shf_add PATH"` puts it on the shelf
+    image shf_top = from shf_top_path, 36, 36
+    fact shf_peek = false      // open to look (the stack hovered, or something just landed)
+    fact shf_last = false      // the capsule's card was last the shelf (not the calendar): its size while it shrinks
+    event shf_clear ->
+    event shf_remove ->
+    event shf_open_item ->
+    let shf_w = 316
+    fact cap_over = false      // the pointer over the capsule, and over the shelf's card (set where their zones are)
+    fact shf_over = false
+    let shf_hot = drag.over > 0.5 and (cap_over or shf_over)
+    let shf_on = shf_hot or shf_peek
+    let shf_th = 82 + max(1, floor((shf.count + 3) / 4)) * 92 + 6
+    prop shf_hh = 180 ~shape
+    follow shf_hh = shf_th
+    on change shf_on while shf_on { shf_last = true; cal = false }
+    on change cal while cal { shf_last = false; shf_peek = false }
     let cal_w = 316
     let upn_h = 32 + max(1, upn.count) * 42 + if(upn.count == 0, 14, 0) + 4   // the Up next module under the month
     let cal_th = 42 + (60 + cal_weeks * 34 + 6) + 6 - cap_y      // its height once open: the month
@@ -3614,12 +3653,13 @@ scene Island {
     prop cal_hh = 260 ~shape
     follow cal_hh = cal_th
 
-    let cap_w = 16 + tip_w + dnd_w + mute_w + bat_gw + 12 + 1 + 12 + datem.width + 16
+    let shf_cw = 26 * shf_cs * (1 - co)       // the shelf's stack at the left end, while it holds something
+    let cap_w = 16 + shf_cw + tip_w + dnd_w + mute_w + bat_gw + 12 + 1 + 12 + datem.width + 16
     let cap_l = cap_r - cap_w
     //  In the calendar the date is the card's: it fades, and the battery slides into its place.
     let cshift = (25 + datem.width) * co
-    let bx = cap_l + 16 + tip_w + dnd_w + mute_w + cshift
-    let mx = cap_l + 16 + tip_w + dnd_w + 7 + cshift     // the muted glyph's centre
+    let bx = cap_l + 16 + shf_cw + tip_w + dnd_w + mute_w + cshift
+    let mx = cap_l + 16 + shf_cw + tip_w + dnd_w + 7 + cshift     // the muted glyph's centre
     //  The capsule's drawn shape: the capsule, or the card it grows into.
     //  The other way round (the files fill the centre, then WhatsApp or the mail opens): the files'
     //  card itself slides right into this place (`inv` 1 → 0) instead of growing out of the capsule.
@@ -3637,8 +3677,8 @@ scene Island {
     let cap_card = chk == 2 or (chk == 3 and cp_kind == 1)   // a notification or a copied picture: a card of the dark glass
     let cm = max(max(co, inv), if(cap_card, ch, 0))   // how much of a card it is: its glass, its corners
     let cg = max(co, if(inv > 0.002, 1, 0))   // sliding in, it is already its whole size: only where it is changes
-    let ccw0 = cap_w + (if(ch > co, hud_w, if(side_k > 0, side_w, max(cal_w, cap_w))) - cap_w) * max(cg, ch)
-    let cch0 = cap_h + (if(ch > co, hud_h, if(side_k > 0, side_h, cal_hh)) - cap_h) * max(cg, ch)
+    let ccw0 = cap_w + (if(ch > co, hud_w, if(side_k > 0, side_w, if(shf_last, max(shf_w, cap_w), max(cal_w, cap_w)))) - cap_w) * max(cg, ch)
+    let cch0 = cap_h + (if(ch > co, hud_h, if(side_k > 0, side_h, if(shf_last, shf_hh, cal_hh))) - cap_h) * max(cg, ch)
     let ccw = ccw0 + (1120 - ccw0) * inv
     let cch = cch0 + (88 + 458 + 16 - cch0) * inv
     let ccl = cap_r - ccw0 + (fl0 - (cap_r - ccw0)) * inv
@@ -3696,7 +3736,7 @@ scene Island {
         move: 6 * (1 - bh), 0
         clip box { from: cap_l + 2, cap_y; size: max(0, cap_w - 4), cap_h; corner: cap_h / 2 continuous }
         text bat_tip {
-            at: cap_l + 16 + cshift, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"
+            at: cap_l + 16 + shf_cw + cshift, 17; anchor: left center; size: 12.5; weight: 600; family: "SF Pro Display"
             color: ink_r; shadow: 0, 1, 3, 35% * (1 - gl_rs); measure: tipm
         }
     }
@@ -3714,7 +3754,7 @@ scene Island {
     group {
     opacity: 1 - smooth(0, 0.5, ch)
     //  Notifications muted: a small moon first.
-    image ic_moon { at: cap_l + 15 + tip_w + cshift, 11; size: 12, 12; tint: ink_r; opacity: 90% * dnd_s }
+    image ic_moon { at: cap_l + 15 + shf_cw + tip_w + cshift, 11; size: 12, 12; tint: ink_r; opacity: 90% * dnd_s }
     //  Sound muted: the speaker grows out of a blur as the capsule makes room,
     //  then a slash draws across, cutting its gap, and the speaker gives a
     //  small flinch as it goes through. Still once it has settled.
@@ -3830,13 +3870,16 @@ scene Island {
     //  Only a hover: it brightens, but a click is not for it (the card is the centre pill's).
     zone box stat_z { from: cap_l, cap_y; size: cap_w, cap_h; corner: cap_h / 2 continuous; label: "Battery and date"; active: cap_here }
     include "pages/calendar.plm"
+    include "pages/shelf.plm"
+    on leave stat_z { cap_over = false }
+    on enter stat_z { cap_over = true }
     zone box bat_z { from: cap_l, cap_y; size: bx + bat_gw + 6 - cap_l, cap_h; corner: cap_h / 2 continuous; label: "Battery"; active: cap_here }
     zone box date_z { from: bx + bat_gw + 6, cap_y; size: max(0, cap_r - bx - bat_gw - 6), cap_h; corner: cap_h / 2 continuous; label: "Date"; active: cap_here and not cal and not side }
     on enter bat_z { bat_peek = true; emit bat_look }
     on leave bat_z { bat_peek = false }
     every 15s while bat_peek or peek_held { emit bat_look }
     on peek(v) while v > 0 and not peek_held { emit bat_look }
-    on enter date_z { cal = true; side_k = 0 }
+    on enter date_z while drag.over < 0.5 { cal = true; side_k = 0 }
     on change cal while cal { emit cal_look; side_k = 0 }
     //  After the capsule's zone, so the click lands here.
     zone box mute_z { from: mx - 12, cap_y + 3; size: 24, cap_h - 6; corner: (cap_h - 6) / 2 continuous; cursor: pointer; label: "Unmute"; active: cap_here and audio.muted and mut > 0.6 }
@@ -3857,7 +3900,7 @@ scene Island {
     let act_keys = expanded and panel == act
     let emo_keys = expanded and (panel == emoji or (side_keys and side_k == 2))
     let fnd_card = expanded and panel == fnds and app != fnd          // the files beside an app
-    let fnd_keys = (app == fnd and not expanded) or fnd_card
+    let fnd_keys = (app == fnd and not expanded) or fnd_card or (fnd_win and app == none and not expanded)
     let clx = ex0                                             // where the pages start
     let emx0 = ex0
     let emy = 0
@@ -4248,109 +4291,30 @@ scene Island {
     on key Escape while expanded and panel == auth { emit pk_cancel }
 
 
-    //  Super+R: the finder, in normal mode; again, close.
-    //  An app's key (Super+Y, +U, +W): up on the stage, or away; with the pill's card open over it, back in front.
+    //  The files. Super+Y: in the pill's card, as an app (again: away); beside another app, as its
+    //  card. Super+R: in a window of their own (Thunar's place), or that window brought forward.
+    //  W moves them between the two, as they are. (finder.luau has their keys.)
+    on find_open while fnd_win { fnd_win = false }
     on find_open while app == fnd and not expanded { app = none }
     on find_open while app == fnd and expanded { expanded = false }
     on find_open while app == none { app = fnd; expanded = false; fnd_insert = false }
-    //  Another app up: the files beside it (again: they go).
     on find_open while app != none and app != fnd and fnd_card { expanded = false }
     on find_open while app != none and app != fnd and not fnd_card { expanded = true; panel = fnds; fnd_insert = false }
-    on find_open while big and side and side_k == 3 { side = false }
-    on key j while fnd_keys and not fnd_view and not fnd_insert { emit fnd_move(1) }
-    on key k while fnd_keys and not fnd_view and not fnd_insert { emit fnd_move(-1) }
-    on key G while fnd_keys and not fnd_view and not fnd_insert { emit fnd_move(100000) }
-    on key g while fnd_keys and not fnd_view and not fnd_insert and fnd_gg { emit fnd_move(-100000); fnd_gg = false }
-    on key g while fnd_keys and not fnd_view and not fnd_insert and not fnd_gg { fnd_gg = true }
-    on still fnd_gg for 600ms while fnd_gg { fnd_gg = false }
-    on key l while fnd_keys and not fnd_view and not fnd_insert { emit fnd_open }
-    on key Return while fnd_keys and not fnd_view and not fnd_insert { emit fnd_open }
-    on key h while fnd_keys and not fnd_view and not fnd_insert { emit fnd_up }
-    on key BackSpace while fnd_keys and not fnd_view and not fnd_insert { emit fnd_up }
-    on key Shift+Return while fnd_keys and not fnd_view { emit fnd_thunar }
-    on key q while fnd_keys and not fnd_card and not fnd_view and not fnd_insert { app = none }
-    on key q while fnd_card and not fnd_view and not fnd_insert { expanded = false }
-    on key i while fnd_keys and not fnd_view and not fnd_insert { fnd_insert = true; focus fq }
-    on key Escape while fnd_keys and not fnd_view and fnd_insert and not fnd_prompting { fnd_insert = false; blur }
-    on key Escape while fnd_keys and not fnd_view and not fnd_insert and fnd_marks > 0 { emit fnd_unmark }
-    on key Escape while fnd_keys and not fnd_view and not fnd_insert and fnd_marks == 0 and not fq_empty { emit fq_clear }
-    on key Escape while fnd_keys and not fnd_card and not fnd_view and not fnd_insert and fnd_marks == 0 and fq_empty { app = none }
-    on key Escape while fnd_card and not fnd_view and not fnd_insert and fnd_marks == 0 and fq_empty { expanded = false }
-    on key Ctrl+j while fnd_keys and not fnd_view and fnd_insert { emit fnd_move(1) }
-    on key Ctrl+k while fnd_keys and not fnd_view and fnd_insert { emit fnd_move(-1) }
-    on key Down while fnd_keys and not fnd_view { emit fnd_move(1) }
-    on key Up while fnd_keys and not fnd_view { emit fnd_move(-1) }
-    on key Ctrl+d while fnd_keys and not fnd_view { emit fnd_move(4) }
-    on key Ctrl+u while fnd_keys and not fnd_view { emit fnd_move(-4) }
-    on key Tab while fnd_keys and not fnd_view { emit fnd_open }
-    on key minus while fnd_keys and not fnd_view and not fnd_insert { emit fnd_up }
-    on key m while fnd_keys and not fnd_view and not fnd_insert { emit fnd_pin }
-    on key t while fnd_keys and not fnd_view and not fnd_insert { emit fnd_tmux }
-    on key T while fnd_keys and not fnd_view and not fnd_insert { emit fnd_term }
-    on key e while fnd_keys and not fnd_view and not fnd_insert { emit fnd_edit }
-    on key o while fnd_keys and not fnd_view and not fnd_insert { emit fnd_thunar }
-    on key space while fnd_keys and not fnd_view and not fnd_insert { emit fnd_mark }
-    //  yy copy, yp the path; dd cut, dD trash: the second key within 600 ms.
-    on key y while fnd_keys and not fnd_view and not fnd_insert and fnd_y { emit fnd_copy; fnd_y = false }
-    on key y while fnd_keys and not fnd_view and not fnd_insert and not fnd_y { fnd_y = true }
-    on key p while fnd_keys and not fnd_view and not fnd_insert and fnd_y { emit fnd_yank; fnd_y = false }
-    on key d while fnd_keys and not fnd_view and not fnd_insert and fnd_y { emit fnd_yank_dir; fnd_y = false }
-    on key p while fnd_keys and not fnd_view and not fnd_insert and not fnd_y { emit fnd_paste }
-    on key d while fnd_keys and not fnd_view and not fnd_insert and not fnd_y and fnd_d { emit fnd_cut; fnd_d = false }
-    on key d while fnd_keys and not fnd_view and not fnd_insert and not fnd_y and not fnd_d { fnd_d = true }
-    on key D while fnd_keys and not fnd_view and not fnd_insert and fnd_d { emit fnd_trash; fnd_d = false }
-    on still fnd_y for 600ms while fnd_y { fnd_y = false }
-    on still fnd_d for 600ms while fnd_d { fnd_d = false }
-    on key r while fnd_keys and not fnd_view and not fnd_insert { emit fnd_rename }
-    on key a while fnd_keys and not fnd_view and not fnd_insert { emit fnd_new(0) }
-    on key A while fnd_keys and not fnd_view and not fnd_insert { emit fnd_new(1) }
-    on key s while fnd_keys and not fnd_view and not fnd_insert { emit fnd_sort(1) }
-    on key S while fnd_keys and not fnd_view and not fnd_insert { emit fnd_sort(-1) }
-    on key period while fnd_keys and not fnd_view and not fnd_insert { emit fnd_hidden }
-    on key asciitilde while fnd_keys and not fnd_view and not fnd_insert { emit fnd_top }
-    on key question while fnd_keys and not fnd_view and not fnd_insert { emit fnd_help }
-    on key H while fnd_keys and not fnd_view and not fnd_insert { emit fnd_back }
-    on key L while fnd_keys and not fnd_view and not fnd_insert { emit fnd_forward }
-    on key Alt+Left while fnd_keys and not fnd_view and not fnd_insert { emit fnd_back }
-    on key Alt+Right while fnd_keys and not fnd_view and not fnd_insert { emit fnd_forward }
-    on key slash while fnd_keys and not fnd_view and not fnd_insert { fnd_insert = true; focus fq }
-    //  A name being typed (rename, new): Enter does it, Esc lets it go.
+    on files_win while app == fnd { app = none }
+    on files_win while fnd_card { expanded = false }
+    on files_win while fnd_win { emit fnd_raise }
+    on files_win while not fnd_win { fnd_win = true }
+    //  The keys are the logic's while the files have them, but for `i` and `/`, which open the
+    //  field at once so not a letter of a quick search is lost.
+    on change fnd_keys { fnd_kon = fnd_keys }
+    on key i while fnd_keys and not fnd_insert and not fnd_prompting and not fnd_pre and not fnd_view { fnd_qkind = 1; fnd_insert = true; focus fq }
+    on key slash while fnd_keys and not fnd_insert and not fnd_prompting and not fnd_pre and not fnd_view { fnd_qkind = 2; fnd_insert = true; focus fq }
+    //  A name being typed (rename, new, a zip's, a path to go to): Enter does it, Esc lets it go.
     on change fnd_prompting while fnd_prompting { fnd_insert = true; focus fnd_in }
     on submit fnd_in { emit fnd_prompt_ok; fnd_prompting = false; fnd_insert = false; blur }
-    on key Escape while fnd_keys and not fnd_view and fnd_prompting { fnd_prompting = false; fnd_insert = false; blur }
+    on key Escape while fnd_keys and fnd_prompting { fnd_prompting = false; fnd_insert = false; blur }
     on change fnd_toast_seq { fnd_toast_on = true }
     on still fnd_toast_seq for 2500ms while fnd_toast_on { fnd_toast_on = false }
-    //  v: look closer at the preview; then its keys zoom and move it, and Esc (or v) comes back.
-    on key v while fnd_keys and not fnd_view and not fnd_insert and pv_kind == 2 { fnd_view = true }
-    on key Escape while fnd_keys and fnd_view { fnd_view = false }
-    on key v while fnd_keys and fnd_view { fnd_view = false }
-    on key V while fnd_keys and not fnd_view and not fnd_insert { emit fnd_view_as(-1) }
-    on key q while fnd_keys and fnd_view { fnd_view = false }
-    on key K while fnd_keys and fnd_view { emit pv_zoom(1.25) }
-    on key J while fnd_keys and fnd_view { emit pv_zoom(0.8) }
-    on key plus while fnd_keys and fnd_view { emit pv_zoom(1.25) }
-    on key equal while fnd_keys and fnd_view { emit pv_zoom(1.25) }
-    on key minus while fnd_keys and fnd_view { emit pv_zoom(0.8) }
-    on key 0 while fnd_keys and fnd_view { emit pv_fit }
-    on key w while fnd_keys and fnd_view { emit pv_width }
-    on key h while fnd_keys and fnd_view { emit pv_pan_x(80) }
-    on key l while fnd_keys and fnd_view { emit pv_pan_x(-80) }
-    on key k while fnd_keys and fnd_view { emit pv_pan_y(80) }
-    on key j while fnd_keys and fnd_view { emit pv_pan_y(-80) }
-    on key Left while fnd_keys and fnd_view { emit pv_pan_x(80) }
-    on key Right while fnd_keys and fnd_view { emit pv_pan_x(-80) }
-    on key Up while fnd_keys and fnd_view { emit pv_pan_y(80) }
-    on key Down while fnd_keys and fnd_view { emit pv_pan_y(-80) }
-    on key Ctrl+u while fnd_keys and fnd_view { emit pv_pan_y(200) }
-    on key Ctrl+d while fnd_keys and fnd_view { emit pv_pan_y(-200) }
-    on key g while fnd_keys and fnd_view and fnd_gg { emit pv_end(1); fnd_gg = false }
-    on key g while fnd_keys and fnd_view and not fnd_gg { fnd_gg = true }
-    on key G while fnd_keys and fnd_view { emit pv_end(-1) }
-    on key 1 while fnd_keys and not fnd_view and not fnd_insert { emit fnd_jump(1) }
-    on key 2 while fnd_keys and not fnd_view and not fnd_insert { emit fnd_jump(2) }
-    on key 3 while fnd_keys and not fnd_view and not fnd_insert { emit fnd_jump(3) }
-    on key 4 while fnd_keys and not fnd_view and not fnd_insert { emit fnd_jump(4) }
-    on submit fq while not fnd_prompting { emit fnd_open }
     on go_home { panel = home }
     //  The mail reader's reply: the field takes the keys as it opens; Enter sends, Escape lets it go.
     on change mr_rep while mr_rep { focus mr_in }
@@ -4432,6 +4396,8 @@ scene Island {
     on submit wa_in { emit wa_send }
     //  The command line: `:` (not while writing), Enter runs, Tab completes, ↑/↓ choose, Esc lets it go.
     on key colon while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql { wa_cmd = true }
+    //  R: sync now (reconnect, catch up, reload the open chat) — when it has fallen behind.
+    on key R while app == wa and not expanded and not side_keys and not wa_modal and not wa_typing and not wa_search and not wa_ql { emit wa_sync }
     on change wa_cmd while wa_cmd { focus wa_cmd_in }
     on change wa_cmd while not wa_cmd and not wa_typing and not wa_search and not wa_cs { blur }
     on submit wa_cmd_in { emit wa_cmd_run }

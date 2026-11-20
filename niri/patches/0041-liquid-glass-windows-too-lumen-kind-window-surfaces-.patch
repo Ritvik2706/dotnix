@@ -1,0 +1,54 @@
+From f27389cfb5508c72f2611031ded301dbced3c24e Mon Sep 17 00:00:00 2001
+From: Ritvik <ritvik2014@gmail.com>
+Date: Tue, 17 Nov 2026 17:38:02 +0400
+Subject: [PATCH] liquid glass: windows too (lumen kind: window surfaces
+ describe their glass as layers do)
+
+---
+ src/window/mapped.rs | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/src/window/mapped.rs b/src/window/mapped.rs
+index 3db1f66c..637076a5 100644
+--- a/src/window/mapped.rs
++++ b/src/window/mapped.rs
+@@ -38,7 +38,7 @@ use crate::render_helpers::surface::{
+     push_elements_from_surface_tree, render_snapshot_from_surface_tree,
+ };
+ use crate::render_helpers::xray::XrayPos;
+-use crate::render_helpers::{background_effect, BakedBuffer, RenderCtx, RenderTarget};
++use crate::render_helpers::{background_effect, liquid_glass, BakedBuffer, RenderCtx, RenderTarget};
+ use crate::utils::id::IdCounter;
+ use crate::utils::transaction::Transaction;
+ use crate::utils::{
+@@ -739,7 +739,7 @@ impl LayoutElement for Mapped {
+ 
+     fn render_background_effect(
+         &self,
+-        ctx: RenderCtx<GlesRenderer>,
++        mut ctx: RenderCtx<GlesRenderer>,
+         geometry: Rectangle<f64, Logical>,
+         scale: f64,
+         clip_to_geometry: bool,
+@@ -749,6 +749,21 @@ impl LayoutElement for Mapped {
+         push: &mut dyn FnMut(BackgroundEffectElement),
+     ) {
+         let should_block_out = ctx.target.should_block_out(self.rules.block_out_from);
++        // Liquid glass (lumen-glass-v1) for a window that describes its glass as shapes
++        // (lumen's `kind: window` surfaces), as layer surfaces have it: the shapes are in
++        // the surface's coordinates, which start at its buffer's corner.
++        if !should_block_out {
++            let surface_loc = geometry.loc + self.buf_loc().to_f64();
++            liquid_glass::render_for_surface(
++                ctx.as_gles(),
++                None,
++                surface_loc,
++                scale,
++                self.toplevel().wl_surface(),
++                self.blur_config,
++                push,
++            );
++        }
+         background_effect::render_for_tile(
+             ctx,
+             None,

@@ -71,6 +71,11 @@ config-file = ghostty-theme
 # custom-shader = shaders/cursor_smear.glsl             # disabled: iTime forces constant 60fps GPU redraws
 #custom-shader = shaders/cursor_smear_fade.glsl
 
+# Wallpaper-tinted cursor comet + landing halo (only on jumps, not typing).
+# Costs ~2% CPU on the FOCUSED terminal (Ghostty animates at 60fps while a
+# shader is loaded); unfocused terminals don't animate.
+custom-shader = shaders/glass_cursor.glsl
+
 # The command to run, usually a shell. If this is not an absolute path, it'll
 # be looked up in the `PATH`. If this is not set, a default will be looked up
 # from your system. The rules for the default lookup are:

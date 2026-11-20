@@ -128,4 +128,14 @@ binds {
     Mod+Shift+WheelScrollUp   cooldown-ms=150 { focus-workspace-up; }
     Mod+WheelScrollRight { focus-column-right; }
     Mod+WheelScrollLeft  { focus-column-left; }
+
+    // Mod + two-finger slide resizes, following the fingers like dragging
+    // the edge (same sense as Mod+Shift+hjkl): right = wider, left =
+    // narrower, down = taller, up = shorter. niri sees the scroll after
+    // natural-scroll flips it, so the triggers read backwards. One tick is
+    // 10 libinput units of travel, i.e. ~1% per small finger movement.
+    Mod+TouchpadScrollLeft  { set-column-width "+1%"; }
+    Mod+TouchpadScrollRight { set-column-width "-1%"; }
+    Mod+TouchpadScrollUp    { set-window-height "+1%"; }
+    Mod+TouchpadScrollDown  { set-window-height "-1%"; }
 }

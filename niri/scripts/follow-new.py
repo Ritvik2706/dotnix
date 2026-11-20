@@ -14,6 +14,8 @@ Left alone:
     splashes), so you only jump once the real window is up.
   - anything in the first GRACE seconds after login, so the apps restored by
     startup.sh don't pull you around.
+  - NO_FOLLOW app ids: side windows meant to open beside you, unfocused
+    (the Claude side pane, claude/pane-toggle.sh).
 
 Started by niri (conf/startup.kdl).
 """
@@ -24,6 +26,7 @@ import time
 
 SETTLE = 0.6  # seconds a window must stay open before we jump to it
 GRACE = 20.0  # seconds after login with no jumping
+NO_FOLLOW = {"dev.dotnix.claude-pane"}
 
 START = time.monotonic()
 lock = threading.Lock()
@@ -63,7 +66,8 @@ def run():
             with lock:
                 new = wid not in windows
                 windows[wid] = w
-            if new and (w.get("is_floating") or time.monotonic() - START <= GRACE):
+            if new and (w.get("is_floating") or w.get("app_id") in NO_FOLLOW
+                        or time.monotonic() - START <= GRACE):
                 continue
             if new:
                 threading.Timer(SETTLE, focus_if_still_there, (wid,)).start()

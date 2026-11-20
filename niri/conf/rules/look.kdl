@@ -18,7 +18,7 @@ window-rule {
 // inactive_opacity 0.90 + xray blur). Ghostty does its own transparency.
 window-rule {
     match is-active=false
-    exclude app-id=r#"^com\.mitchellh\.ghostty(\.project)?$"#
+    exclude app-id=r#"^(com\.mitchellh\.ghostty(\.project)?|dev\.dotnix\.claude-pane)$"#
     opacity 0.90
     background-effect {
         blur true
@@ -29,7 +29,7 @@ window-rule {
 // Ghostty: its own translucency over niri's cached wallpaper frost (cheap,
 // unlike ghostty's background-blur), so the terminal is glass like the rest.
 window-rule {
-    match app-id=r#"^com\.mitchellh\.ghostty(\.project)?$"#
+    match app-id=r#"^(com\.mitchellh\.ghostty(\.project)?|dev\.dotnix\.claude-pane)$"#
     opacity 1.0
     background-effect {
         blur true

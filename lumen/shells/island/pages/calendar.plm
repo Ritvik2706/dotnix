@@ -59,7 +59,7 @@ part Calendar {
 
     //  ── the month, in the capsule grown into its card ──
     group {
-        show: co > 0.01 and side_k == 0
+        show: co > 0.01 and side_k == 0 and not shf_last
         opacity: smooth(0.45, 1, co)
         move: 0, 8 * (1 - co)
         clip box { from: ccl, cap_y; size: ccw, cch; corner: ccr continuous }
@@ -100,7 +100,7 @@ part Calendar {
     //  after the other once the card has opened.
     let m2 = smooth(0.35, 0.85, co)
     group {
-        show: co > 0.01 and side_k == 0
+        show: co > 0.01 and side_k == 0 and not shf_last
         group {
             opacity: m2
             move: 0, -10 * (1 - m2)

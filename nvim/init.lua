@@ -34,3 +34,9 @@ end, 1000)
 
 -- Load custom highlights (must be loaded after colorscheme to avoid being overridden)
 require("config.highlights")
+
+-- :ClaudeWatch — follow Claude Code in this nvim (config/modules/claude-watch.lua;
+-- Mod+Shift+D opens one beside the terminal)
+vim.api.nvim_create_user_command("ClaudeWatch", function()
+  require("config.modules.claude-watch").start()
+end, { desc = "Follow Claude Code: replay its reads and edits here" })
